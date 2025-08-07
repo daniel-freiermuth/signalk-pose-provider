@@ -1,6 +1,10 @@
 package com.signalk.companion.data.model
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 
 @Serializable
 data class SignalKMessage(
@@ -19,29 +23,23 @@ data class SignalKUpdate(
 @Serializable
 data class SignalKSource(
     val label: String,
-    val type: String = "NMEA2000",
     val src: String = "android-companion"
 )
 
 @Serializable
 data class SignalKValue(
     val path: String,
-    val value: SignalKValueData
+    val value: JsonElement  // This allows any JSON value: number, string, object
 )
 
-@Serializable
-sealed class SignalKValueData {
-    @Serializable
-    data class Position(val latitude: Double, val longitude: Double) : SignalKValueData()
-    
-    @Serializable
-    data class NumberValue(val value: Double) : SignalKValueData()
-    
-    @Serializable
-    data class StringValue(val value: String) : SignalKValueData()
-    
-    @Serializable
-    data class QualityValue(val value: Double, val quality: String) : SignalKValueData()
+// Helper functions to create SignalK values
+object SignalKValues {
+    fun number(value: Double): JsonElement = JsonPrimitive(value)
+    fun string(value: String): JsonElement = JsonPrimitive(value)
+    fun position(latitude: Double, longitude: Double): JsonElement = buildJsonObject {
+        put("latitude", JsonPrimitive(latitude))
+        put("longitude", JsonPrimitive(longitude))
+    }
 }
 
 // Data classes for sensor readings

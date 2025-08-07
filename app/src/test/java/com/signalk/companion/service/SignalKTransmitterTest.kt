@@ -1,6 +1,7 @@
 package com.signalk.companion.service
 
 import com.signalk.companion.data.model.LocationData
+import com.signalk.companion.data.model.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Test
@@ -53,20 +54,51 @@ class SignalKTransmitterTest {
     }
     
     @Test
-    fun testValidCoordinates() {
-        val locationData = LocationData(
-            latitude = 59.3293,
-            longitude = 18.0686,
-            accuracy = 5.0f,
-            bearing = 180.0f,
-            speed = 5.0f,
-            altitude = 10.0,
-            timestamp = System.currentTimeMillis()
+    fun testSignalKJsonStructure() {
+        // Test the new simplified JSON structure
+        val source = SignalKSource(
+            label = "Android Companion",
+            src = "android-companion"
         )
         
-        // Test that coordinates are in valid ranges
-        assertTrue("Latitude should be valid", locationData.latitude >= -90 && locationData.latitude <= 90)
-        assertTrue("Longitude should be valid", locationData.longitude >= -180 && locationData.longitude <= 180)
-        assertTrue("Accuracy should be positive", locationData.accuracy > 0)
+        val values = listOf(
+            SignalKValue(
+                path = "navigation.position",
+                value = SignalKValues.position(59.3293, 18.0686)
+            ),
+            SignalKValue(
+                path = "navigation.speedOverGround", 
+                value = SignalKValues.number(5.0)
+            ),
+            SignalKValue(
+                path = "navigation.gnss.type",
+                value = SignalKValues.string("GPS")
+            )
+        )
+        
+        val update = SignalKUpdate(
+            source = source,
+            timestamp = "2025-08-07T12:34:56.789Z",
+            values = values
+        )
+        
+        val message = SignalKMessage(
+            context = "vessels.self",
+            updates = listOf(update),
+            token = null
+        )
+        
+        val json = Json { prettyPrint = true }.encodeToString(message)
+        
+        // Basic verification
+        assertNotNull(json)
+        assertTrue("Should contain navigation.position", json.contains("navigation.position"))
+        assertFalse("Should not contain 'type' field in source", json.contains("\"type\":"))
+        
+        // For debugging - this will appear in test failure messages if needed
+        if (json.length > 100) {
+            val shortJson = json.take(200) + "..."
+            assertTrue("JSON should be well-formed: $shortJson", json.startsWith("{"))
+        }
     }
 }

@@ -274,7 +274,6 @@ class SignalKTransmitter @Inject constructor(
         val timestamp = dateFormat.format(Date(locationData.timestamp))
         val source = SignalKSource(
             label = "Android Companion",
-            type = "NMEA2000",
             src = "android-companion"
         )
         
@@ -284,7 +283,7 @@ class SignalKTransmitter @Inject constructor(
         values.add(
             SignalKValue(
                 path = "navigation.position",
-                value = SignalKValueData.Position(
+                value = SignalKValues.position(
                     latitude = locationData.latitude,
                     longitude = locationData.longitude
                 )
@@ -296,7 +295,7 @@ class SignalKTransmitter @Inject constructor(
             values.add(
                 SignalKValue(
                     path = "navigation.position.accuracy",
-                    value = SignalKValueData.NumberValue(locationData.accuracy.toDouble())
+                    value = SignalKValues.number(locationData.accuracy.toDouble())
                 )
             )
         }
@@ -306,7 +305,7 @@ class SignalKTransmitter @Inject constructor(
             values.add(
                 SignalKValue(
                     path = "navigation.speedOverGround",
-                    value = SignalKValueData.NumberValue(locationData.speed.toDouble())
+                    value = SignalKValues.number(locationData.speed.toDouble())
                 )
             )
             
@@ -315,7 +314,7 @@ class SignalKTransmitter @Inject constructor(
                 values.add(
                     SignalKValue(
                         path = "navigation.speedOverGround.accuracy",
-                        value = SignalKValueData.NumberValue(speedAcc.toDouble())
+                        value = SignalKValues.number(speedAcc.toDouble())
                     )
                 )
             }
@@ -326,7 +325,7 @@ class SignalKTransmitter @Inject constructor(
             values.add(
                 SignalKValue(
                     path = "navigation.courseOverGroundTrue",
-                    value = SignalKValueData.NumberValue(Math.toRadians(locationData.bearing.toDouble()))
+                    value = SignalKValues.number(Math.toRadians(locationData.bearing.toDouble()))
                 )
             )
             
@@ -335,7 +334,7 @@ class SignalKTransmitter @Inject constructor(
                 values.add(
                     SignalKValue(
                         path = "navigation.courseOverGroundTrue.accuracy",
-                        value = SignalKValueData.NumberValue(Math.toRadians(bearingAcc.toDouble()))
+                        value = SignalKValues.number(Math.toRadians(bearingAcc.toDouble()))
                     )
                 )
             }
@@ -346,7 +345,7 @@ class SignalKTransmitter @Inject constructor(
             values.add(
                 SignalKValue(
                     path = "navigation.gnss.altitude",
-                    value = SignalKValueData.NumberValue(locationData.altitude)
+                    value = SignalKValues.number(locationData.altitude)
                 )
             )
             
@@ -355,7 +354,7 @@ class SignalKTransmitter @Inject constructor(
                 values.add(
                     SignalKValue(
                         path = "navigation.gnss.altitude.accuracy",
-                        value = SignalKValueData.NumberValue(vertAcc.toDouble())
+                        value = SignalKValues.number(vertAcc.toDouble())
                     )
                 )
             }
@@ -366,7 +365,7 @@ class SignalKTransmitter @Inject constructor(
             values.add(
                 SignalKValue(
                     path = "navigation.gnss.type",
-                    value = SignalKValueData.StringValue(provider)
+                    value = SignalKValues.string(provider)
                 )
             )
         }
@@ -390,7 +389,6 @@ class SignalKTransmitter @Inject constructor(
         val timestamp = dateFormat.format(Date(sensorData.timestamp))
         val source = SignalKSource(
             label = "Android Companion Sensors",
-            type = "NMEA2000",
             src = "android-companion-sensors"
         )
         
@@ -401,7 +399,7 @@ class SignalKTransmitter @Inject constructor(
             values.add(
                 SignalKValue(
                     path = "environment.outside.pressure",
-                    value = SignalKValueData.NumberValue((pressure * 100).toDouble()) // Convert hPa to Pa
+                    value = SignalKValues.number((pressure * 100).toDouble()) // Convert hPa to Pa
                 )
             )
         }
@@ -411,7 +409,7 @@ class SignalKTransmitter @Inject constructor(
             values.add(
                 SignalKValue(
                     path = "navigation.headingMagnetic",
-                    value = SignalKValueData.NumberValue(Math.toRadians(heading.toDouble()))
+                    value = SignalKValues.number(Math.toRadians(heading.toDouble()))
                 )
             )
         }
@@ -421,7 +419,7 @@ class SignalKTransmitter @Inject constructor(
             values.add(
                 SignalKValue(
                     path = "navigation.headingTrue",
-                    value = SignalKValueData.NumberValue(Math.toRadians(heading.toDouble()))
+                    value = SignalKValues.number(Math.toRadians(heading.toDouble()))
                 )
             )
         }
