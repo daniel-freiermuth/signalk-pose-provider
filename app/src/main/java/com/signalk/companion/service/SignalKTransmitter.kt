@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.*
 import java.io.OutputStreamWriter
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -30,6 +31,10 @@ class SignalKTransmitter @Inject constructor(
     private var socket: DatagramSocket? = null
     private var targetAddress: InetAddress? = null
     private var dnsRefreshJob: Job? = null
+    
+    // WebSocket support
+    private var okHttpClient: OkHttpClient? = null
+    private var webSocket: WebSocket? = null
     
     // DNS refresh interval (5 minutes) - good balance between responsiveness and network load
     private val DNS_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
@@ -55,11 +60,11 @@ class SignalKTransmitter @Inject constructor(
         serverPort = port
         transmissionProtocol = protocol
         
-        // For HTTP(S), construct the base URL using the protocol from the enum
+        // For WebSocket/HTTP(S), construct the base URL using the protocol from the enum
         baseUrl = when (protocol) {
             TransmissionProtocol.UDP -> ""  // Not used for UDP
-            TransmissionProtocol.HTTP -> "http://$hostname:$port"
-            TransmissionProtocol.HTTPS -> "https://$hostname:$port"
+            TransmissionProtocol.WEBSOCKET -> "ws://$hostname:$port"
+            TransmissionProtocol.WEBSOCKET_SSL -> "wss://$hostname:$port"
         }
         
         // Don't resolve DNS immediately - do it when actually starting streaming
@@ -72,7 +77,7 @@ class SignalKTransmitter @Inject constructor(
         val parsedUrl = parseUrl(fullUrl)
         val port = when (protocol) {
             TransmissionProtocol.UDP -> 55555  // Fixed UDP port
-            TransmissionProtocol.HTTP, TransmissionProtocol.HTTPS -> parsedUrl.port
+            TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> parsedUrl.port
         }
         
         serverAddress = parsedUrl.hostname
@@ -121,8 +126,8 @@ class SignalKTransmitter @Inject constructor(
     private fun getDefaultPort(protocol: TransmissionProtocol): Int {
         return when (protocol) {
             TransmissionProtocol.UDP -> 55555  // SignalK UDP port
-            TransmissionProtocol.HTTP -> 3000  // SignalK HTTP port
-            TransmissionProtocol.HTTPS -> 3443 // SignalK HTTPS port (or 3000 if using SSL termination)
+            TransmissionProtocol.WEBSOCKET -> 3000  // SignalK WebSocket port
+            TransmissionProtocol.WEBSOCKET_SSL -> 3443 // SignalK WebSocket SSL port (or 3000 if using SSL termination)
         }
     }
     
@@ -141,11 +146,9 @@ class SignalKTransmitter @Inject constructor(
                     // Start periodic DNS refresh to handle changing IP addresses
                     startDnsRefreshTimer()
                 }
-                TransmissionProtocol.HTTP, TransmissionProtocol.HTTPS -> {
-                    // For HTTP(S), we don't need a persistent socket
-                    // DNS resolution will happen per request
-                    socket = null
-                    targetAddress = null
+                TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
+                    // Initialize WebSocket connection
+                    initializeWebSocket()
                     
                     // Start periodic DNS refresh for hostname resolution
                     startDnsRefreshTimer()
@@ -166,9 +169,9 @@ class SignalKTransmitter @Inject constructor(
                     targetAddress = InetAddress.getByName(serverAddress)
                     // DNS resolution successful - connection is good
                 }
-                TransmissionProtocol.HTTP, TransmissionProtocol.HTTPS -> {
-                    // For HTTP(S), just validate that we can resolve the hostname
-                    // Actual connection will be made per request
+                TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
+                    // For WebSocket, just validate that we can resolve the hostname
+                    // Actual connection will be made per WebSocket connection
                     InetAddress.getByName(serverAddress)
                     // DNS resolution successful
                 }
@@ -179,7 +182,7 @@ class SignalKTransmitter @Inject constructor(
             if (targetAddress == null && transmissionProtocol == TransmissionProtocol.UDP) {
                 throw e // First time and failed - propagate the error
             }
-            // Otherwise, keep using the cached address or continue for HTTP
+            // Otherwise, keep using the cached address or continue for WebSocket
         }
     }
     
@@ -189,9 +192,9 @@ class SignalKTransmitter @Inject constructor(
         
         // Start new refresh timer
         dnsRefreshJob = CoroutineScope(Dispatchers.IO).launch {
-            while (socket != null) {
+            while (socket != null || webSocket != null) {
                 delay(DNS_REFRESH_INTERVAL_MS)
-                if (socket != null) { // Check again after delay
+                if (socket != null || webSocket != null) { // Check again after delay
                     try {
                         refreshDnsResolution()
                     } catch (e: Exception) {
@@ -212,6 +215,12 @@ class SignalKTransmitter @Inject constructor(
         socket?.close()
         socket = null
         targetAddress = null
+        
+        // Close WebSocket connection
+        webSocket?.close(1000, "Streaming stopped")
+        webSocket = null
+        okHttpClient = null
+        
         _connectionStatus.value = false
         _lastSentMessage.value = null
         _messagesSent.value = 0
@@ -220,7 +229,7 @@ class SignalKTransmitter @Inject constructor(
     
     // Manual DNS refresh - can be called from UI if user reports connectivity issues
     suspend fun refreshDns() {
-        if (socket != null) {
+        if (socket != null || webSocket != null) {
             withContext(Dispatchers.IO) {
                 refreshDnsResolution()
             }
@@ -347,7 +356,9 @@ class SignalKTransmitter @Inject constructor(
         return SignalKMessage(
             context = "vessels.self",
             updates = listOf(update),
-            token = authenticationService.getAuthToken()
+            token = if (transmissionProtocol == TransmissionProtocol.UDP) {
+                authenticationService.getAuthToken()
+            } else null  // For WebSocket, token goes in connection headers
         )
     }
     
@@ -394,7 +405,9 @@ class SignalKTransmitter @Inject constructor(
         if (values.isEmpty()) return SignalKMessage(
             context = "vessels.self", 
             updates = emptyList(),
-            token = authenticationService.getAuthToken()
+            token = if (transmissionProtocol == TransmissionProtocol.UDP) {
+                authenticationService.getAuthToken()
+            } else null  // For WebSocket, token goes in connection headers
         )
         
         val update = SignalKUpdate(
@@ -406,7 +419,9 @@ class SignalKTransmitter @Inject constructor(
         return SignalKMessage(
             context = "vessels.self",
             updates = listOf(update),
-            token = authenticationService.getAuthToken()
+            token = if (transmissionProtocol == TransmissionProtocol.UDP) {
+                authenticationService.getAuthToken()
+            } else null  // For WebSocket, token goes in connection headers
         )
     }
     
@@ -418,11 +433,8 @@ class SignalKTransmitter @Inject constructor(
                 TransmissionProtocol.UDP -> {
                     sendViaUDP(json)
                 }
-                TransmissionProtocol.HTTP -> {
-                    sendViaHTTP(json, false)
-                }
-                TransmissionProtocol.HTTPS -> {
-                    sendViaHTTP(json, true)
+                TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
+                    sendViaWebSocket(json)
                 }
             }
             
@@ -432,7 +444,9 @@ class SignalKTransmitter @Inject constructor(
             _lastTransmissionTime.value = System.currentTimeMillis()
         } catch (e: Exception) {
             _connectionStatus.value = false
-            // Log error or handle as needed
+            // Log the error details for debugging
+            println("SignalK transmission error: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
         }
     }
     
@@ -448,37 +462,58 @@ class SignalKTransmitter @Inject constructor(
         }
     }
     
-    private suspend fun sendViaHTTP(json: String, @Suppress("UNUSED_PARAMETER") useHttps: Boolean) {
+    private suspend fun sendViaWebSocket(json: String) {
+        webSocket?.let { ws ->
+            ws.send(json)
+        } ?: run {
+            throw Exception("WebSocket connection not established")
+        }
+    }
+    
+    private suspend fun initializeWebSocket() {
         withContext(Dispatchers.IO) {
-            val streamUrl = "${baseUrl}/signalk/v1/stream"
-            val url = URL(streamUrl)
-            val connection = url.openConnection() as HttpURLConnection
+            okHttpClient = OkHttpClient.Builder()
+                .build()
             
-            connection.apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Accept", "application/json")
-                
-                // Add authentication header if we have a token
-                authenticationService.getAuthToken()?.let { token ->
-                    setRequestProperty("Authorization", "Bearer $token")
+            val streamUrl = "${baseUrl}/signalk/v1/stream"
+            val request = Request.Builder()
+                .url(streamUrl)
+                .apply {
+                    // Add authentication header if we have a token
+                    authenticationService.getAuthToken()?.let { token ->
+                        addHeader("Authorization", "Bearer $token")
+                    }
+                }
+                .build()
+            
+            val webSocketListener = object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    _connectionStatus.value = true
+                    println("WebSocket connected to SignalK server")
                 }
                 
-                doOutput = true
-                connectTimeout = 5000
-                readTimeout = 5000
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    // Handle incoming messages from server (optional)
+                    println("Received from SignalK: $text")
+                }
+                
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    println("WebSocket closing: $code $reason")
+                }
+                
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    _connectionStatus.value = false
+                    println("WebSocket closed: $code $reason")
+                }
+                
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    _connectionStatus.value = false
+                    println("WebSocket error: ${t.message}")
+                    t.printStackTrace()
+                }
             }
             
-            // Send the SignalK delta message
-            OutputStreamWriter(connection.outputStream).use { writer ->
-                writer.write(json)
-                writer.flush()
-            }
-            
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                throw Exception("HTTP error: $responseCode")
-            }
+            webSocket = okHttpClient?.newWebSocket(request, webSocketListener)
         }
     }
 }

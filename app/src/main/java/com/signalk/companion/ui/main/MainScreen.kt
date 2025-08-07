@@ -65,7 +65,9 @@ fun MainScreen(
             ConnectionStatusCard(
                 isConnected = uiState.isConnected,
                 serverUrl = uiState.serverUrl,
-                onServerUrlChange = viewModel::updateServerUrl
+                transmissionProtocol = uiState.transmissionProtocol,
+                onServerUrlChange = viewModel::updateServerUrl,
+                onProtocolChange = viewModel::updateTransmissionProtocol
             )
             
             // Authentication Card (integrated login)
@@ -119,12 +121,17 @@ fun MainScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectionStatusCard(
     isConnected: Boolean,
     serverUrl: String,
-    onServerUrlChange: (String) -> Unit
+    transmissionProtocol: TransmissionProtocol,
+    onServerUrlChange: (String) -> Unit,
+    onProtocolChange: (TransmissionProtocol) -> Unit
 ) {
+    var protocolDropdownExpanded by remember { mutableStateOf(false) }
+    
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -145,6 +152,47 @@ fun ConnectionStatusCard(
                 placeholder = { Text("http://192.168.1.100:3000") },
                 modifier = Modifier.fillMaxWidth()
             )
+            
+            // Protocol Selection
+            ExposedDropdownMenuBox(
+                expanded = protocolDropdownExpanded,
+                onExpandedChange = { protocolDropdownExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = transmissionProtocol.displayName,
+                    onValueChange = {},
+                    label = { Text("Protocol") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = protocolDropdownExpanded) },
+                    readOnly = true,
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth()
+                )
+                
+                ExposedDropdownMenu(
+                    expanded = protocolDropdownExpanded,
+                    onDismissRequest = { protocolDropdownExpanded = false }
+                ) {
+                    TransmissionProtocol.values().forEach { protocol ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(protocol.displayName)
+                                    Text(
+                                        text = protocol.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            onClick = {
+                                onProtocolChange(protocol)
+                                protocolDropdownExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
             
             Row(
                 verticalAlignment = Alignment.CenterVertically,

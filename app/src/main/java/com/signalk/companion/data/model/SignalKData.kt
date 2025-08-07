@@ -45,6 +45,7 @@ sealed class SignalKValueData {
 }
 
 // Data classes for sensor readings
+@Serializable
 data class LocationData(
     val latitude: Double,
     val longitude: Double,
@@ -61,6 +62,7 @@ data class LocationData(
     val provider: String? = null          // GPS, Network, Fused, etc.
 )
 
+@Serializable
 data class SensorData(
     val magneticHeading: Float? = null,
     val trueHeading: Float? = null,

@@ -15,8 +15,8 @@ import javax.inject.Inject
 
 enum class TransmissionProtocol(val displayName: String, val description: String) {
     UDP("UDP", "Direct UDP transmission - fastest, requires network access"),
-    HTTP("HTTP", "HTTP streaming - works through firewalls, same as login"),
-    HTTPS("HTTPS", "Secure HTTPS streaming - encrypted, same as login")
+    WEBSOCKET("WebSocket", "WebSocket streaming - real-time, works through firewalls"),
+    WEBSOCKET_SSL("WebSocket SSL", "Secure WebSocket streaming - encrypted, same as login")
 }
 
 data class MainUiState(

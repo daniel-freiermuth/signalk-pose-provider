@@ -78,6 +78,9 @@ dependencies {
     // JSON
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
     
+    // WebSocket
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    
     // Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.32.0")
     

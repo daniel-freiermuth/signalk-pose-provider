@@ -6,12 +6,10 @@ import kotlinx.serialization.json.Json
 import org.junit.Test
 import org.junit.Assert.*
 
-class SignalKServiceTest {
+class SignalKDataTest {
     
     @Test
     fun testLocationDataSerialization() {
-        val signalKService = SignalKService()
-        
         // Mock location data
         val locationData = LocationData(
             latitude = 59.3293,
