@@ -3,6 +3,7 @@ package com.signalk.companion.service
 import com.signalk.companion.data.model.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.DatagramPacket
@@ -20,6 +21,10 @@ class SignalKTransmitter @Inject constructor() {
     private var serverPort: Int = 55555
     private var socket: DatagramSocket? = null
     private var targetAddress: InetAddress? = null
+    private var dnsRefreshJob: Job? = null
+    
+    // DNS refresh interval (5 minutes) - good balance between responsiveness and network load
+    private val DNS_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
     
     private val _connectionStatus = MutableStateFlow(false)
     val connectionStatus: StateFlow<Boolean> = _connectionStatus
@@ -39,11 +44,26 @@ class SignalKTransmitter @Inject constructor() {
     
     fun configure(address: String) {
         val parts = address.split(":")
-        serverAddress = parts[0]
+        serverAddress = parts[0].trim()
         serverPort = if (parts.size > 1) parts[1].toIntOrNull() ?: 55555 else 55555
         
+        // Don't resolve DNS immediately - do it when actually starting streaming
+        // This allows hostnames like "signalk.local", "my-boat.local", etc.
+        _connectionStatus.value = false
+    }
+    
+    suspend fun startStreaming() {
         try {
-            targetAddress = InetAddress.getByName(serverAddress)
+            socket = DatagramSocket()
+            
+            // Initial DNS resolution on IO dispatcher
+            withContext(Dispatchers.IO) {
+                refreshDnsResolution()
+            }
+            
+            // Start periodic DNS refresh to handle changing IP addresses
+            startDnsRefreshTimer()
+            
             _connectionStatus.value = true
         } catch (e: Exception) {
             _connectionStatus.value = false
@@ -51,23 +71,62 @@ class SignalKTransmitter @Inject constructor() {
         }
     }
     
-    fun startStreaming() {
+    private fun refreshDnsResolution() {
         try {
-            socket = DatagramSocket()
-            _connectionStatus.value = true
+            targetAddress = InetAddress.getByName(serverAddress)
+            // DNS resolution successful - connection is good
         } catch (e: Exception) {
-            _connectionStatus.value = false
-            throw e
+            // DNS resolution failed - but don't kill the entire streaming
+            // Keep using the old IP if we had one, or fail if this is the first attempt
+            if (targetAddress == null) {
+                throw e // First time and failed - propagate the error
+            }
+            // Otherwise, keep using the cached address
+        }
+    }
+    
+    private fun startDnsRefreshTimer() {
+        // Cancel any existing refresh timer
+        dnsRefreshJob?.cancel()
+        
+        // Start new refresh timer
+        dnsRefreshJob = CoroutineScope(Dispatchers.IO).launch {
+            while (socket != null) {
+                delay(DNS_REFRESH_INTERVAL_MS)
+                if (socket != null) { // Check again after delay
+                    try {
+                        refreshDnsResolution()
+                    } catch (e: Exception) {
+                        // Log DNS refresh failure, but don't stop streaming
+                        // In a real app, you might want to use a proper logger here
+                    }
+                }
+            }
         }
     }
     
     fun stopStreaming() {
+        // Cancel DNS refresh timer
+        dnsRefreshJob?.cancel()
+        dnsRefreshJob = null
+        
+        // Close socket and reset state
         socket?.close()
         socket = null
+        targetAddress = null
         _connectionStatus.value = false
         _lastSentMessage.value = null
         _messagesSent.value = 0
         _lastTransmissionTime.value = null
+    }
+    
+    // Manual DNS refresh - can be called from UI if user reports connectivity issues
+    suspend fun refreshDns() {
+        if (socket != null) {
+            withContext(Dispatchers.IO) {
+                refreshDnsResolution()
+            }
+        }
     }
     
     suspend fun sendLocationData(locationData: LocationData) {

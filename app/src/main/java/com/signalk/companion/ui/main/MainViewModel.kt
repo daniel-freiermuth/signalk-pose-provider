@@ -38,6 +38,15 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             locationService.locationUpdates.collect { locationData ->
                 _uiState.update { it.copy(locationData = locationData) }
+                
+                // Send location data to SignalK when streaming and we have data
+                if (locationData != null && _uiState.value.isStreaming && _uiState.value.isConnected) {
+                    try {
+                        signalKTransmitter.sendLocationData(locationData)
+                    } catch (e: Exception) {
+                        _uiState.update { it.copy(error = "Failed to send location data: ${e.message}") }
+                    }
+                }
             }
         }
         
@@ -83,12 +92,16 @@ class MainViewModel @Inject constructor(
                 // Start location service
                 locationService.startLocationUpdates(context)
                 
-                // Start SignalK service
+                // Start SignalK service (this is where DNS resolution happens)
                 signalKTransmitter.startStreaming()
                 
                 _uiState.update { it.copy(isStreaming = true, error = null) }
+            } catch (e: java.net.UnknownHostException) {
+                _uiState.update { it.copy(error = "Cannot resolve hostname: ${_uiState.value.serverAddress}. Check server address.") }
+            } catch (e: java.net.SocketException) {
+                _uiState.update { it.copy(error = "Network error: ${e.message}") }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message) }
+                _uiState.update { it.copy(error = "Failed to start streaming: ${e.message}") }
             }
         }
     }

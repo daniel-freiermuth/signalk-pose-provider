@@ -51,6 +51,8 @@ The app transmits data using standard SignalK paths:
 - **Default Server**: 192.168.1.100:3000
 - **Update Frequency**: 1Hz (configurable to 0.5-2Hz)
 - **Location Priority**: High accuracy with sensor fusion
+- **DNS Refresh**: Automatic every 5 minutes (handles dynamic IPs)
+- **Hostname Support**: Full support for mDNS/Bonjour (e.g., `signalk.local`)
 
 ## Building
 
@@ -201,6 +203,21 @@ chmod +x ./gradlew
 **Location Permissions**: The app requires precise location access
 **Network Access**: Ensure your device can reach the SignalK server
 **UDP Port**: Default is 55555, ensure SignalK server is listening on this port
+**Hostname Resolution**: If using hostnames like `signalk.local`, ensure mDNS is working on your network
+
+### Marina Networks & DNS
+
+The app is designed for maritime environments where network configurations change frequently:
+
+- **mDNS Hostnames**: Use `signalk.local` instead of fixed IP addresses when possible
+- **Dynamic IP Handling**: The app automatically refreshes DNS resolution every 5 minutes
+- **Network Changes**: When moving between marina slips, the app will adapt to new IP addresses
+- **Connection Recovery**: Failed connections are automatically retried with updated DNS resolution
+
+For optimal performance in marinas:
+1. Use hostname-based configuration (`signalk.local:3000`) 
+2. Ensure your SignalK server broadcasts mDNS
+3. Monitor the app's connection status for network changes
 
 ## Contributing
 

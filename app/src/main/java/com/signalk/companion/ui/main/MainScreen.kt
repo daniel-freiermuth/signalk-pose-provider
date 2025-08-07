@@ -81,6 +81,14 @@ fun MainScreen(
                 permissionsGranted = permissionsState.allPermissionsGranted
             )
             
+            // Error Card
+            uiState.error?.let { error ->
+                ErrorCard(
+                    error = error,
+                    onDismiss = { /* Could add a dismiss function to ViewModel */ }
+                )
+            }
+            
             // Sensor Data Card
             SensorDataCard(
                 locationData = uiState.locationData,
@@ -317,6 +325,43 @@ fun LiveTransmissionCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun ErrorCard(
+    error: String,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Error",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            
+            Text(
+                text = "• Check server address (hostnames like 'signalk.local' are supported)\n• Ensure network connectivity\n• Verify SignalK server is running",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
         }
     }
 }
