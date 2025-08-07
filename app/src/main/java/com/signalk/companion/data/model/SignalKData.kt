@@ -4,8 +4,9 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class SignalKMessage(
-    val context: String = "vessels.self",
-    val updates: List<SignalKUpdate>
+    val context: String,
+    val updates: List<SignalKUpdate>,
+    val token: String? = null  // JWT token for authentication
 )
 
 @Serializable

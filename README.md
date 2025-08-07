@@ -13,12 +13,12 @@ A modern Android application that streams smartphone sensor data to SignalK serv
 - ✅ Start/stop controls with connection status
 - ✅ GPS quality indicators (accuracy, provider type)
 - ✅ Enhanced precision for Android 8.0+ (speed, bearing, altitude accuracy)
+- ✅ JWT authentication for SignalK servers
+- ✅ Login/logout functionality with token management
 
 ### Planned (Full Feature Set)
 - 🔄 Additional sensors: magnetometer, accelerometer, gyroscope, barometer
 - 🔄 Sensor fusion for improved heading/course/speed
-- 🔄 Data quality indicators and metrics
-- 🔄 JWT authentication for SignalK servers
 - 🔄 Server discovery on local network
 - 🔄 Configurable update rates
 - 🔄 Notification system
@@ -138,11 +138,18 @@ If you prefer using Android Studio:
 
 ## Usage
 
-1. Enter your SignalK server address (IP:port)
-2. Grant location permissions when prompted
-3. Tap "Start Streaming" to begin data transmission
-4. Monitor connection status and sensor data in real-time
-5. Use "Stop Streaming" to halt transmission
+1. Enter your SignalK server address (IP:port or hostname like `signalk.local:3000`)
+2. **Optional**: Click "Login" to authenticate with your SignalK server
+   - Uses **HTTP(S) protocol** for secure authentication
+   - Enter your username and password
+   - Login form expands inline (no separate screens)
+3. Grant location permissions when prompted
+4. Tap "Start Streaming" to begin data transmission
+   - **UDP protocol** for real-time sensor data streaming
+   - JWT tokens included automatically if authenticated
+5. Monitor connection status, authentication status, and sensor data in real-time
+6. Use "Stop Streaming" to halt transmission
+7. **Optional**: Click "Logout" to clear authentication
 
 ## Architecture
 
@@ -228,6 +235,32 @@ For optimal performance in marinas:
 1. Use hostname-based configuration (`signalk.local:3000`) 
 2. Ensure your SignalK server broadcasts mDNS
 3. Monitor the app's connection status for network changes
+
+## Authentication
+
+The app supports SignalK JWT authentication for secure connections:
+
+### Features
+- **HTTP(S)-based login** via `/signalk/v1/auth/login` endpoint
+- **JWT token management** with automatic expiry handling
+- **Token inclusion** in all SignalK UDP messages for authenticated access
+- **Protocol separation** - HTTP(S) for auth, UDP for data streaming
+- **Optional authentication** - works with both authenticated and open servers
+- **Secure logout** with server-side token invalidation via HTTP(S)
+
+### Server Compatibility
+- ✅ **OpenPlotter/SignalK Node Server** - Full authentication support
+- ✅ **Wilhelmsk** - Authentication supported
+- ✅ **SignalK Python Server** - Authentication supported  
+- ✅ **Open servers** - Authentication optional, app works without login
+
+### Security Notes
+- **HTTPS preferred** - Uses HTTPS when available for secure credential transmission
+- **HTTP fallback** - Works with HTTP for development/local servers  
+- **Dual protocol design** - HTTP(S) for authentication, UDP for data
+- **Tokens in memory only** - No persistent token storage for security
+- **Automatic logout** on app restart for security
+- **Server-side validation** - JWT tokens validated on each UDP message
 
 ## Contributing
 

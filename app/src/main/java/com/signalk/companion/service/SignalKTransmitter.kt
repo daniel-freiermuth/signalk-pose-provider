@@ -15,7 +15,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class SignalKTransmitter @Inject constructor() {
+class SignalKTransmitter @Inject constructor(
+    private val authenticationService: AuthenticationService
+) {
     
     private var serverAddress: String = ""
     private var serverPort: Int = 55555
@@ -248,7 +250,8 @@ class SignalKTransmitter @Inject constructor() {
         
         return SignalKMessage(
             context = "vessels.self",
-            updates = listOf(update)
+            updates = listOf(update),
+            token = authenticationService.getAuthToken()
         )
     }
     
@@ -292,7 +295,11 @@ class SignalKTransmitter @Inject constructor() {
             )
         }
         
-        if (values.isEmpty()) return SignalKMessage(context = "vessels.self", updates = emptyList())
+        if (values.isEmpty()) return SignalKMessage(
+            context = "vessels.self", 
+            updates = emptyList(),
+            token = authenticationService.getAuthToken()
+        )
         
         val update = SignalKUpdate(
             source = source,
@@ -302,7 +309,8 @@ class SignalKTransmitter @Inject constructor() {
         
         return SignalKMessage(
             context = "vessels.self",
-            updates = listOf(update)
+            updates = listOf(update),
+            token = authenticationService.getAuthToken()
         )
     }
     

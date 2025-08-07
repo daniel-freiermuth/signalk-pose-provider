@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -64,6 +66,15 @@ fun MainScreen(
                 isConnected = uiState.isConnected,
                 serverAddress = uiState.serverAddress,
                 onServerAddressChange = viewModel::updateServerAddress
+            )
+            
+            // Authentication Card (integrated login)
+            AuthenticationCard(
+                isAuthenticated = uiState.isAuthenticated,
+                username = uiState.username,
+                serverUrl = uiState.serverAddress,
+                onLogin = { username, password -> viewModel.login(username, password) },
+                onLogout = { viewModel.logout() }
             )
             
             // Control Card
@@ -362,6 +373,137 @@ fun ErrorCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
+        }
+    }
+}
+
+@Composable
+fun AuthenticationCard(
+    isAuthenticated: Boolean,
+    username: String?,
+    serverUrl: String,
+    onLogin: (String, String) -> Unit,
+    onLogout: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var loginUsername by remember { mutableStateOf("") }
+    var loginPassword by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Authentication",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (isAuthenticated) "✅ Authenticated as: $username" else "🔓 Not authenticated",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isAuthenticated) 
+                            MaterialTheme.colorScheme.primary 
+                        else 
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                if (isAuthenticated) {
+                    OutlinedButton(onClick = onLogout) {
+                        Text("Logout")
+                    }
+                } else {
+                    Button(
+                        onClick = { expanded = !expanded }
+                    ) {
+                        Text(if (expanded) "Cancel" else "Login")
+                    }
+                }
+            }
+            
+            // Expandable login form
+            if (expanded && !isAuthenticated) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Server: $serverUrl",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    OutlinedTextField(
+                        value = loginUsername,
+                        onValueChange = { loginUsername = it },
+                        label = { Text("Username") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    
+                    OutlinedTextField(
+                        value = loginPassword,
+                        onValueChange = { loginPassword = it },
+                        label = { Text("Password") },
+                        modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Text(
+                                    text = if (passwordVisible) "👁" else "🔒",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        },
+                        singleLine = true
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { expanded = false },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Cancel")
+                        }
+                        
+                        Button(
+                            onClick = {
+                                if (loginUsername.isNotBlank() && loginPassword.isNotBlank()) {
+                                    onLogin(loginUsername, loginPassword)
+                                    loginPassword = "" // Clear password for security
+                                    expanded = false
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = loginUsername.isNotBlank() && loginPassword.isNotBlank()
+                        ) {
+                            Text("Login")
+                        }
+                    }
+                }
+            } else if (!isAuthenticated) {
+                Text(
+                    text = "Optional: Login to authenticate with your SignalK server",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

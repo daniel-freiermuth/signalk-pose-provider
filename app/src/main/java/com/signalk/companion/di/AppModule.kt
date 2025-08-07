@@ -1,5 +1,6 @@
 package com.signalk.companion.di
 
+import com.signalk.companion.service.AuthenticationService
 import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SignalKTransmitter
 import dagger.Module
@@ -14,13 +15,19 @@ object AppModule {
     
     @Provides
     @Singleton
+    fun provideAuthenticationService(): AuthenticationService {
+        return AuthenticationService()
+    }
+    
+    @Provides
+    @Singleton
     fun provideLocationService(): LocationService {
         return LocationService()
     }
     
     @Provides
     @Singleton
-    fun provideSignalKTransmitter(): SignalKTransmitter {
-        return SignalKTransmitter()
+    fun provideSignalKTransmitter(authenticationService: AuthenticationService): SignalKTransmitter {
+        return SignalKTransmitter(authenticationService)
     }
 }

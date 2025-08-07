@@ -7,6 +7,7 @@ import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SignalKTransmitter
+import com.signalk.companion.service.AuthenticationService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -21,13 +22,16 @@ data class MainUiState(
     val error: String? = null,
     val lastSentMessage: String? = null,
     val messagesSent: Int = 0,
-    val lastTransmissionTime: Long? = null
+    val lastTransmissionTime: Long? = null,
+    val isAuthenticated: Boolean = false,
+    val username: String? = null
 )
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val locationService: LocationService,
-    private val signalKTransmitter: SignalKTransmitter
+    private val signalKTransmitter: SignalKTransmitter,
+    private val authenticationService: AuthenticationService
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(MainUiState())
@@ -77,6 +81,23 @@ class MainViewModel @Inject constructor(
                 _uiState.update { it.copy(lastTransmissionTime = time) }
             }
         }
+        
+        // Observe authentication state
+        viewModelScope.launch {
+            authenticationService.authState.collect { authState ->
+                _uiState.update { 
+                    it.copy(
+                        isAuthenticated = authState.isAuthenticated,
+                        username = authState.username
+                    )
+                }
+                
+                // Update error state if there's an auth error
+                if (authState.error != null) {
+                    _uiState.update { it.copy(error = authState.error) }
+                }
+            }
+        }
     }
     
     fun updateServerAddress(address: String) {
@@ -111,6 +132,18 @@ class MainViewModel @Inject constructor(
             locationService.stopLocationUpdates()
             signalKTransmitter.stopStreaming()
             _uiState.update { it.copy(isStreaming = false) }
+        }
+    }
+    
+    fun login(username: String, password: String) {
+        viewModelScope.launch {
+            authenticationService.login(_uiState.value.serverAddress, username, password)
+        }
+    }
+    
+    fun logout() {
+        viewModelScope.launch {
+            authenticationService.logout()
         }
     }
 }
