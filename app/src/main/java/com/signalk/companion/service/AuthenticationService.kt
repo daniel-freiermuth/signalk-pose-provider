@@ -61,7 +61,7 @@ class AuthenticationService @Inject constructor() {
                 when (responseCode) {
                     200 -> {
                         val loginResponse = json.decodeFromString<LoginResponse>(responseBody)
-                        val tokenExpiry = System.currentTimeMillis() + (loginResponse.timeToLive * 1000)
+                        val tokenExpiry = System.currentTimeMillis() + ((loginResponse.timeToLive ?: 3600) * 1000)
                         
                         _authState.value = _authState.value.copy(
                             isAuthenticated = true,

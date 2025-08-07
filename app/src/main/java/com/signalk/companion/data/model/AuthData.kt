@@ -10,8 +10,10 @@ data class LoginRequest(
 
 @Serializable
 data class LoginResponse(
-    val timeToLive: Long,     // Token validity in seconds
-    val token: String         // JWT token
+    val token: String,                    // JWT token (required)
+    val timeToLive: Long? = null,        // Token validity in seconds (optional)
+    val expires: Long? = null,           // Alternative field name for token expiry (optional)
+    val expiresIn: Long? = null          // Another alternative field name (optional)
 )
 
 @Serializable
