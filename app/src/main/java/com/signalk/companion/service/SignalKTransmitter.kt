@@ -72,20 +72,39 @@ class SignalKTransmitter @Inject constructor(
         _connectionStatus.value = false
     }
     
-    // New method to configure from a full URL (for HTTP/HTTPS protocols)
-    fun configureFromUrl(fullUrl: String, protocol: TransmissionProtocol) {
+    // Configure from a full URL and auto-detect WebSocket protocol based on HTTP/HTTPS
+    fun configureFromUrl(fullUrl: String, protocol: TransmissionProtocol = TransmissionProtocol.UDP) {
         val parsedUrl = parseUrl(fullUrl)
-        val port = when (protocol) {
+        
+        // Auto-detect WebSocket protocol based on HTTPS/HTTP
+        val detectedProtocol = when {
+            protocol == TransmissionProtocol.UDP -> TransmissionProtocol.UDP
+            parsedUrl.isHttps -> TransmissionProtocol.WEBSOCKET_SSL
+            else -> TransmissionProtocol.WEBSOCKET
+        }
+        
+        val port = when (detectedProtocol) {
             TransmissionProtocol.UDP -> 55555  // Fixed UDP port
             TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> parsedUrl.port
         }
         
         serverAddress = parsedUrl.hostname
         serverPort = port
-        transmissionProtocol = protocol
-        baseUrl = if (protocol != TransmissionProtocol.UDP) fullUrl else ""
+        transmissionProtocol = detectedProtocol
+        
+        // Build WebSocket URL based on detected protocol
+        baseUrl = when (detectedProtocol) {
+            TransmissionProtocol.UDP -> ""
+            TransmissionProtocol.WEBSOCKET -> "ws://${parsedUrl.hostname}:${port}"
+            TransmissionProtocol.WEBSOCKET_SSL -> "wss://${parsedUrl.hostname}:${port}"
+        }
         
         _connectionStatus.value = false
+    }
+    
+    // Convenient method to configure WebSocket from HTTP URL with auto-detection
+    fun configureWebSocketFromHttpUrl(fullUrl: String) {
+        configureFromUrl(fullUrl, TransmissionProtocol.WEBSOCKET) // Will auto-detect WSS if HTTPS
     }
     
     private data class ParsedUrl(val hostname: String, val port: Int, val isHttps: Boolean)
@@ -93,13 +112,18 @@ class SignalKTransmitter @Inject constructor(
     private fun parseUrl(url: String): ParsedUrl {
         return try {
             val cleanUrl = url.lowercase().let { 
-                if (!it.startsWith("http://") && !it.startsWith("https://")) {
+                if (!it.startsWith("http://") && !it.startsWith("https://") && 
+                    !it.startsWith("ws://") && !it.startsWith("wss://")) {
                     "http://$it"
                 } else it
             }
             
-            val isHttps = cleanUrl.startsWith("https://")
-            val withoutProtocol = cleanUrl.removePrefix("https://").removePrefix("http://")
+            val isHttps = cleanUrl.startsWith("https://") || cleanUrl.startsWith("wss://")
+            val withoutProtocol = cleanUrl
+                .removePrefix("https://")
+                .removePrefix("http://")
+                .removePrefix("wss://")
+                .removePrefix("ws://")
             val parts = withoutProtocol.split(":")
             
             val hostname = parts[0].trim()

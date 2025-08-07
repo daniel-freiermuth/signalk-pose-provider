@@ -15,8 +15,8 @@ import javax.inject.Inject
 
 enum class TransmissionProtocol(val displayName: String, val description: String) {
     UDP("UDP", "Direct UDP transmission - fastest, requires network access"),
-    WEBSOCKET("WebSocket", "WebSocket streaming - real-time, works through firewalls"),
-    WEBSOCKET_SSL("WebSocket SSL", "Secure WebSocket streaming - encrypted, same as login")
+    WEBSOCKET("WebSocket (Auto)", "Auto-detects WS/WSS from HTTP/HTTPS URL - real-time, firewall-friendly"),
+    WEBSOCKET_SSL("WebSocket SSL", "Forces secure WSS streaming - encrypted, same as HTTPS login")
 }
 
 data class MainUiState(
@@ -164,8 +164,16 @@ class MainViewModel @Inject constructor(
             try {
                 val currentState = _uiState.value
                 
-                // Configure SignalK service with the full URL
-                signalKTransmitter.configureFromUrl(currentState.serverUrl, currentState.transmissionProtocol)
+                // Configure SignalK service - auto-detect WebSocket protocol based on HTTP/HTTPS
+                when (currentState.transmissionProtocol) {
+                    TransmissionProtocol.UDP -> {
+                        signalKTransmitter.configureFromUrl(currentState.serverUrl, TransmissionProtocol.UDP)
+                    }
+                    TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
+                        // Auto-detect WS vs WSS based on HTTP vs HTTPS in the URL
+                        signalKTransmitter.configureWebSocketFromHttpUrl(currentState.serverUrl)
+                    }
+                }
                 
                 // Start location service
                 locationService.startLocationUpdates(context)
