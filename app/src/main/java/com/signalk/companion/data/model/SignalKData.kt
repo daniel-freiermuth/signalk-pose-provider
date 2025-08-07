@@ -37,6 +37,9 @@ sealed class SignalKValueData {
     data class NumberValue(val value: Double) : SignalKValueData()
     
     @Serializable
+    data class StringValue(val value: String) : SignalKValueData()
+    
+    @Serializable
     data class QualityValue(val value: Double, val quality: String) : SignalKValueData()
 }
 
@@ -44,11 +47,17 @@ sealed class SignalKValueData {
 data class LocationData(
     val latitude: Double,
     val longitude: Double,
-    val accuracy: Float,
+    val accuracy: Float,              // Horizontal accuracy in meters
     val bearing: Float,
     val speed: Float,
     val altitude: Double,
-    val timestamp: Long
+    val timestamp: Long,
+    // Additional quality measures
+    val verticalAccuracy: Float? = null,  // Vertical accuracy in meters (API 26+)
+    val speedAccuracy: Float? = null,     // Speed accuracy in m/s (API 26+)  
+    val bearingAccuracy: Float? = null,   // Bearing accuracy in degrees (API 26+)
+    val satellites: Int? = null,          // Number of satellites used
+    val provider: String? = null          // GPS, Network, Fused, etc.
 )
 
 data class SensorData(

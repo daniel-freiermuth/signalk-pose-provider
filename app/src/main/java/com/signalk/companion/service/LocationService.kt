@@ -44,7 +44,18 @@ class LocationService @Inject constructor() {
                         bearing = if (location.hasBearing()) location.bearing else 0f,
                         speed = if (location.hasSpeed()) location.speed else 0f,
                         altitude = if (location.hasAltitude()) location.altitude else 0.0,
-                        timestamp = location.time
+                        timestamp = location.time,
+                        // Enhanced quality measures (API 26+)
+                        verticalAccuracy = if (android.os.Build.VERSION.SDK_INT >= 26 && location.hasVerticalAccuracy()) {
+                            location.verticalAccuracyMeters
+                        } else null,
+                        speedAccuracy = if (android.os.Build.VERSION.SDK_INT >= 26 && location.hasSpeedAccuracy()) {
+                            location.speedAccuracyMetersPerSecond
+                        } else null,
+                        bearingAccuracy = if (android.os.Build.VERSION.SDK_INT >= 26 && location.hasBearingAccuracy()) {
+                            location.bearingAccuracyDegrees
+                        } else null,
+                        provider = location.provider
                     )
                     _locationUpdates.value = locationData
                 }

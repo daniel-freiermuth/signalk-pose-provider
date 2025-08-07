@@ -149,7 +149,7 @@ class SignalKTransmitter @Inject constructor() {
         
         val values = mutableListOf<SignalKValue>()
         
-        // Position
+        // Position with quality indicators
         values.add(
             SignalKValue(
                 path = "navigation.position",
@@ -160,7 +160,17 @@ class SignalKTransmitter @Inject constructor() {
             )
         )
         
-        // Speed over ground
+        // Add position accuracy as separate quality indicator
+        if (locationData.accuracy > 0) {
+            values.add(
+                SignalKValue(
+                    path = "navigation.position.accuracy",
+                    value = SignalKValueData.NumberValue(locationData.accuracy.toDouble())
+                )
+            )
+        }
+        
+        // Speed over ground with accuracy
         if (locationData.speed > 0) {
             values.add(
                 SignalKValue(
@@ -168,9 +178,19 @@ class SignalKTransmitter @Inject constructor() {
                     value = SignalKValueData.NumberValue(locationData.speed.toDouble())
                 )
             )
+            
+            // Add speed accuracy if available
+            locationData.speedAccuracy?.let { speedAcc ->
+                values.add(
+                    SignalKValue(
+                        path = "navigation.speedOverGround.accuracy",
+                        value = SignalKValueData.NumberValue(speedAcc.toDouble())
+                    )
+                )
+            }
         }
         
-        // Course over ground
+        // Course over ground with accuracy
         if (locationData.bearing > 0) {
             values.add(
                 SignalKValue(
@@ -178,14 +198,44 @@ class SignalKTransmitter @Inject constructor() {
                     value = SignalKValueData.NumberValue(Math.toRadians(locationData.bearing.toDouble()))
                 )
             )
+            
+            // Add bearing accuracy if available
+            locationData.bearingAccuracy?.let { bearingAcc ->
+                values.add(
+                    SignalKValue(
+                        path = "navigation.courseOverGroundTrue.accuracy",
+                        value = SignalKValueData.NumberValue(Math.toRadians(bearingAcc.toDouble()))
+                    )
+                )
+            }
         }
         
-        // Altitude
+        // Altitude with accuracy
         if (locationData.altitude != 0.0) {
             values.add(
                 SignalKValue(
                     path = "navigation.gnss.altitude",
                     value = SignalKValueData.NumberValue(locationData.altitude)
+                )
+            )
+            
+            // Add vertical accuracy if available
+            locationData.verticalAccuracy?.let { vertAcc ->
+                values.add(
+                    SignalKValue(
+                        path = "navigation.gnss.altitude.accuracy",
+                        value = SignalKValueData.NumberValue(vertAcc.toDouble())
+                    )
+                )
+            }
+        }
+        
+        // GPS quality indicators
+        locationData.provider?.let { provider ->
+            values.add(
+                SignalKValue(
+                    path = "navigation.gnss.type",
+                    value = SignalKValueData.StringValue(provider)
                 )
             )
         }

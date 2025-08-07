@@ -11,6 +11,8 @@ A modern Android application that streams smartphone sensor data to SignalK serv
 - ✅ MVVM architecture with Hilt dependency injection
 - ✅ Background service for continuous streaming
 - ✅ Start/stop controls with connection status
+- ✅ GPS quality indicators (accuracy, provider type)
+- ✅ Enhanced precision for Android 8.0+ (speed, bearing, altitude accuracy)
 
 ### Planned (Full Feature Set)
 - 🔄 Additional sensors: magnetometer, accelerometer, gyroscope, barometer
@@ -35,12 +37,20 @@ A modern Android application that streams smartphone sensor data to SignalK serv
 
 ## SignalK Data Paths
 
-The app transmits data using standard SignalK paths:
+The app transmits data using standard SignalK paths with quality indicators:
 
+### Navigation Data
 - `navigation.position` - GPS coordinates
+- `navigation.position.accuracy` - Horizontal accuracy in meters
 - `navigation.speedOverGround` - Speed from GPS
-- `navigation.courseOverGroundTrue` - Course from GPS
+- `navigation.speedOverGround.accuracy` - Speed accuracy (Android 8.0+)
+- `navigation.courseOverGroundTrue` - Course from GPS  
+- `navigation.courseOverGroundTrue.accuracy` - Bearing accuracy (Android 8.0+)
 - `navigation.gnss.altitude` - Altitude from GPS
+- `navigation.gnss.altitude.accuracy` - Vertical accuracy (Android 8.0+)
+- `navigation.gnss.type` - GPS provider (GPS, Network, Fused)
+
+### Planned Sensor Data
 - `environment.outside.pressure` - Atmospheric pressure (planned)
 - `navigation.headingMagnetic` - Magnetic heading (planned)
 - `navigation.headingTrue` - True heading (planned)
