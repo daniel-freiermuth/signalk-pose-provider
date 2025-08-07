@@ -18,7 +18,10 @@ data class MainUiState(
     val serverAddress: String = "192.168.1.100:3000",
     val locationData: LocationData? = null,
     val sensorData: SensorData? = null,
-    val error: String? = null
+    val error: String? = null,
+    val lastSentMessage: String? = null,
+    val messagesSent: Int = 0,
+    val lastTransmissionTime: Long? = null
 )
 
 @HiltViewModel
@@ -42,6 +45,27 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             signalKTransmitter.connectionStatus.collect { isConnected ->
                 _uiState.update { it.copy(isConnected = isConnected) }
+            }
+        }
+        
+        // Observe last sent message
+        viewModelScope.launch {
+            signalKTransmitter.lastSentMessage.collect { message ->
+                _uiState.update { it.copy(lastSentMessage = message) }
+            }
+        }
+        
+        // Observe messages sent count
+        viewModelScope.launch {
+            signalKTransmitter.messagesSent.collect { count ->
+                _uiState.update { it.copy(messagesSent = count) }
+            }
+        }
+        
+        // Observe last transmission time
+        viewModelScope.launch {
+            signalKTransmitter.lastTransmissionTime.collect { time ->
+                _uiState.update { it.copy(lastTransmissionTime = time) }
             }
         }
     }

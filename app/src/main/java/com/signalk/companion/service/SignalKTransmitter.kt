@@ -24,6 +24,15 @@ class SignalKTransmitter @Inject constructor() {
     private val _connectionStatus = MutableStateFlow(false)
     val connectionStatus: StateFlow<Boolean> = _connectionStatus
     
+    private val _lastSentMessage = MutableStateFlow<String?>(null)
+    val lastSentMessage: StateFlow<String?> = _lastSentMessage
+    
+    private val _messagesSent = MutableStateFlow(0)
+    val messagesSent: StateFlow<Int> = _messagesSent
+    
+    private val _lastTransmissionTime = MutableStateFlow<Long?>(null)
+    val lastTransmissionTime: StateFlow<Long?> = _lastTransmissionTime
+    
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
     }
@@ -56,6 +65,9 @@ class SignalKTransmitter @Inject constructor() {
         socket?.close()
         socket = null
         _connectionStatus.value = false
+        _lastSentMessage.value = null
+        _messagesSent.value = 0
+        _lastTransmissionTime.value = null
     }
     
     suspend fun sendLocationData(locationData: LocationData) {
@@ -194,6 +206,11 @@ class SignalKTransmitter @Inject constructor() {
                 targetAddress?.let { address ->
                     val packet = DatagramPacket(data, data.size, address, serverPort)
                     socket.send(packet)
+                    
+                    // Update tracking state
+                    _lastSentMessage.value = json
+                    _messagesSent.value = _messagesSent.value + 1
+                    _lastTransmissionTime.value = System.currentTimeMillis()
                 }
             }
         } catch (e: Exception) {
