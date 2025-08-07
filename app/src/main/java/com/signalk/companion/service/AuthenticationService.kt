@@ -1,9 +1,11 @@
 package com.signalk.companion.service
 
 import com.signalk.companion.data.model.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.OutputStreamWriter
@@ -25,78 +27,110 @@ class AuthenticationService @Inject constructor() {
         return try {
             _authState.value = _authState.value.copy(isLoading = true, error = null)
             
-            val loginUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/login"
-            val loginRequest = LoginRequest(username, password)
-            
-            val url = URL(loginUrl)
-            val connection = url.openConnection() as HttpURLConnection
-            
-            connection.apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Accept", "application/json")
-                doOutput = true
-                connectTimeout = 10000
-                readTimeout = 10000
-            }
-            
-            // Send login request
-            val requestBody = json.encodeToString(loginRequest)
-            OutputStreamWriter(connection.outputStream).use { writer ->
-                writer.write(requestBody)
-                writer.flush()
-            }
-            
-            val responseCode = connection.responseCode
-            val responseBody = if (responseCode == 200) {
-                connection.inputStream.bufferedReader().use { it.readText() }
-            } else {
-                connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
-            }
-            
-            when (responseCode) {
-                200 -> {
-                    val loginResponse = json.decodeFromString<LoginResponse>(responseBody)
-                    val tokenExpiry = System.currentTimeMillis() + (loginResponse.timeToLive * 1000)
-                    
-                    _authState.value = _authState.value.copy(
-                        isAuthenticated = true,
-                        token = loginResponse.token,
-                        tokenExpiry = tokenExpiry,
-                        username = username,
-                        serverUrl = serverUrl,
-                        isLoading = false,
-                        error = null
-                    )
-                    
-                    Result.success(loginResponse)
+            // Use IO dispatcher for network operations
+            withContext(Dispatchers.IO) {
+                val loginUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/login"
+                val loginRequest = LoginRequest(username, password)
+                
+                val url = URL(loginUrl)
+                val connection = url.openConnection() as HttpURLConnection
+                
+                connection.apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Accept", "application/json")
+                    doOutput = true
+                    connectTimeout = 10000
+                    readTimeout = 10000
                 }
-                401 -> {
-                    _authState.value = _authState.value.copy(
-                        isLoading = false, 
-                        error = "Invalid username or password"
-                    )
-                    Result.failure(Exception("Invalid credentials"))
+                
+                // Send login request
+                val requestBody = json.encodeToString(loginRequest)
+                OutputStreamWriter(connection.outputStream).use { writer ->
+                    writer.write(requestBody)
+                    writer.flush()
                 }
-                501 -> {
-                    _authState.value = _authState.value.copy(
-                        isLoading = false, 
-                        error = "Server does not support authentication"
-                    )
-                    Result.failure(Exception("Authentication not supported"))
+                
+                val responseCode = connection.responseCode
+                val responseBody = if (responseCode == 200) {
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                } else {
+                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
                 }
-                else -> {
-                    _authState.value = _authState.value.copy(
-                        isLoading = false, 
-                        error = "Login failed: $responseCode"
-                    )
-                    Result.failure(Exception("HTTP $responseCode: $responseBody"))
+                
+                when (responseCode) {
+                    200 -> {
+                        val loginResponse = json.decodeFromString<LoginResponse>(responseBody)
+                        val tokenExpiry = System.currentTimeMillis() + (loginResponse.timeToLive * 1000)
+                        
+                        _authState.value = _authState.value.copy(
+                            isAuthenticated = true,
+                            token = loginResponse.token,
+                            tokenExpiry = tokenExpiry,
+                            username = username,
+                            serverUrl = serverUrl,
+                            isLoading = false,
+                            error = null
+                        )
+                        
+                        Result.success(loginResponse)
+                    }
+                    401 -> {
+                        _authState.value = _authState.value.copy(
+                            isLoading = false, 
+                            error = "Invalid username or password"
+                        )
+                        Result.failure(Exception("Invalid credentials"))
+                    }
+                    501 -> {
+                        _authState.value = _authState.value.copy(
+                            isLoading = false, 
+                            error = "Server does not support authentication"
+                        )
+                        Result.failure(Exception("Authentication not supported"))
+                    }
+                    else -> {
+                        _authState.value = _authState.value.copy(
+                            isLoading = false, 
+                            error = "Login failed: $responseCode"
+                        )
+                        Result.failure(Exception("HTTP $responseCode: $responseBody"))
+                    }
                 }
-            }
-        } catch (e: Exception) {
+            } // Close withContext(Dispatchers.IO)
+        } catch (e: java.net.UnknownHostException) {
+            val error = "Cannot resolve hostname: ${e.message ?: "Unknown host"}"
             _authState.value = _authState.value.copy(
                 isLoading = false, 
-                error = "Connection failed: ${e.message}"
+                error = error
+            )
+            Result.failure(Exception(error))
+        } catch (e: java.net.ConnectException) {
+            val error = "Cannot connect to server: ${e.message ?: "Connection refused"}"
+            _authState.value = _authState.value.copy(
+                isLoading = false, 
+                error = error
+            )
+            Result.failure(Exception(error))
+        } catch (e: java.net.SocketTimeoutException) {
+            val error = "Connection timeout: Server not responding"
+            _authState.value = _authState.value.copy(
+                isLoading = false, 
+                error = error
+            )
+            Result.failure(Exception(error))
+        } catch (e: java.io.IOException) {
+            val error = "Network error: ${e.message ?: "I/O error"}"
+            _authState.value = _authState.value.copy(
+                isLoading = false, 
+                error = error
+            )
+            Result.failure(Exception(error))
+        } catch (e: Exception) {
+            val error = "Login failed: ${e.javaClass.simpleName} - ${e.message ?: "Unknown error"}"
+            _authState.value = _authState.value.copy(
+                isLoading = false, 
+                error = error
             )
             Result.failure(e)
         }
@@ -109,19 +143,21 @@ class AuthenticationService @Inject constructor() {
             val token = currentState.token
             
             if (serverUrl != null && token != null) {
-                val logoutUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/logout"
-                val url = URL(logoutUrl)
-                val connection = url.openConnection() as HttpURLConnection
-                
-                connection.apply {
-                    requestMethod = "PUT"
-                    setRequestProperty("Authorization", "Bearer $token")
-                    connectTimeout = 5000
-                    readTimeout = 5000
+                withContext(Dispatchers.IO) {
+                    val logoutUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/logout"
+                    val url = URL(logoutUrl)
+                    val connection = url.openConnection() as HttpURLConnection
+                    
+                    connection.apply {
+                        requestMethod = "PUT"
+                        setRequestProperty("Authorization", "Bearer $token")
+                        connectTimeout = 5000
+                        readTimeout = 5000
+                    }
+                    
+                    // We don't really care about the response for logout
+                    connection.responseCode
                 }
-                
-                // We don't really care about the response for logout
-                connection.responseCode
             }
             
             // Always clear local auth state
@@ -144,34 +180,36 @@ class AuthenticationService @Inject constructor() {
                 return Result.failure(Exception("No token to validate"))
             }
             
-            val validateUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/validate"
-            val url = URL(validateUrl)
-            val connection = url.openConnection() as HttpURLConnection
-            
-            connection.apply {
-                requestMethod = "POST"
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("Content-Type", "application/json")
-                connectTimeout = 5000
-                readTimeout = 5000
-            }
-            
-            val responseCode = connection.responseCode
-            
-            when (responseCode) {
-                200 -> {
-                    val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-                    // For HTTP validation, we might get a new token in response
-                    // For now, we'll assume the current token is still valid
-                    Result.success(token)
+            withContext(Dispatchers.IO) {
+                val validateUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/validate"
+                val url = URL(validateUrl)
+                val connection = url.openConnection() as HttpURLConnection
+                
+                connection.apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Authorization", "Bearer $token")
+                    setRequestProperty("Content-Type", "application/json")
+                    connectTimeout = 5000
+                    readTimeout = 5000
                 }
-                401 -> {
-                    // Token is invalid, clear auth state
-                    _authState.value = AuthState()
-                    Result.failure(Exception("Token expired"))
-                }
-                else -> {
-                    Result.failure(Exception("Token validation failed: $responseCode"))
+                
+                val responseCode = connection.responseCode
+                
+                when (responseCode) {
+                    200 -> {
+                        val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+                        // For HTTP validation, we might get a new token in response
+                        // For now, we'll assume the current token is still valid
+                        Result.success(token)
+                    }
+                    401 -> {
+                        // Token is invalid, clear auth state
+                        _authState.value = AuthState()
+                        Result.failure(Exception("Token expired"))
+                    }
+                    else -> {
+                        Result.failure(Exception("Token validation failed: $responseCode"))
+                    }
                 }
             }
         } catch (e: Exception) {

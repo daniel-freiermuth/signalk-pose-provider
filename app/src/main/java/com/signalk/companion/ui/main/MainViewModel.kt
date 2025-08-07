@@ -13,10 +13,17 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class TransmissionProtocol(val displayName: String, val description: String) {
+    UDP("UDP", "Direct UDP transmission - fastest, requires network access"),
+    HTTP("HTTP", "HTTP streaming - works through firewalls, same as login"),
+    HTTPS("HTTPS", "Secure HTTPS streaming - encrypted, same as login")
+}
+
 data class MainUiState(
     val isConnected: Boolean = false,
     val isStreaming: Boolean = false,
-    val serverAddress: String = "192.168.1.100:3000",
+    val serverUrl: String = "http://192.168.1.100:3000",
+    val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.UDP,
     val locationData: LocationData? = null,
     val sensorData: SensorData? = null,
     val error: String? = null,
@@ -24,8 +31,51 @@ data class MainUiState(
     val messagesSent: Int = 0,
     val lastTransmissionTime: Long? = null,
     val isAuthenticated: Boolean = false,
-    val username: String? = null
+    val username: String? = null,
+    val isLoggingIn: Boolean = false
+) {
+    // Parse the URL to extract components
+    private val parsedUrl: ParsedUrl get() = parseUrl(serverUrl)
+    
+    val hostname: String get() = parsedUrl.hostname
+    val port: Int get() = parsedUrl.port
+    val isHttps: Boolean get() = parsedUrl.isHttps
+    
+    // For UDP streaming, use hostname with port 55555
+    val udpAddress: String get() = "$hostname:55555"
+}
+
+private data class ParsedUrl(
+    val hostname: String,
+    val port: Int,
+    val isHttps: Boolean
 )
+
+private fun parseUrl(url: String): ParsedUrl {
+    return try {
+        val cleanUrl = url.lowercase().let { 
+            if (!it.startsWith("http://") && !it.startsWith("https://")) {
+                "http://$it" // Default to HTTP if no protocol specified
+            } else it
+        }
+        
+        val isHttps = cleanUrl.startsWith("https://")
+        val withoutProtocol = cleanUrl.removePrefix("https://").removePrefix("http://")
+        val parts = withoutProtocol.split(":")
+        
+        val hostname = parts[0].trim()
+        val port = if (parts.size > 1) {
+            parts[1].split("/")[0].toIntOrNull() ?: (if (isHttps) 443 else 80)
+        } else {
+            if (isHttps) 443 else 80
+        }
+        
+        ParsedUrl(hostname, port, isHttps)
+    } catch (e: Exception) {
+        // Fallback for invalid URLs
+        ParsedUrl("192.168.1.100", 3000, false)
+    }
+}
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -88,7 +138,8 @@ class MainViewModel @Inject constructor(
                 _uiState.update { 
                     it.copy(
                         isAuthenticated = authState.isAuthenticated,
-                        username = authState.username
+                        username = authState.username,
+                        isLoggingIn = authState.isLoading
                     )
                 }
                 
@@ -100,15 +151,21 @@ class MainViewModel @Inject constructor(
         }
     }
     
-    fun updateServerAddress(address: String) {
-        _uiState.update { it.copy(serverAddress = address) }
+    fun updateServerUrl(url: String) {
+        _uiState.update { it.copy(serverUrl = url) }
+    }
+
+    fun updateTransmissionProtocol(protocol: TransmissionProtocol) {
+        _uiState.update { it.copy(transmissionProtocol = protocol) }
     }
     
-    fun startStreaming(context: Context) {
+    fun startStreaming(context: android.content.Context) {
         viewModelScope.launch {
             try {
-                // Configure SignalK service
-                signalKTransmitter.configure(_uiState.value.serverAddress)
+                val currentState = _uiState.value
+                
+                // Configure SignalK service with the full URL
+                signalKTransmitter.configureFromUrl(currentState.serverUrl, currentState.transmissionProtocol)
                 
                 // Start location service
                 locationService.startLocationUpdates(context)
@@ -118,7 +175,7 @@ class MainViewModel @Inject constructor(
                 
                 _uiState.update { it.copy(isStreaming = true, error = null) }
             } catch (e: java.net.UnknownHostException) {
-                _uiState.update { it.copy(error = "Cannot resolve hostname: ${_uiState.value.serverAddress}. Check server address.") }
+                _uiState.update { it.copy(error = "Cannot resolve hostname: ${_uiState.value.hostname}. Check server address.") }
             } catch (e: java.net.SocketException) {
                 _uiState.update { it.copy(error = "Network error: ${e.message}") }
             } catch (e: Exception) {
@@ -137,7 +194,7 @@ class MainViewModel @Inject constructor(
     
     fun login(username: String, password: String) {
         viewModelScope.launch {
-            authenticationService.login(_uiState.value.serverAddress, username, password)
+            authenticationService.login(_uiState.value.serverUrl, username, password)
         }
     }
     

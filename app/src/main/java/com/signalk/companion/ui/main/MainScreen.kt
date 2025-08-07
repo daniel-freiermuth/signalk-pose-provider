@@ -64,15 +64,16 @@ fun MainScreen(
             // Connection Status Card
             ConnectionStatusCard(
                 isConnected = uiState.isConnected,
-                serverAddress = uiState.serverAddress,
-                onServerAddressChange = viewModel::updateServerAddress
+                serverUrl = uiState.serverUrl,
+                onServerUrlChange = viewModel::updateServerUrl
             )
             
             // Authentication Card (integrated login)
             AuthenticationCard(
                 isAuthenticated = uiState.isAuthenticated,
                 username = uiState.username,
-                serverUrl = uiState.serverAddress,
+                serverUrl = uiState.serverUrl,
+                isLoggingIn = uiState.isLoggingIn,
                 onLogin = { username, password -> viewModel.login(username, password) },
                 onLogout = { viewModel.logout() }
             )
@@ -121,8 +122,8 @@ fun MainScreen(
 @Composable
 fun ConnectionStatusCard(
     isConnected: Boolean,
-    serverAddress: String,
-    onServerAddressChange: (String) -> Unit
+    serverUrl: String,
+    onServerUrlChange: (String) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -138,10 +139,10 @@ fun ConnectionStatusCard(
             )
             
             OutlinedTextField(
-                value = serverAddress,
-                onValueChange = onServerAddressChange,
-                label = { Text("SignalK Server Address") },
-                placeholder = { Text("192.168.1.100:3000") },
+                value = serverUrl,
+                onValueChange = onServerUrlChange,
+                label = { Text("Server URL") },
+                placeholder = { Text("http://192.168.1.100:3000") },
                 modifier = Modifier.fillMaxWidth()
             )
             
@@ -382,6 +383,7 @@ fun AuthenticationCard(
     isAuthenticated: Boolean,
     username: String?,
     serverUrl: String,
+    isLoggingIn: Boolean = false,
     onLogin: (String, String) -> Unit,
     onLogout: () -> Unit
 ) {
@@ -389,6 +391,14 @@ fun AuthenticationCard(
     var loginUsername by remember { mutableStateOf("") }
     var loginPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    
+    // Close the form only when authentication succeeds
+    LaunchedEffect(isAuthenticated) {
+        if (isAuthenticated) {
+            expanded = false
+            loginPassword = "" // Clear password for security
+        }
+    }
     
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -428,7 +438,8 @@ fun AuthenticationCard(
                     }
                 } else {
                     Button(
-                        onClick = { expanded = !expanded }
+                        onClick = { expanded = !expanded },
+                        enabled = !isLoggingIn
                     ) {
                         Text(if (expanded) "Cancel" else "Login")
                     }
@@ -477,7 +488,8 @@ fun AuthenticationCard(
                     ) {
                         OutlinedButton(
                             onClick = { expanded = false },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            enabled = !isLoggingIn
                         ) {
                             Text("Cancel")
                         }
@@ -486,14 +498,17 @@ fun AuthenticationCard(
                             onClick = {
                                 if (loginUsername.isNotBlank() && loginPassword.isNotBlank()) {
                                     onLogin(loginUsername, loginPassword)
-                                    loginPassword = "" // Clear password for security
-                                    expanded = false
+                                    // Don't collapse form here - let LaunchedEffect handle it on success
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            enabled = loginUsername.isNotBlank() && loginPassword.isNotBlank()
+                            enabled = loginUsername.isNotBlank() && loginPassword.isNotBlank() && !isLoggingIn
                         ) {
-                            Text("Login")
+                            if (isLoggingIn) {
+                                Text("Logging in...")
+                            } else {
+                                Text("Login")
+                            }
                         }
                     }
                 }
