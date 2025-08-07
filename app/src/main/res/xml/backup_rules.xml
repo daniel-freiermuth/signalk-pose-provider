@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<backup-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="device_prefs.xml"/>
+        <exclude domain="sharedpref" path="com.my.app_preferences.xml"/>
+    </cloud-backup>
+</backup-rules>

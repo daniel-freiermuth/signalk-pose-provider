@@ -1,0 +1,126 @@
+# Android Build Artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Build directories
+build/
+app/build/
+*/build/
+
+# Gradle files
+.gradle/
+app/.gradle/
+gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Local configuration file (contains signing keys, API keys, etc.)
+local.properties
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+.idea_modules/
+
+# VS Code
+.vscode/
+
+# Signing files
+*.jks
+*.keystore
+app/release/
+release/
+
+# Proguard
+proguard/
+
+# Log Files
+*.log
+
+# NDK
+obj/
+
+# Generated files
+bin/
+gen/
+
+# Gradle daemon and lock files
+.gradle
+gradle.lock
+
+# Android Profiling
+*.hprof
+
+# Lint
+lint-report.html
+lint-report_files/
+lint-results*.xml
+
+# Mac OS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# Linux
+*~
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~.nib
+
+# Package Files
+*.jar
+*.war
+*.ear
+
+# Virtual machine crash logs
+hs_err_pid*
+
+# Kotlin
+*.kotlin_metadata
+
+# R8/Proguard mapping files
+mapping.txt
+seeds.txt
+usage.txt
+
+# Google Services (e.g. APIs or Firebase)
+# Comment the next line if you want to check in your google-services.json
+# google-services.json
+
+# Freeline
+freeline.py
+freeline/
+freeline_project_description.json
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+fastlane/readme.md
+
+# Crashlytics
+com_crashlytics_export_strings.xml
+crashlytics.properties
+crashlytics-build.properties
+fabric.properties
+
+# Version control
+*.orig
+
+# Backup files
+*.backup
+
+# Gradle distribution (usually you'd include this, but since we have gradle-dist...)
+gradle-dist/
+
+# Custom - Project specific
+# Add any project-specific files/folders to ignore here
