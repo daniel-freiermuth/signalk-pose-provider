@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,6 +84,7 @@ class SignalKStreamingService : Service() {
                     try {
                         signalKTransmitter.sendLocationData(it)
                         updateTransmissionStats()
+                        Log.d(TAG, "Sent location data: lat=${it.latitude}, lon=${it.longitude}")
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to send location data", e)
                     }
@@ -95,8 +97,21 @@ class SignalKStreamingService : Service() {
                 try {
                     signalKTransmitter.sendSensorData(sensorData)
                     updateTransmissionStats()
+                    Log.d(TAG, "Sent sensor data: timestamp=${sensorData.timestamp}")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to send sensor data", e)
+                }
+            }
+        }
+        
+        // Observe SignalK connection status
+        serviceScope.launch {
+            signalKTransmitter.connectionStatus.collect { isConnected ->
+                Log.d(TAG, "SignalK connection status: $isConnected")
+                if (isConnected) {
+                    updateNotification("Connected to SignalK - Messages sent: ${_messagesSent.value}")
+                } else {
+                    updateNotification("Connecting to SignalK...")
                 }
             }
         }
@@ -129,9 +144,19 @@ class SignalKStreamingService : Service() {
         
         serviceScope.launch {
             try {
+                Log.d(TAG, "Configuring SignalK transmitter for: $serverUrl")
+                
                 // Configure SignalK transmitter
                 signalKTransmitter.configureWebSocketFromHttpUrl(serverUrl)
                 
+                // Start SignalK streaming (this is crucial!)
+                Log.d(TAG, "Starting SignalK transmitter...")
+                signalKTransmitter.startStreaming()
+                
+                // Wait a moment for connection to establish
+                delay(1000)
+                
+                Log.d(TAG, "Starting location updates with rate: ${locationRate}ms")
                 // Start location updates
                 try {
                     locationService.startLocationUpdates(this@SignalKStreamingService, locationRate)
@@ -139,6 +164,7 @@ class SignalKStreamingService : Service() {
                     Log.e(TAG, "Location permission not granted", e)
                 }
                 
+                Log.d(TAG, "Starting sensor updates with rate: ${sensorRate}ms")
                 // Start sensor updates
                 sensorService.startSensorUpdates(sensorRate)
                 
@@ -195,7 +221,11 @@ class SignalKStreamingService : Service() {
         _lastTransmissionTime.value = System.currentTimeMillis()
         
         // Update notification with current stats
-        val notification = createNotification("Messages sent: ${_messagesSent.value}")
+        updateNotification("Messages sent: ${_messagesSent.value}")
+    }
+    
+    private fun updateNotification(contentText: String) {
+        val notification = createNotification(contentText)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
