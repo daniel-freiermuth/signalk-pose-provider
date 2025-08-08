@@ -275,8 +275,8 @@ class SignalKTransmitter @Inject constructor(
     private fun createLocationMessage(locationData: LocationData): SignalKMessage {
         val timestamp = dateFormat.format(Date(locationData.timestamp))
         val source = SignalKSource(
-            label = "Android Companion",
-            src = "android-companion"
+            label = "SignalK Navigation Provider",
+            src = "signalk-nav-provider"
         )
         
         val values = mutableListOf<SignalKValue>()
@@ -390,8 +390,8 @@ class SignalKTransmitter @Inject constructor(
     private fun createSensorMessage(sensorData: SensorData): SignalKMessage {
         val timestamp = dateFormat.format(Date(sensorData.timestamp))
         val source = SignalKSource(
-            label = "Android Companion Sensors",
-            src = "android-companion-sensors"
+            label = "SignalK Navigation Provider - Sensors",
+            src = "signalk-nav-provider-sensors"
         )
         
         val values = mutableListOf<SignalKValue>()

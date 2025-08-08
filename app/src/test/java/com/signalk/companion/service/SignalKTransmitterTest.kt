@@ -57,8 +57,8 @@ class SignalKTransmitterTest {
     fun testSignalKJsonStructure() {
         // Test the new simplified JSON structure
         val source = SignalKSource(
-            label = "Android Companion",
-            src = "android-companion"
+            label = "SignalK Navigation Provider",
+            src = "signalk-nav-provider"
         )
         
         val values = listOf(
