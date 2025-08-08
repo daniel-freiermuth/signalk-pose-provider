@@ -1,11 +1,17 @@
 package com.signalk.companion.ui.main
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.service.LocationService
+import com.signalk.companion.service.SensorService
+import com.signalk.companion.service.SignalKStreamingService
 import com.signalk.companion.service.SignalKTransmitter
 import com.signalk.companion.service.AuthenticationService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,11 +25,20 @@ enum class TransmissionProtocol(val displayName: String, val description: String
     WEBSOCKET_SSL("WebSocket SSL", "Forces secure WSS streaming - encrypted, same as HTTPS login")
 }
 
+enum class UpdateRate(val displayName: String, val intervalMs: Long, val description: String) {
+    FAST("Fast (0.5s)", 500L, "2 Hz - High precision, more battery usage"),
+    NORMAL("Normal (1s)", 1000L, "1 Hz - Balanced performance and battery"),
+    SLOW("Slow (2s)", 2000L, "0.5 Hz - Battery efficient, lower precision"),
+    VERY_SLOW("Very Slow (5s)", 5000L, "0.2 Hz - Maximum battery life")
+}
+
 data class MainUiState(
     val isConnected: Boolean = false,
     val isStreaming: Boolean = false,
-    val serverUrl: String = "http://192.168.1.100:3000",
+    val serverUrl: String = "https://signalk.entrop.mywire.org",
     val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.UDP,
+    val locationUpdateRate: UpdateRate = UpdateRate.NORMAL,
+    val sensorUpdateRate: UpdateRate = UpdateRate.NORMAL,
     val locationData: LocationData? = null,
     val sensorData: SensorData? = null,
     val error: String? = null,
@@ -31,7 +46,7 @@ data class MainUiState(
     val messagesSent: Int = 0,
     val lastTransmissionTime: Long? = null,
     val isAuthenticated: Boolean = false,
-    val username: String? = null,
+    val username: String? = "test",
     val isLoggingIn: Boolean = false
 ) {
     // Parse the URL to extract components
@@ -80,55 +95,68 @@ private fun parseUrl(url: String): ParsedUrl {
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val locationService: LocationService,
+    private val sensorService: SensorService,
     private val signalKTransmitter: SignalKTransmitter,
     private val authenticationService: AuthenticationService
 ) : ViewModel() {
+    
+    private var currentContext: Context? = null
+    private var streamingService: SignalKStreamingService? = null
+    private var bound = false
+    
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            val binder = service as SignalKStreamingService.LocalBinder
+            streamingService = binder.getService()
+            bound = true
+            
+            // Observe service state
+            viewModelScope.launch {
+                streamingService?.isStreaming?.collect { isStreaming ->
+                    _uiState.update { it.copy(isStreaming = isStreaming) }
+                }
+            }
+            
+            viewModelScope.launch {
+                streamingService?.messagesSent?.collect { count ->
+                    _uiState.update { it.copy(messagesSent = count) }
+                }
+            }
+            
+            viewModelScope.launch {
+                streamingService?.lastTransmissionTime?.collect { time ->
+                    _uiState.update { it.copy(lastTransmissionTime = time) }
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(arg0: ComponentName) {
+            streamingService = null
+            bound = false
+        }
+    }
     
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
     
     init {
-        // Observe location updates
+        // Still observe location and sensor data for UI display (but not for transmission)
         viewModelScope.launch {
             locationService.locationUpdates.collect { locationData ->
                 _uiState.update { it.copy(locationData = locationData) }
-                
-                // Send location data to SignalK when streaming and we have data
-                if (locationData != null && _uiState.value.isStreaming && _uiState.value.isConnected) {
-                    try {
-                        signalKTransmitter.sendLocationData(locationData)
-                    } catch (e: Exception) {
-                        _uiState.update { it.copy(error = "Failed to send location data: ${e.message}") }
-                    }
-                }
             }
         }
         
-        // Observe service connection status
+        viewModelScope.launch {
+            sensorService.sensorData.collect { sensorData ->
+                _uiState.update { it.copy(sensorData = sensorData) }
+            }
+        }
+        
+        // Observe SignalK connection status for UI
         viewModelScope.launch {
             signalKTransmitter.connectionStatus.collect { isConnected ->
                 _uiState.update { it.copy(isConnected = isConnected) }
-            }
-        }
-        
-        // Observe last sent message
-        viewModelScope.launch {
-            signalKTransmitter.lastSentMessage.collect { message ->
-                _uiState.update { it.copy(lastSentMessage = message) }
-            }
-        }
-        
-        // Observe messages sent count
-        viewModelScope.launch {
-            signalKTransmitter.messagesSent.collect { count ->
-                _uiState.update { it.copy(messagesSent = count) }
-            }
-        }
-        
-        // Observe last transmission time
-        viewModelScope.launch {
-            signalKTransmitter.lastTransmissionTime.collect { time ->
-                _uiState.update { it.copy(lastTransmissionTime = time) }
             }
         }
         
@@ -159,45 +187,53 @@ class MainViewModel @Inject constructor(
         _uiState.update { it.copy(transmissionProtocol = protocol) }
     }
     
+    fun updateLocationUpdateRate(rate: UpdateRate) {
+        _uiState.update { it.copy(locationUpdateRate = rate) }
+        // If currently streaming, update service rate
+        streamingService?.updateLocationRate(rate)
+    }
+
+    fun updateSensorUpdateRate(rate: UpdateRate) {
+        _uiState.update { it.copy(sensorUpdateRate = rate) }
+        // If currently streaming, update service rate
+        streamingService?.updateSensorRate(rate)
+    }
+
     fun startStreaming(context: android.content.Context) {
-        viewModelScope.launch {
-            try {
-                val currentState = _uiState.value
-                
-                // Configure SignalK service - auto-detect WebSocket protocol based on HTTP/HTTPS
-                when (currentState.transmissionProtocol) {
-                    TransmissionProtocol.UDP -> {
-                        signalKTransmitter.configureFromUrl(currentState.serverUrl, TransmissionProtocol.UDP)
-                    }
-                    TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
-                        // Auto-detect WS vs WSS based on HTTP vs HTTPS in the URL
-                        signalKTransmitter.configureWebSocketFromHttpUrl(currentState.serverUrl)
-                    }
-                }
-                
-                // Start location service
-                locationService.startLocationUpdates(context)
-                
-                // Start SignalK service (this is where DNS resolution happens)
-                signalKTransmitter.startStreaming()
-                
-                _uiState.update { it.copy(isStreaming = true, error = null) }
-            } catch (e: java.net.UnknownHostException) {
-                _uiState.update { it.copy(error = "Cannot resolve hostname: ${_uiState.value.hostname}. Check server address.") }
-            } catch (e: java.net.SocketException) {
-                _uiState.update { it.copy(error = "Network error: ${e.message}") }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(error = "Failed to start streaming: ${e.message}") }
+        currentContext = context
+        
+        // Bind to service if not already bound
+        if (!bound) {
+            val intent = Intent(context, SignalKStreamingService::class.java)
+            context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        }
+        
+        // Start streaming service
+        val currentState = _uiState.value
+        val serviceIntent = Intent(context, SignalKStreamingService::class.java).apply {
+            action = SignalKStreamingService.ACTION_START_STREAMING
+            putExtra(SignalKStreamingService.EXTRA_SERVER_URL, currentState.serverUrl)
+            putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, currentState.locationUpdateRate.intervalMs)
+            putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, currentState.sensorUpdateRate.intervalMs.toInt())
+        }
+        
+        context.startForegroundService(serviceIntent)
+    }
+
+    fun stopStreaming() {
+        currentContext?.let { context ->
+            val serviceIntent = Intent(context, SignalKStreamingService::class.java).apply {
+                action = SignalKStreamingService.ACTION_STOP_STREAMING
+            }
+            context.startService(serviceIntent)
+            
+            // Unbind from service
+            if (bound) {
+                context.unbindService(serviceConnection)
+                bound = false
             }
         }
-    }
-    
-    fun stopStreaming() {
-        viewModelScope.launch {
-            locationService.stopLocationUpdates()
-            signalKTransmitter.stopStreaming()
-            _uiState.update { it.copy(isStreaming = false) }
-        }
+        currentContext = null
     }
     
     fun login(username: String, password: String) {
@@ -209,6 +245,19 @@ class MainViewModel @Inject constructor(
     fun logout() {
         viewModelScope.launch {
             authenticationService.logout()
+        }
+    }
+    
+    fun getAvailableSensors(): Map<String, Boolean> {
+        return sensorService.getAvailableSensors()
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        // Unbind service when ViewModel is cleared
+        if (bound && currentContext != null) {
+            currentContext!!.unbindService(serviceConnection)
+            bound = false
         }
     }
 }

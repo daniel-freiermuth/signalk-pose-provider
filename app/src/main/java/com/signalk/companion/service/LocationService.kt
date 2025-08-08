@@ -3,6 +3,7 @@ package com.signalk.companion.service
 import android.content.Context
 import android.location.Location
 import android.os.Looper
+import android.util.Log
 import com.google.android.gms.location.*
 import com.signalk.companion.data.model.LocationData
 import kotlinx.coroutines.channels.awaitClose
@@ -18,24 +19,53 @@ class LocationService @Inject constructor() {
     
     private var fusedLocationClient: FusedLocationProviderClient? = null
     private var locationCallback: LocationCallback? = null
+    private var lastLocationTime = 0L
     
     private val _locationUpdates = MutableStateFlow<LocationData?>(null)
     val locationUpdates: StateFlow<LocationData?> = _locationUpdates
     
+    companion object {
+        private const val TAG = "LocationService"
+    }
+    
     @Throws(SecurityException::class)
-    suspend fun startLocationUpdates(context: Context) {
+    suspend fun startLocationUpdates(context: Context, updateIntervalMs: Long = 1000L) {
+        Log.d(TAG, "Starting location updates with interval: ${updateIntervalMs}ms")
+        lastLocationTime = 0L // Reset for accurate interval logging
+        
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
         
+        // Use more aggressive priority for fast updates
+        val priority = if (updateIntervalMs <= 1000L) {
+            Priority.PRIORITY_HIGH_ACCURACY
+        } else {
+            Priority.PRIORITY_BALANCED_POWER_ACCURACY
+        }
+        
         val locationRequest = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY,
-            1000L // 1 second intervals
+            priority,
+            updateIntervalMs
         ).apply {
-            setMinUpdateIntervalMillis(500L) // Minimum 0.5 seconds
-            setMaxUpdateDelayMillis(2000L) // Maximum 2 seconds delay
+            setMinUpdateIntervalMillis(updateIntervalMs / 2) // Minimum half the update interval
+            setMaxUpdateDelayMillis(updateIntervalMs * 2) // Maximum twice the update interval
+            setWaitForAccurateLocation(false) // Don't wait for high accuracy
+            setMaxUpdateAgeMillis(updateIntervalMs / 2) // Age limit for cached locations
         }.build()
+        
+        Log.d(TAG, "LocationRequest configured with:")
+        Log.d(TAG, "  - Priority: $priority")
+        Log.d(TAG, "  - Update interval: ${updateIntervalMs}ms")
+        Log.d(TAG, "  - Min update interval: ${updateIntervalMs / 2}ms")
+        Log.d(TAG, "  - Max update delay: ${updateIntervalMs * 2}ms")
         
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
+                val currentTime = System.currentTimeMillis()
+                val actualInterval = if (lastLocationTime > 0) currentTime - lastLocationTime else 0
+                lastLocationTime = currentTime
+                
+                Log.d(TAG, "Location update received. Actual interval: ${actualInterval}ms (configured: ${updateIntervalMs}ms)")
+                
                 locationResult.lastLocation?.let { location ->
                     val locationData = LocationData(
                         latitude = location.latitude,
@@ -67,14 +97,28 @@ class LocationService @Inject constructor() {
             locationCallback!!,
             Looper.getMainLooper()
         )
+        
+        Log.d(TAG, "Location updates started successfully")
     }
     
     fun stopLocationUpdates() {
+        Log.d(TAG, "Stopping location updates")
         locationCallback?.let { callback ->
             fusedLocationClient?.removeLocationUpdates(callback)
         }
         locationCallback = null
         fusedLocationClient = null
         _locationUpdates.value = null
+    }
+    
+    @Throws(SecurityException::class)
+    suspend fun updateLocationRate(context: Context, updateIntervalMs: Long) {
+        Log.d(TAG, "Updating location rate to ${updateIntervalMs}ms")
+        if (fusedLocationClient != null && locationCallback != null) {
+            // Stop current updates
+            stopLocationUpdates()
+            // Restart with new rate
+            startLocationUpdates(context, updateIntervalMs)
+        }
     }
 }

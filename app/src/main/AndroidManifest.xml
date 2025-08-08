@@ -42,7 +42,7 @@
         </activity>
         
         <service
-            android:name=".service.SignalKBackgroundService"
+            android:name=".service.SignalKStreamingService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="location" />

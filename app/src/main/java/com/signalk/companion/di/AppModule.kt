@@ -1,11 +1,14 @@
 package com.signalk.companion.di
 
+import android.content.Context
 import com.signalk.companion.service.AuthenticationService
 import com.signalk.companion.service.LocationService
+import com.signalk.companion.service.SensorService
 import com.signalk.companion.service.SignalKTransmitter
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
@@ -23,6 +26,12 @@ object AppModule {
     @Singleton
     fun provideLocationService(): LocationService {
         return LocationService()
+    }
+    
+    @Provides
+    @Singleton
+    fun provideSensorService(@ApplicationContext context: Context): SensorService {
+        return SensorService(context)
     }
     
     @Provides

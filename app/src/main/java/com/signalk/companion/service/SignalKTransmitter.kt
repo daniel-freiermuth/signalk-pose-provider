@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import okhttp3.*
 import java.io.OutputStreamWriter
 import java.net.DatagramPacket
@@ -394,32 +396,119 @@ class SignalKTransmitter @Inject constructor(
         
         val values = mutableListOf<SignalKValue>()
         
-        // Atmospheric pressure
-        sensorData.pressure?.let { pressure ->
-            values.add(
-                SignalKValue(
-                    path = "environment.outside.pressure",
-                    value = SignalKValues.number((pressure * 100).toDouble()) // Convert hPa to Pa
-                )
-            )
-        }
-        
-        // Magnetic heading
+        // Navigation orientation data
         sensorData.magneticHeading?.let { heading ->
             values.add(
                 SignalKValue(
                     path = "navigation.headingMagnetic",
-                    value = SignalKValues.number(Math.toRadians(heading.toDouble()))
+                    value = SignalKValues.number(heading.toDouble()) // Already in radians
                 )
             )
         }
         
-        // True heading
         sensorData.trueHeading?.let { heading ->
             values.add(
                 SignalKValue(
-                    path = "navigation.headingTrue",
-                    value = SignalKValues.number(Math.toRadians(heading.toDouble()))
+                    path = "navigation.headingTrue", 
+                    value = SignalKValues.number(heading.toDouble()) // Already in radians
+                )
+            )
+        }
+        
+        sensorData.courseOverGround?.let { course ->
+            values.add(
+                SignalKValue(
+                    path = "navigation.courseOverGroundTrue",
+                    value = SignalKValues.number(course.toDouble()) // Already in radians
+                )
+            )
+        }
+        
+        sensorData.speedOverGround?.let { speed ->
+            values.add(
+                SignalKValue(
+                    path = "navigation.speedOverGround",
+                    value = SignalKValues.number(speed.toDouble()) // Already in m/s
+                )
+            )
+        }
+        
+        // Device attitude (roll, pitch, yaw)
+        if (sensorData.roll != null || sensorData.pitch != null || sensorData.yaw != null) {
+            val attitude = buildJsonObject {
+                sensorData.roll?.let { put("roll", JsonPrimitive(it.toDouble())) }
+                sensorData.pitch?.let { put("pitch", JsonPrimitive(it.toDouble())) }
+                sensorData.yaw?.let { put("yaw", JsonPrimitive(it.toDouble())) }
+            }
+            values.add(
+                SignalKValue(
+                    path = "navigation.attitude",
+                    value = attitude
+                )
+            )
+        }
+        
+        sensorData.rateOfTurn?.let { rate ->
+            values.add(
+                SignalKValue(
+                    path = "navigation.rateOfTurn",
+                    value = SignalKValues.number(rate.toDouble()) // Already in rad/s
+                )
+            )
+        }
+        
+        // Environmental sensors
+        sensorData.pressure?.let { pressure ->
+            values.add(
+                SignalKValue(
+                    path = "environment.outside.pressure",
+                    value = SignalKValues.number(pressure.toDouble()) // Already in Pa
+                )
+            )
+        }
+        
+        sensorData.temperature?.let { temperature ->
+            values.add(
+                SignalKValue(
+                    path = "environment.outside.temperature",
+                    value = SignalKValues.number(temperature.toDouble()) // Already in K
+                )
+            )
+        }
+        
+        sensorData.relativeHumidity?.let { humidity ->
+            values.add(
+                SignalKValue(
+                    path = "environment.outside.relativeHumidity",
+                    value = SignalKValues.number(humidity.toDouble()) // Already as ratio
+                )
+            )
+        }
+        
+        sensorData.illuminance?.let { illuminance ->
+            values.add(
+                SignalKValue(
+                    path = "environment.outside.illuminance",
+                    value = SignalKValues.number(illuminance.toDouble()) // Already in Lux
+                )
+            )
+        }
+        
+        // Device electrical information
+        sensorData.batteryLevel?.let { level ->
+            values.add(
+                SignalKValue(
+                    path = "electrical.batteries.phone.capacity.stateOfCharge",
+                    value = SignalKValues.number(level.toDouble()) // Already as ratio
+                )
+            )
+        }
+        
+        sensorData.batteryVoltage?.let { voltage ->
+            values.add(
+                SignalKValue(
+                    path = "electrical.batteries.phone.voltage",
+                    value = SignalKValues.number(voltage.toDouble()) // Already in V
                 )
             )
         }

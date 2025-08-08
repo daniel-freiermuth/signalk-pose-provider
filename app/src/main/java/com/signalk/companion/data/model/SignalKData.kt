@@ -62,10 +62,27 @@ data class LocationData(
 
 @Serializable
 data class SensorData(
-    val magneticHeading: Float? = null,
-    val trueHeading: Float? = null,
-    val courseOverGround: Float? = null,
-    val speedOverGround: Float? = null,
-    val pressure: Float? = null,
+    // Navigation orientation data
+    val magneticHeading: Float? = null,        // radians, from magnetometer
+    val trueHeading: Float? = null,           // radians, magnetic + declination
+    val courseOverGround: Float? = null,      // radians, from GPS
+    val speedOverGround: Float? = null,       // m/s, from GPS
+    
+    // Device attitude (roll, pitch, yaw in radians)
+    val roll: Float? = null,                  // radians, device roll
+    val pitch: Float? = null,                 // radians, device pitch  
+    val yaw: Float? = null,                   // radians, device yaw
+    val rateOfTurn: Float? = null,            // rad/s, from gyroscope
+    
+    // Environmental sensors
+    val pressure: Float? = null,              // Pa, barometric pressure
+    val temperature: Float? = null,           // K, ambient temperature
+    val relativeHumidity: Float? = null,      // ratio (0-1), humidity
+    val illuminance: Float? = null,           // Lux, ambient light
+    
+    // Device info
+    val batteryLevel: Float? = null,          // ratio (0-1), battery state of charge
+    val batteryVoltage: Float? = null,        // V, estimated battery voltage
+    
     val timestamp: Long = System.currentTimeMillis()
 )

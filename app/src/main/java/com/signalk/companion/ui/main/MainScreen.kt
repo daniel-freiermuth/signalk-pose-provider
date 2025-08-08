@@ -95,6 +95,14 @@ fun MainScreen(
                 permissionsGranted = permissionsState.allPermissionsGranted
             )
             
+            // Update Rate Configuration Card
+            UpdateRateCard(
+                locationUpdateRate = uiState.locationUpdateRate,
+                sensorUpdateRate = uiState.sensorUpdateRate,
+                onLocationRateChange = viewModel::updateLocationUpdateRate,
+                onSensorRateChange = viewModel::updateSensorUpdateRate
+            )
+            
             // Error Card
             uiState.error?.let { error ->
                 ErrorCard(
@@ -102,6 +110,9 @@ fun MainScreen(
                     onDismiss = { /* Could add a dismiss function to ViewModel */ }
                 )
             }
+            
+            // Sensor Availability Card
+            SensorAvailabilityCard(viewModel = viewModel)
             
             // Sensor Data Card
             SensorDataCard(
@@ -274,24 +285,130 @@ fun SensorDataCard(
                 fontWeight = FontWeight.Bold
             )
             
+            // Location/GPS Data Section
             locationData?.let { location ->
+                Text(
+                    text = "GPS Navigation",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
                 SensorDataRow("Latitude", "${location.latitude}")
                 SensorDataRow("Longitude", "${location.longitude}")
-                SensorDataRow("Speed", "${String.format("%.2f", location.speed)} m/s")
-                SensorDataRow("Bearing", "${String.format("%.1f", location.bearing)}°")
-                SensorDataRow("Accuracy", "${String.format("%.1f", location.accuracy)} m")
+                SensorDataRow("Speed over Ground", "${String.format("%.2f", location.speed)} m/s")
+                SensorDataRow("GPS Bearing", "${String.format("%.1f", location.bearing)}°")
+                SensorDataRow("GPS Accuracy", "${String.format("%.1f", location.accuracy)} m")
+                
+                location.altitude.let { alt ->
+                    SensorDataRow("Altitude", "${String.format("%.1f", alt)} m")
+                }
+                
+                location.satellites?.let { sats ->
+                    SensorDataRow("Satellites", "$sats")
+                }
+                
+                Divider(modifier = Modifier.padding(vertical = 4.dp))
             } ?: run {
                 Text(
-                    text = "No location data",
+                    text = "No GPS data available",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Divider(modifier = Modifier.padding(vertical = 4.dp))
             }
             
+            // Device Sensors Section
             sensorData?.let { sensor ->
-                sensor.pressure?.let { pressure ->
-                    SensorDataRow("Pressure", "${String.format("%.2f", pressure)} hPa")
+                var hasOrientationData = false
+                var hasEnvironmentalData = false
+                var hasDeviceData = false
+                
+                // Navigation/Orientation Data
+                if (sensor.magneticHeading != null || sensor.trueHeading != null || 
+                    sensor.roll != null || sensor.pitch != null || sensor.yaw != null || 
+                    sensor.rateOfTurn != null) {
+                    hasOrientationData = true
+                    Text(
+                        text = "Device Orientation",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    sensor.magneticHeading?.let { heading ->
+                        SensorDataRow("Magnetic Heading", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")
+                    }
+                    sensor.trueHeading?.let { heading ->
+                        SensorDataRow("True Heading", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")
+                    }
+                    sensor.roll?.let { roll ->
+                        SensorDataRow("Roll", "${String.format("%.1f", Math.toDegrees(roll.toDouble()))}°")
+                    }
+                    sensor.pitch?.let { pitch ->
+                        SensorDataRow("Pitch", "${String.format("%.1f", Math.toDegrees(pitch.toDouble()))}°")
+                    }
+                    sensor.yaw?.let { yaw ->
+                        SensorDataRow("Yaw", "${String.format("%.1f", Math.toDegrees(yaw.toDouble()))}°")
+                    }
+                    sensor.rateOfTurn?.let { rate ->
+                        SensorDataRow("Rate of Turn", "${String.format("%.2f", Math.toDegrees(rate.toDouble()))}°/s")
+                    }
                 }
+                
+                // Environmental Data
+                if (sensor.pressure != null || sensor.temperature != null || 
+                    sensor.relativeHumidity != null || sensor.illuminance != null) {
+                    if (hasOrientationData) Divider(modifier = Modifier.padding(vertical = 4.dp))
+                    hasEnvironmentalData = true
+                    Text(
+                        text = "Environmental",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    sensor.pressure?.let { pressure ->
+                        SensorDataRow("Barometric Pressure", "${String.format("%.2f", pressure / 100)} hPa")
+                    }
+                    sensor.temperature?.let { temp ->
+                        SensorDataRow("Temperature", "${String.format("%.1f", temp - 273.15)}°C")
+                    }
+                    sensor.relativeHumidity?.let { humidity ->
+                        SensorDataRow("Humidity", "${String.format("%.1f", humidity * 100)}%")
+                    }
+                    sensor.illuminance?.let { light ->
+                        SensorDataRow("Light Level", "${String.format("%.0f", light)} Lux")
+                    }
+                }
+                
+                // Device/Battery Data
+                if (sensor.batteryLevel != null || sensor.batteryVoltage != null) {
+                    if (hasOrientationData || hasEnvironmentalData) Divider(modifier = Modifier.padding(vertical = 4.dp))
+                    hasDeviceData = true
+                    Text(
+                        text = "Device Status",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    sensor.batteryLevel?.let { level ->
+                        SensorDataRow("Battery Level", "${String.format("%.0f", level * 100)}%")
+                    }
+                    sensor.batteryVoltage?.let { voltage ->
+                        SensorDataRow("Battery Voltage", "${String.format("%.2f", voltage)} V")
+                    }
+                }
+                
+                if (!hasOrientationData && !hasEnvironmentalData && !hasDeviceData) {
+                    Text(
+                        text = "No device sensors available or active",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } ?: run {
+                Text(
+                    text = "Device sensors initializing...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -568,5 +685,277 @@ fun AuthenticationCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun SensorAvailabilityCard(viewModel: MainViewModel) {
+    val availableSensors = remember { viewModel.getAvailableSensors() }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Device Sensors",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Text(
+                text = "Available sensors on this device:",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            // Create rows for sensor availability
+            val sensorDisplayNames = mapOf(
+                "magnetometer" to "Magnetometer (Compass)",
+                "accelerometer" to "Accelerometer (Tilt)",
+                "gyroscope" to "Gyroscope (Rotation)",
+                "pressure" to "Barometric Pressure",
+                "temperature" to "Ambient Temperature",
+                "humidity" to "Relative Humidity",
+                "light" to "Light Sensor"
+            )
+            
+            sensorDisplayNames.forEach { (key, displayName) ->
+                SensorAvailabilityRow(
+                    sensorName = displayName,
+                    isAvailable = availableSensors[key] ?: false
+                )
+            }
+            
+            if (availableSensors.values.any { it }) {
+                Text(
+                    text = "✓ Available sensors will be included in SignalK data stream",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Text(
+                    text = "⚠ No device sensors detected - only GPS data will be transmitted",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SensorAvailabilityRow(sensorName: String, isAvailable: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = sensorName,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = if (isAvailable) "✓ Available" else "✗ Not Available",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isAvailable) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun UpdateRateCard(
+    locationUpdateRate: UpdateRate,
+    sensorUpdateRate: UpdateRate,
+    onLocationRateChange: (UpdateRate) -> Unit,
+    onSensorRateChange: (UpdateRate) -> Unit
+) {
+    var locationDropdownExpanded by remember { mutableStateOf(false) }
+    var sensorDropdownExpanded by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Update Rate Configuration",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Text(
+                text = "Configure how frequently location and sensor data is collected and transmitted. Lower rates save battery but provide less frequent updates.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            // Location Update Rate
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Location Update Rate",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                
+                ExposedDropdownMenuBox(
+                    expanded = locationDropdownExpanded,
+                    onExpandedChange = { locationDropdownExpanded = !locationDropdownExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = "${locationUpdateRate.displayName} (${locationUpdateRate.description})",
+                        onValueChange = { },
+                        readOnly = true,
+                        label = { Text("Location Rate") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(
+                                expanded = locationDropdownExpanded
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                    )
+                    
+                    ExposedDropdownMenu(
+                        expanded = locationDropdownExpanded,
+                        onDismissRequest = { locationDropdownExpanded = false }
+                    ) {
+                        UpdateRate.values().forEach { rate ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = rate.displayName,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        Text(
+                                            text = rate.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    onLocationRateChange(rate)
+                                    locationDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Sensor Update Rate
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Sensor Update Rate",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                
+                ExposedDropdownMenuBox(
+                    expanded = sensorDropdownExpanded,
+                    onExpandedChange = { sensorDropdownExpanded = !sensorDropdownExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = "${sensorUpdateRate.displayName} (${sensorUpdateRate.description})",
+                        onValueChange = { },
+                        readOnly = true,
+                        label = { Text("Sensor Rate") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(
+                                expanded = sensorDropdownExpanded
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                    )
+                    
+                    ExposedDropdownMenu(
+                        expanded = sensorDropdownExpanded,
+                        onDismissRequest = { sensorDropdownExpanded = false }
+                    ) {
+                        UpdateRate.values().forEach { rate ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = rate.displayName,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        Text(
+                                            text = rate.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    onSensorRateChange(rate)
+                                    sensorDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Battery Impact Indicator
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "🔋",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "Battery Impact: ${getBatteryImpact(locationUpdateRate, sensorUpdateRate)}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Text(
+                        text = "Current configuration will update location every ${locationUpdateRate.intervalMs / 1000}s and sensors every ${sensorUpdateRate.intervalMs / 1000}s",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun getBatteryImpact(locationRate: UpdateRate, sensorRate: UpdateRate): String {
+    val combinedScore = (locationRate.ordinal + sensorRate.ordinal) / 2.0
+    return when {
+        combinedScore < 0.5 -> "Very High"
+        combinedScore < 1.5 -> "High"
+        combinedScore < 2.5 -> "Medium"
+        else -> "Low"
     }
 }
