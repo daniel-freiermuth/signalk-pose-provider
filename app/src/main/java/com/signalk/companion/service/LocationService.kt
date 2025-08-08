@@ -29,27 +29,23 @@ class LocationService @Inject constructor() {
     }
     
     @Throws(SecurityException::class)
-    suspend fun startLocationUpdates(context: Context, updateIntervalMs: Long = 1000L) {
+    suspend fun startLocationUpdates(context: Context, updateIntervalMs: Long = 500L) {  // Faster default
         Log.d(TAG, "Starting location updates with interval: ${updateIntervalMs}ms")
         lastLocationTime = 0L // Reset for accurate interval logging
         
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
         
-        // Use more aggressive priority for fast updates
-        val priority = if (updateIntervalMs <= 1000L) {
-            Priority.PRIORITY_HIGH_ACCURACY
-        } else {
-            Priority.PRIORITY_BALANCED_POWER_ACCURACY
-        }
+        // Always use highest accuracy for marine navigation
+        val priority = Priority.PRIORITY_HIGH_ACCURACY
         
         val locationRequest = LocationRequest.Builder(
             priority,
             updateIntervalMs
         ).apply {
-            setMinUpdateIntervalMillis(updateIntervalMs / 2) // Minimum half the update interval
-            setMaxUpdateDelayMillis(updateIntervalMs * 2) // Maximum twice the update interval
+            setMinUpdateIntervalMillis(100L) // Much faster minimum (100ms)
+            setMaxUpdateDelayMillis(updateIntervalMs) // Tighter delay control  
             setWaitForAccurateLocation(false) // Don't wait for high accuracy
-            setMaxUpdateAgeMillis(updateIntervalMs / 2) // Age limit for cached locations
+            setMaxUpdateAgeMillis(200L) // Very fresh data only
         }.build()
         
         Log.d(TAG, "LocationRequest configured with:")
