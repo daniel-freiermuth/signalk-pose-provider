@@ -84,8 +84,7 @@ class SignalKTransmitterTest {
         
         val message = SignalKMessage(
             context = "vessels.self",
-            updates = listOf(update),
-            token = null
+            updates = listOf(update)
         )
         
         val json = Json { prettyPrint = true }.encodeToString(message)

@@ -10,10 +10,7 @@ data class LoginRequest(
 
 @Serializable
 data class LoginResponse(
-    val token: String,                    // JWT token (required)
-    val timeToLive: Long? = null,        // Token validity in seconds (optional)
-    val expires: Long? = null,           // Alternative field name for token expiry (optional)
-    val expiresIn: Long? = null          // Another alternative field name (optional)
+    val token: String                    // JWT token (required)
 )
 
 @Serializable
@@ -62,8 +59,8 @@ data class LogoutResponse(
 data class AuthState(
     val isAuthenticated: Boolean = false,
     val token: String? = null,
-    val tokenExpiry: Long? = null,    // Timestamp when token expires
     val username: String? = null,
+    val password: String? = null,     // Stored temporarily in memory for re-authentication
     val serverUrl: String? = null,
     val isLoading: Boolean = false,
     val error: String? = null

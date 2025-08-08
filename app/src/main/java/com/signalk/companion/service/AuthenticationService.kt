@@ -61,13 +61,12 @@ class AuthenticationService @Inject constructor() {
                 when (responseCode) {
                     200 -> {
                         val loginResponse = json.decodeFromString<LoginResponse>(responseBody)
-                        val tokenExpiry = System.currentTimeMillis() + ((loginResponse.timeToLive ?: 3600) * 1000)
                         
                         _authState.value = _authState.value.copy(
                             isAuthenticated = true,
                             token = loginResponse.token,
-                            tokenExpiry = tokenExpiry,
                             username = username,
+                            password = password,  // Store temporarily for re-authentication
                             serverUrl = serverUrl,
                             isLoading = false,
                             error = null
@@ -170,63 +169,36 @@ class AuthenticationService @Inject constructor() {
         }
     }
     
-    suspend fun validateToken(): Result<String> {
+    fun getAuthToken(): String? {
+        return _authState.value.token
+    }
+    
+    suspend fun tryRefreshToken(): Result<String?> {
         return try {
             val currentState = _authState.value
-            val serverUrl = currentState.serverUrl
-            val token = currentState.token
             
-            if (serverUrl == null || token == null) {
-                return Result.failure(Exception("No token to validate"))
-            }
-            
-            withContext(Dispatchers.IO) {
-                val validateUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/validate"
-                val url = URL(validateUrl)
-                val connection = url.openConnection() as HttpURLConnection
+            // Since this server doesn't support token refresh/validation,
+            // we'll attempt to re-authenticate with stored credentials to get a fresh token
+            if (currentState.isAuthenticated && 
+                currentState.serverUrl != null && 
+                currentState.username != null &&
+                currentState.password != null) {
                 
-                connection.apply {
-                    requestMethod = "POST"
-                    setRequestProperty("Authorization", "Bearer $token")
-                    setRequestProperty("Content-Type", "application/json")
-                    connectTimeout = 5000
-                    readTimeout = 5000
+                // Re-login using stored credentials
+                val loginResult = login(currentState.serverUrl, currentState.username, currentState.password)
+                if (loginResult.isSuccess) {
+                    // Login successful, return the new token
+                    Result.success(_authState.value.token)
+                } else {
+                    // Login failed, return null to indicate re-authentication needed
+                    Result.success(null)
                 }
-                
-                val responseCode = connection.responseCode
-                
-                when (responseCode) {
-                    200 -> {
-                        val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-                        // For HTTP validation, we might get a new token in response
-                        // For now, we'll assume the current token is still valid
-                        Result.success(token)
-                    }
-                    401 -> {
-                        // Token is invalid, clear auth state
-                        _authState.value = AuthState()
-                        Result.failure(Exception("Token expired"))
-                    }
-                    else -> {
-                        Result.failure(Exception("Token validation failed: $responseCode"))
-                    }
-                }
+            } else {
+                // No stored credentials available, manual re-authentication required
+                Result.success(null)
             }
         } catch (e: Exception) {
             Result.failure(e)
-        }
-    }
-    
-    fun isTokenExpired(): Boolean {
-        val expiry = _authState.value.tokenExpiry ?: return true
-        return System.currentTimeMillis() >= expiry - 60000 // Expire 1 minute early for safety
-    }
-    
-    fun getAuthToken(): String? {
-        return if (isTokenExpired()) {
-            null
-        } else {
-            _authState.value.token
         }
     }
     

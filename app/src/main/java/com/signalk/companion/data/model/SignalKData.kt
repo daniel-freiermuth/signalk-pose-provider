@@ -9,8 +9,7 @@ import kotlinx.serialization.json.buildJsonObject
 @Serializable
 data class SignalKMessage(
     val context: String,
-    val updates: List<SignalKUpdate>,
-    val token: String? = null  // JWT token for authentication
+    val updates: List<SignalKUpdate>
 )
 
 @Serializable

@@ -42,8 +42,7 @@ fun main() {
     
     val message = SignalKMessage(
         context = "vessels.self",
-        updates = listOf(update),
-        token = null  // For WebSocket
+        updates = listOf(update)
     )
     
     val json = Json { prettyPrint = true }.encodeToString(message)

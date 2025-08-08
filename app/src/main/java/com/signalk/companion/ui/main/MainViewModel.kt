@@ -176,6 +176,15 @@ class MainViewModel @Inject constructor(
             }
         }
         
+        // Observe authentication errors from SignalK transmitter
+        viewModelScope.launch {
+            signalKTransmitter.authenticationError.collect { authError ->
+                if (authError != null) {
+                    _uiState.update { it.copy(error = authError) }
+                }
+            }
+        }
+        
         // Observe authentication state
         viewModelScope.launch {
             authenticationService.authState.collect { authState ->
@@ -290,6 +299,10 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             authenticationService.logout()
         }
+    }
+    
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
     }
     
     fun getAvailableSensors(): Map<String, Boolean> {

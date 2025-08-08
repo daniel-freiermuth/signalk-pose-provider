@@ -44,6 +44,9 @@ class SignalKTransmitter @Inject constructor(
     private val _connectionStatus = MutableStateFlow(false)
     val connectionStatus: StateFlow<Boolean> = _connectionStatus
     
+    private val _authenticationError = MutableStateFlow<String?>(null)
+    val authenticationError: StateFlow<String?> = _authenticationError
+    
     private val _lastSentMessage = MutableStateFlow<String?>(null)
     val lastSentMessage: StateFlow<String?> = _lastSentMessage
     
@@ -262,6 +265,11 @@ class SignalKTransmitter @Inject constructor(
         }
     }
     
+    // Clear authentication error - can be called from UI after user acknowledges the error
+    fun clearAuthenticationError() {
+        _authenticationError.value = null
+    }
+    
     suspend fun sendLocationData(locationData: LocationData) {
         val signalKMessage = createLocationMessage(locationData)
         sendMessage(signalKMessage)
@@ -380,10 +388,7 @@ class SignalKTransmitter @Inject constructor(
         
         return SignalKMessage(
             context = "vessels.self",
-            updates = listOf(update),
-            token = if (transmissionProtocol == TransmissionProtocol.UDP) {
-                authenticationService.getAuthToken()
-            } else null  // For WebSocket, token goes in connection headers
+            updates = listOf(update)
         )
     }
     
@@ -515,10 +520,7 @@ class SignalKTransmitter @Inject constructor(
         
         if (values.isEmpty()) return SignalKMessage(
             context = "vessels.self", 
-            updates = emptyList(),
-            token = if (transmissionProtocol == TransmissionProtocol.UDP) {
-                authenticationService.getAuthToken()
-            } else null  // For WebSocket, token goes in connection headers
+            updates = emptyList()
         )
         
         val update = SignalKUpdate(
@@ -529,10 +531,7 @@ class SignalKTransmitter @Inject constructor(
         
         return SignalKMessage(
             context = "vessels.self",
-            updates = listOf(update),
-            token = if (transmissionProtocol == TransmissionProtocol.UDP) {
-                authenticationService.getAuthToken()
-            } else null  // For WebSocket, token goes in connection headers
+            updates = listOf(update)
         )
     }
     
@@ -621,6 +620,45 @@ class SignalKTransmitter @Inject constructor(
                     _connectionStatus.value = false
                     println("WebSocket error: ${t.message}")
                     t.printStackTrace()
+                    
+                    // Check if this is an authentication failure
+                    response?.let { resp ->
+                        if (resp.code == 401 || resp.code == 403) {
+                            val errorMsg = "Authentication failed (${resp.code}): Token may be expired or invalid"
+                            println(errorMsg)
+                            _authenticationError.value = errorMsg
+                            
+                            // Launch coroutine to handle token renewal and reconnection
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    println("Attempting automatic token renewal...")
+                                    val result = authenticationService.tryRefreshToken()
+                                    if (result.isSuccess && result.getOrNull() != null) {
+                                        println("Token renewed successfully, attempting to reconnect...")
+                                        _authenticationError.value = null // Clear error
+                                        // Token was refreshed, attempt to reconnect
+                                        delay(1000) // Brief delay before reconnection
+                                        initializeWebSocket()
+                                    } else {
+                                        val failureMsg = "Automatic token renewal failed - manual re-authentication required"
+                                        println(failureMsg)
+                                        _authenticationError.value = failureMsg
+                                    }
+                                } catch (e: Exception) {
+                                    val renewalError = "Error during token renewal: ${e.message}"
+                                    println(renewalError)
+                                    _authenticationError.value = renewalError
+                                    e.printStackTrace()
+                                }
+                            }
+                        } else {
+                            // Non-authentication error, could be network issue
+                            _authenticationError.value = null
+                        }
+                    } ?: run {
+                        // No response means likely network error
+                        _authenticationError.value = null
+                    }
                 }
             }
             
