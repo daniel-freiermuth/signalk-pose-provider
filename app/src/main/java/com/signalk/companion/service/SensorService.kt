@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.util.Log
 import com.signalk.companion.data.model.SensorData
+import com.signalk.companion.ui.main.DeviceOrientation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,6 +47,11 @@ class SensorService @Inject constructor(
 
     // Filtering for smooth data
     private val alpha = 0.8f  // Low-pass filter constant
+    
+    // Marine navigation configuration
+    private var deviceOrientation = DeviceOrientation.LANDSCAPE_LEFT
+    private var tiltCorrectionEnabled = true
+    private var headingOffsetDegrees = 0.0f // Correction for device mounting angle
     
     // Current sensor delay setting and rate limiting
     private var currentSensorDelay = SensorManager.SENSOR_DELAY_UI
@@ -106,6 +112,21 @@ class SensorService @Inject constructor(
         sensorManager.unregisterListener(this)
         // Restart with new rate
         startSensorUpdates(updateIntervalMs)
+    }
+
+    fun setDeviceOrientation(orientation: DeviceOrientation) {
+        Log.d(TAG, "Setting device orientation to: ${orientation.displayName}")
+        this.deviceOrientation = orientation
+    }
+
+    fun setTiltCorrection(enabled: Boolean) {
+        Log.d(TAG, "Setting tilt correction to: $enabled")
+        this.tiltCorrectionEnabled = enabled
+    }
+
+    fun setHeadingOffset(offsetDegrees: Float) {
+        Log.d(TAG, "Setting heading offset to: ${offsetDegrees}°")
+        this.headingOffsetDegrees = offsetDegrees
     }
 
     fun stopSensorUpdates() {
@@ -171,15 +192,64 @@ class SensorService @Inject constructor(
 
     private fun updateOrientation() {
         if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, magneticField)) {
-            SensorManager.getOrientation(rotationMatrix, orientation)
             
-            // orientation[0] = azimuth (rotation around z-axis) - magnetic heading
-            // orientation[1] = pitch (rotation around x-axis)  
-            // orientation[2] = roll (rotation around y-axis)
+            // Apply device orientation compensation for marine mounting
+            val orientationMatrix = FloatArray(9)
+            when (deviceOrientation) {
+                DeviceOrientation.PORTRAIT -> {
+                    // No rotation needed - default phone orientation
+                    System.arraycopy(rotationMatrix, 0, orientationMatrix, 0, 9)
+                }
+                DeviceOrientation.LANDSCAPE_LEFT -> {
+                    // Phone rotated 90° counter-clockwise (left side toward bow)
+                    SensorManager.remapCoordinateSystem(
+                        rotationMatrix, 
+                        SensorManager.AXIS_Y, 
+                        SensorManager.AXIS_MINUS_X, 
+                        orientationMatrix
+                    )
+                }
+                DeviceOrientation.LANDSCAPE_RIGHT -> {
+                    // Phone rotated 90° clockwise (right side toward bow) 
+                    SensorManager.remapCoordinateSystem(
+                        rotationMatrix, 
+                        SensorManager.AXIS_MINUS_Y, 
+                        SensorManager.AXIS_X, 
+                        orientationMatrix
+                    )
+                }
+                DeviceOrientation.PORTRAIT_INVERTED -> {
+                    // Phone upside down (bottom toward bow)
+                    SensorManager.remapCoordinateSystem(
+                        rotationMatrix, 
+                        SensorManager.AXIS_MINUS_X, 
+                        SensorManager.AXIS_MINUS_Y, 
+                        orientationMatrix
+                    )
+                }
+            }
             
-            val magneticHeading = orientation[0]  // Already in radians
-            val pitch = orientation[1]           // Already in radians
-            val roll = orientation[2]            // Already in radians
+            // Get orientation values from the corrected matrix
+            SensorManager.getOrientation(orientationMatrix, orientation)
+            
+            var magneticHeading = orientation[0]  // Azimuth in radians
+            val pitch = orientation[1]           // Pitch in radians  
+            val roll = orientation[2]            // Roll in radians
+            
+            // Apply tilt compensation if enabled (improves accuracy when device is tilted)
+            if (tiltCorrectionEnabled) {
+                magneticHeading = applyTiltCompensation(magneticHeading, pitch, roll)
+            }
+            
+            // Apply heading offset correction for device mounting angle
+            magneticHeading = applyHeadingOffset(magneticHeading)
+            
+            // Normalize heading to 0-2π range
+            magneticHeading = normalizeHeading(magneticHeading)
+            
+            Log.d(TAG, "Magnetic heading: ${Math.toDegrees(magneticHeading.toDouble()).toFloat()}°, " +
+                      "pitch: ${Math.toDegrees(pitch.toDouble()).toFloat()}°, " +
+                      "roll: ${Math.toDegrees(roll.toDouble()).toFloat()}°")
             
             updateSensorData { 
                 copy(
@@ -189,6 +259,39 @@ class SensorService @Inject constructor(
                 ) 
             }
         }
+    }
+
+    private fun applyTiltCompensation(heading: Float, pitch: Float, roll: Float): Float {
+        // Tilt compensation algorithm for more accurate heading when device is tilted
+        // This is particularly important for boat-mounted devices that may not be perfectly level
+        
+        val cosPitch = cos(pitch)
+        val sinPitch = sin(pitch)
+        val cosRoll = cos(roll)
+        val sinRoll = sin(roll)
+        
+        // Calculate tilt-compensated heading
+        val cosHeading = cos(heading)
+        val sinHeading = sin(heading)
+        
+        // Apply tilt compensation matrix
+        val compensatedX = cosHeading * cosPitch + sinHeading * sinRoll * sinPitch
+        val compensatedY = sinHeading * cosRoll
+        
+        return atan2(compensatedY, compensatedX)
+    }
+
+    private fun normalizeHeading(heading: Float): Float {
+        var normalized = heading
+        while (normalized < 0) normalized += (2 * PI).toFloat()
+        while (normalized >= (2 * PI).toFloat()) normalized -= (2 * PI).toFloat()
+        return normalized
+    }
+
+    private fun applyHeadingOffset(heading: Float): Float {
+        // Convert offset from degrees to radians and apply correction
+        val offsetRadians = Math.toRadians(headingOffsetDegrees.toDouble()).toFloat()
+        return heading + offsetRadians
     }
 
     private fun updateGyroscopeData() {

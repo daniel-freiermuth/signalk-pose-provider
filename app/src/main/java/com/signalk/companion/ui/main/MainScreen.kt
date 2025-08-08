@@ -100,7 +100,17 @@ fun MainScreen(
                 locationUpdateRate = uiState.locationUpdateRate,
                 sensorUpdateRate = uiState.sensorUpdateRate,
                 onLocationRateChange = viewModel::updateLocationUpdateRate,
-                onSensorRateChange = viewModel::updateSensorUpdateRate
+                onSensorRateChange = viewModel::updateSensorRate
+            )
+            
+            // Marine Configuration Card
+            MarineConfigCard(
+                deviceOrientation = uiState.deviceOrientation,
+                compassTiltCorrection = uiState.compassTiltCorrection,
+                headingOffset = uiState.headingOffset,
+                onDeviceOrientationChange = viewModel::updateDeviceOrientation,
+                onTiltCorrectionChange = viewModel::updateCompassTiltCorrection,
+                onHeadingOffsetChange = viewModel::updateHeadingOffset
             )
             
             // Error Card
@@ -957,5 +967,262 @@ private fun getBatteryImpact(locationRate: UpdateRate, sensorRate: UpdateRate): 
         combinedScore < 1.5 -> "High"
         combinedScore < 2.5 -> "Medium"
         else -> "Low"
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MarineConfigCard(
+    deviceOrientation: DeviceOrientation,
+    compassTiltCorrection: Boolean,
+    headingOffset: Float,
+    onDeviceOrientationChange: (DeviceOrientation) -> Unit,
+    onTiltCorrectionChange: (Boolean) -> Unit,
+    onHeadingOffsetChange: (Float) -> Unit
+) {
+    var orientationDropdownExpanded by remember { mutableStateOf(false) }
+    var offsetText by remember { mutableStateOf(headingOffset.toString()) }
+    
+    // Update offset text when headingOffset changes externally
+    LaunchedEffect(headingOffset) {
+        offsetText = headingOffset.toString()
+    }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "⚓ Marine Configuration",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Text(
+                text = "Configure device orientation and compass settings for boat mounting",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            // Device Orientation Selection
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Device Orientation",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                
+                ExposedDropdownMenuBox(
+                    expanded = orientationDropdownExpanded,
+                    onExpandedChange = { orientationDropdownExpanded = !orientationDropdownExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = "${deviceOrientation.displayName} (${deviceOrientation.description})",
+                        onValueChange = { },
+                        readOnly = true,
+                        label = { Text("Mounting Orientation") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(
+                                expanded = orientationDropdownExpanded
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                    )
+                    
+                    ExposedDropdownMenu(
+                        expanded = orientationDropdownExpanded,
+                        onDismissRequest = { orientationDropdownExpanded = false }
+                    ) {
+                        DeviceOrientation.values().forEach { orientation ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = orientation.displayName,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        Text(
+                                            text = orientation.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    onDeviceOrientationChange(orientation)
+                                    orientationDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Compass Tilt Correction Toggle
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Compass Tilt Correction",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Compensate for boat heel and pitch",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = if (compassTiltCorrection) "✓ Enabled - More accurate heading when boat tilts" 
+                                  else "✗ Disabled - Basic compass reading only",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (compassTiltCorrection) MaterialTheme.colorScheme.primary 
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    
+                    Switch(
+                        checked = compassTiltCorrection,
+                        onCheckedChange = onTiltCorrectionChange
+                    )
+                }
+            }
+            
+            // Heading Offset Configuration
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Heading Offset Correction",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                
+                Text(
+                    text = "Correct for device mounting angle relative to boat centerline",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = offsetText,
+                        onValueChange = { 
+                            offsetText = it
+                            // Try to parse and update immediately
+                            it.toFloatOrNull()?.let { value ->
+                                if (value >= -180f && value <= 180f) {
+                                    onHeadingOffsetChange(value)
+                                }
+                            }
+                        },
+                        label = { Text("Offset (°)") },
+                        placeholder = { Text("0.0") },
+                        suffix = { Text("°") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    
+                    Text(
+                        text = "Range: -180° to +180°",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                // Quick preset buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val presets = listOf(-15f, -10f, -5f, 0f, 5f, 10f, 15f)
+                    presets.forEach { preset ->
+                        OutlinedButton(
+                            onClick = { 
+                                onHeadingOffsetChange(preset)
+                                offsetText = preset.toString()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = if (preset == 0f) "0°" else "${preset.toInt()}°",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Configuration Summary
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "🧭",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "Current Configuration",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    
+                    Text(
+                        text = "• Orientation: ${deviceOrientation.displayName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    
+                    Text(
+                        text = "• Tilt correction: ${if (compassTiltCorrection) "Enabled" else "Disabled"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    
+                    Text(
+                        text = "• Heading offset: ${if (headingOffset == 0f) "None" else "${headingOffset}°"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    
+                    if (headingOffset != 0f) {
+                        Text(
+                            text = "Example: Device shows 015°, boat heading = 015° ${if (headingOffset > 0) "+" else ""}${headingOffset}° = ${String.format("%.0f", (15 + headingOffset + 360) % 360)}°",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
     }
 }

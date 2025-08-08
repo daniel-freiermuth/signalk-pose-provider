@@ -49,7 +49,6 @@ data class MainUiState(
     val sensorUpdateRate: UpdateRate = UpdateRate.NORMAL,
     val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
     val compassTiltCorrection: Boolean = true,
-    val headingOffset: Float = 0.0f, // Heading correction in degrees (+/- for device mounting angle)
     val locationData: LocationData? = null,
     val sensorData: SensorData? = null,
     val error: String? = null,
@@ -154,7 +153,6 @@ class MainViewModel @Inject constructor(
         // Configure sensor service for boat mounting (landscape left by default)
         sensorService.setDeviceOrientation(DeviceOrientation.LANDSCAPE_LEFT)
         sensorService.setTiltCorrection(true)
-        sensorService.setHeadingOffset(0.0f) // No offset by default
         
         // Still observe location and sensor data for UI display (but not for transmission)
         viewModelScope.launch {
@@ -229,14 +227,6 @@ class MainViewModel @Inject constructor(
         sensorService.setTiltCorrection(enabled)
         // If streaming service is bound, update it too
         streamingService?.updateTiltCorrection(enabled)
-    }
-
-    fun updateHeadingOffset(offsetDegrees: Float) {
-        _uiState.update { it.copy(headingOffset = offsetDegrees) }
-        // Update sensor service with heading offset
-        sensorService.setHeadingOffset(offsetDegrees)
-        // If streaming service is bound, update it too
-        streamingService?.updateHeadingOffset(offsetDegrees)
     }
 
     fun startStreaming(context: android.content.Context) {

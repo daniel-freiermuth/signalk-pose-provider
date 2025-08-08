@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import com.signalk.companion.MainActivity
 import com.signalk.companion.R
 import com.signalk.companion.ui.main.UpdateRate
+import com.signalk.companion.ui.main.DeviceOrientation
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -214,6 +215,21 @@ class SignalKStreamingService : Service() {
         if (_isStreaming.value) {
             sensorService.updateSensorRate(rate.intervalMs.toInt())
         }
+    }
+
+    fun updateDeviceOrientation(orientation: DeviceOrientation) {
+        sensorService.setDeviceOrientation(orientation)
+        Log.d(TAG, "Updated device orientation to: ${orientation.displayName}")
+    }
+
+    fun updateTiltCorrection(enabled: Boolean) {
+        sensorService.setTiltCorrection(enabled)
+        Log.d(TAG, "Updated tilt correction to: $enabled")
+    }
+
+    fun updateHeadingOffset(offsetDegrees: Float) {
+        sensorService.setHeadingOffset(offsetDegrees)
+        Log.d(TAG, "Updated heading offset to: ${offsetDegrees}°")
     }
 
     private fun updateTransmissionStats() {
