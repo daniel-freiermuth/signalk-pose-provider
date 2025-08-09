@@ -63,28 +63,43 @@ class SensorService @Inject constructor(
     }
 
     fun startSensorUpdates(updateIntervalMs: Int = 1000) {
+        startSensorUpdates(updateIntervalMs, needsHeading = true, needsPressure = true)
+    }
+    
+    fun startSensorUpdates(updateIntervalMs: Int = 1000, needsHeading: Boolean = true, needsPressure: Boolean = true) {
         this.updateIntervalMs = updateIntervalMs
         currentSensorDelay = getSensorDelayFromInterval(updateIntervalMs)
         lastUpdateTime = 0L // Reset to force immediate first update
-        Log.d(TAG, "Starting sensor updates with interval ${updateIntervalMs}ms (delay: $currentSensorDelay)")
+        Log.d(TAG, "Starting sensor updates with interval ${updateIntervalMs}ms (delay: $currentSensorDelay, heading=$needsHeading, pressure=$needsPressure)")
         
-        // Register available sensors
-        magnetometer?.let { 
-            sensorManager.registerListener(this, it, currentSensorDelay)
-            Log.d(TAG, "Magnetometer registered")
+        // Register sensors based on what's needed
+        if (needsHeading) {
+            magnetometer?.let { 
+                sensorManager.registerListener(this, it, currentSensorDelay)
+                Log.d(TAG, "Magnetometer registered (needed for heading)")
+            }
+            accelerometer?.let { 
+                sensorManager.registerListener(this, it, currentSensorDelay)
+                Log.d(TAG, "Accelerometer registered (needed for heading)")
+            }
+            gyroscope?.let { 
+                sensorManager.registerListener(this, it, currentSensorDelay)
+                Log.d(TAG, "Gyroscope registered (needed for heading)")
+            }
+        } else {
+            Log.d(TAG, "Heading disabled - skipping magnetometer, accelerometer, gyroscope")
         }
-        accelerometer?.let { 
-            sensorManager.registerListener(this, it, currentSensorDelay)
-            Log.d(TAG, "Accelerometer registered")
+        
+        if (needsPressure) {
+            pressure?.let { 
+                sensorManager.registerListener(this, it, currentSensorDelay)
+                Log.d(TAG, "Pressure sensor registered")
+            }
+        } else {
+            Log.d(TAG, "Pressure disabled - skipping pressure sensor")
         }
-        gyroscope?.let { 
-            sensorManager.registerListener(this, it, currentSensorDelay)
-            Log.d(TAG, "Gyroscope registered")
-        }
-        pressure?.let { 
-            sensorManager.registerListener(this, it, currentSensorDelay)
-            Log.d(TAG, "Pressure sensor registered")
-        }
+        
+        // Always register temperature and humidity as they're not configurable yet
         temperature?.let { 
             sensorManager.registerListener(this, it, currentSensorDelay)
             Log.d(TAG, "Temperature sensor registered")

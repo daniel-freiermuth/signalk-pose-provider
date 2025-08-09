@@ -181,17 +181,25 @@ class SignalKStreamingService : Service() {
                 // Wait a moment for connection to establish
                 delay(1000)
                 
-                Log.d(TAG, "Starting location updates with rate: ${locationRate}ms")
-                // Start location updates
-                try {
-                    locationService.startLocationUpdates(this@SignalKStreamingService, locationRate)
-                } catch (e: SecurityException) {
-                    Log.e(TAG, "Location permission not granted", e)
+                // Conditionally start location updates only if location data is needed
+                if (sendLocation) {
+                    Log.d(TAG, "Starting location updates with rate: ${locationRate}ms")
+                    try {
+                        locationService.startLocationUpdates(this@SignalKStreamingService, locationRate)
+                    } catch (e: SecurityException) {
+                        Log.e(TAG, "Location permission not granted", e)
+                    }
+                } else {
+                    Log.d(TAG, "Location transmission disabled - skipping GPS activation")
                 }
                 
-                Log.d(TAG, "Starting sensor updates with rate: ${sensorRate}ms")
-                // Start sensor updates
-                sensorService.startSensorUpdates(sensorRate)
+                // Conditionally start sensor updates only if heading or pressure data is needed
+                if (sendHeading || sendPressure) {
+                    Log.d(TAG, "Starting sensor updates with rate: ${sensorRate}ms (heading=$sendHeading, pressure=$sendPressure)")
+                    sensorService.startSensorUpdates(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)
+                } else {
+                    Log.d(TAG, "All sensor transmission disabled - skipping sensor activation")
+                }
                 
                 _isStreaming.value = true
                 
