@@ -27,13 +27,6 @@ enum class TransmissionProtocol(val displayName: String, val description: String
     WEBSOCKET_SSL("WebSocket SSL", "Forces secure WSS streaming - encrypted, same as HTTPS login")
 }
 
-enum class UpdateRate(val displayName: String, val intervalMs: Long, val description: String) {
-    FAST("Fast (0.5s)", 500L, "2 Hz - High precision, more battery usage"),
-    NORMAL("Normal (1s)", 1000L, "1 Hz - Balanced performance and battery"),
-    SLOW("Slow (2s)", 2000L, "0.5 Hz - Battery efficient, lower precision"),
-    VERY_SLOW("Very Slow (5s)", 5000L, "0.2 Hz - Maximum battery life")
-}
-
 enum class DeviceOrientation(val displayName: String, val rotationDegrees: Int, val description: String) {
     PORTRAIT("Portrait", 0, "Phone held normally (top of phone = bow)"),
     LANDSCAPE_LEFT("Landscape Left", 90, "Phone rotated 90° CCW (left side = bow)"),
@@ -47,8 +40,6 @@ data class MainUiState(
     val serverUrl: String = "https://signalk.entrop.mywire.org",
     val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.UDP,
     val vesselId: String = "self",
-    val locationUpdateRate: UpdateRate = UpdateRate.NORMAL,
-    val sensorUpdateRate: UpdateRate = UpdateRate.NORMAL,
     val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
     val compassTiltCorrection: Boolean = true,
     val headingOffset: Float = 0.0f, // Heading correction in degrees (+/- for device mounting angle)
@@ -213,18 +204,6 @@ class MainViewModel @Inject constructor(
     fun updateTransmissionProtocol(protocol: TransmissionProtocol) {
         _uiState.update { it.copy(transmissionProtocol = protocol) }
     }
-    
-    fun updateLocationUpdateRate(rate: UpdateRate) {
-        _uiState.update { it.copy(locationUpdateRate = rate) }
-        // If currently streaming, update service rate
-        streamingService?.updateLocationRate(rate)
-    }
-
-    fun updateSensorRate(rate: UpdateRate) {
-        _uiState.update { it.copy(sensorUpdateRate = rate) }
-        // If currently streaming, update service rate
-        streamingService?.updateSensorRate(rate)
-    }
 
     fun updateDeviceOrientation(orientation: DeviceOrientation) {
         _uiState.update { it.copy(deviceOrientation = orientation) }
@@ -280,8 +259,8 @@ class MainViewModel @Inject constructor(
         val serviceIntent = Intent(context, SignalKStreamingService::class.java).apply {
             action = SignalKStreamingService.ACTION_START_STREAMING
             putExtra(SignalKStreamingService.EXTRA_SERVER_URL, currentState.serverUrl)
-            putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, currentState.locationUpdateRate.intervalMs)
-            putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, currentState.sensorUpdateRate.intervalMs.toInt())
+            putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Fixed 1-second interval
+            putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, 1000) // Fixed 1-second interval
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

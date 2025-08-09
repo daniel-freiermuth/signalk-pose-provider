@@ -14,7 +14,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.signalk.companion.MainActivity
 import com.signalk.companion.R
-import com.signalk.companion.ui.main.UpdateRate
 import com.signalk.companion.ui.main.DeviceOrientation
 import com.signalk.companion.util.BatteryOptimizationHelper
 import dagger.hilt.android.AndroidEntryPoint
@@ -204,24 +203,6 @@ class SignalKStreamingService : Service() {
             
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
-        }
-    }
-
-    fun updateLocationRate(rate: UpdateRate) {
-        if (_isStreaming.value) {
-            serviceScope.launch {
-                try {
-                    locationService.updateLocationRate(this@SignalKStreamingService, rate.intervalMs)
-                } catch (e: SecurityException) {
-                    Log.e(TAG, "Location permission not granted", e)
-                }
-            }
-        }
-    }
-
-    fun updateSensorRate(rate: UpdateRate) {
-        if (_isStreaming.value) {
-            sensorService.updateSensorRate(rate.intervalMs.toInt())
         }
     }
 
