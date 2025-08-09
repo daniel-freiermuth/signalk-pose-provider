@@ -57,6 +57,9 @@ class SensorService @Inject constructor(
     
     // Accumulated sensor readings for rate limiting
     private var pendingSensorUpdate = false
+    
+    // Track active state
+    private var isActive = false
 
     companion object {
         private const val TAG = "SensorService"
@@ -110,6 +113,7 @@ class SensorService @Inject constructor(
         }
 
         logAvailableSensors()
+        isActive = true
     }
 
     fun updateSensorRate(updateIntervalMs: Int) {
@@ -140,6 +144,11 @@ class SensorService @Inject constructor(
     fun stopSensorUpdates() {
         Log.d(TAG, "Stopping sensor updates")
         sensorManager.unregisterListener(this)
+        isActive = false
+    }
+    
+    fun isSensorUpdatesActive(): Boolean {
+        return isActive
     }
 
     override fun onSensorChanged(event: SensorEvent?) {

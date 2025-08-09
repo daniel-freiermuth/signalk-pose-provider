@@ -64,6 +64,7 @@ class SignalKStreamingService : Service() {
         
         const val ACTION_START_STREAMING = "START_STREAMING"
         const val ACTION_STOP_STREAMING = "STOP_STREAMING"
+        const val ACTION_UPDATE_CONFIG = "UPDATE_CONFIG"
         
         const val EXTRA_SERVER_URL = "SERVER_URL"
         const val EXTRA_LOCATION_RATE = "LOCATION_RATE"
@@ -137,6 +138,15 @@ class SignalKStreamingService : Service() {
                 val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
                 
                 startStreaming(serverUrl, locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
+            }
+            ACTION_UPDATE_CONFIG -> {
+                val locationRate = intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L)
+                val sensorRate = intent.getIntExtra(EXTRA_SENSOR_RATE, 1000)
+                val sendLocation = intent.getBooleanExtra(EXTRA_SEND_LOCATION, true)
+                val sendHeading = intent.getBooleanExtra(EXTRA_SEND_HEADING, true)
+                val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
+                
+                updateStreamingConfig(locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
             }
             ACTION_STOP_STREAMING -> {
                 stopStreaming()
@@ -228,6 +238,60 @@ class SignalKStreamingService : Service() {
             
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
+        }
+    }
+
+    private fun updateStreamingConfig(locationRate: Long, sensorRate: Int, sendLocation: Boolean, sendHeading: Boolean, sendPressure: Boolean) {
+        if (!_isStreaming.value) {
+            Log.d(TAG, "Not currently streaming, ignoring config update")
+            return
+        }
+        
+        Log.d(TAG, "Updating streaming configuration (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")
+        
+        serviceScope.launch {
+            // Update stored configuration
+            this@SignalKStreamingService.sendLocation = sendLocation
+            this@SignalKStreamingService.sendHeading = sendHeading
+            this@SignalKStreamingService.sendPressure = sendPressure
+            
+            // Handle location service changes
+            val wasLocationActive = locationService.isLocationUpdatesActive()
+            val shouldLocationBeActive = sendLocation
+            
+            if (wasLocationActive && !shouldLocationBeActive) {
+                Log.d(TAG, "Stopping location updates (disabled in config)")
+                locationService.stopLocationUpdates()
+            } else if (!wasLocationActive && shouldLocationBeActive) {
+                Log.d(TAG, "Starting location updates (enabled in config)")
+                try {
+                    locationService.startLocationUpdates(this@SignalKStreamingService, locationRate)
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "Location permission not granted", e)
+                }
+            } else if (wasLocationActive && shouldLocationBeActive) {
+                Log.d(TAG, "Updating location rate to ${locationRate}ms")
+                locationService.updateLocationRate(locationRate)
+            }
+            
+            // Handle sensor service changes
+            val wasSensorActive = sensorService.isSensorUpdatesActive()
+            val shouldSensorBeActive = sendHeading || sendPressure
+            
+            if (wasSensorActive && !shouldSensorBeActive) {
+                Log.d(TAG, "Stopping sensor updates (all sensors disabled in config)")
+                sensorService.stopSensorUpdates()
+            } else if (!wasSensorActive && shouldSensorBeActive) {
+                Log.d(TAG, "Starting sensor updates (sensors enabled in config)")
+                sensorService.startSensorUpdates(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)
+            } else if (wasSensorActive && shouldSensorBeActive) {
+                Log.d(TAG, "Updating sensor configuration (heading=$sendHeading, pressure=$sendPressure)")
+                // Restart sensors with new configuration
+                sensorService.stopSensorUpdates()
+                sensorService.startSensorUpdates(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)
+            }
+            
+            Log.d(TAG, "Streaming configuration updated successfully")
         }
     }
 

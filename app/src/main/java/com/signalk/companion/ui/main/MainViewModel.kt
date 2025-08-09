@@ -243,18 +243,40 @@ class MainViewModel @Inject constructor(
         _uiState.update { it.copy(sendLocation = enabled) }
         // Save to shared preferences
         currentContext?.let { AppSettings.setSendLocation(it, enabled) }
+        // Update running service if active
+        sendConfigUpdateToService()
     }
     
     fun updateSendHeading(enabled: Boolean) {
         _uiState.update { it.copy(sendHeading = enabled) }
         // Save to shared preferences
         currentContext?.let { AppSettings.setSendHeading(it, enabled) }
+        // Update running service if active
+        sendConfigUpdateToService()
     }
     
     fun updateSendPressure(enabled: Boolean) {
         _uiState.update { it.copy(sendPressure = enabled) }
         // Save to shared preferences
         currentContext?.let { AppSettings.setSendPressure(it, enabled) }
+        // Update running service if active
+        sendConfigUpdateToService()
+    }
+    
+    private fun sendConfigUpdateToService() {
+        currentContext?.let { context ->
+            if (_uiState.value.isStreaming) {
+                val intent = Intent(context, SignalKStreamingService::class.java).apply {
+                    action = SignalKStreamingService.ACTION_UPDATE_CONFIG
+                    putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Use current default
+                    putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, 1000)   // Use current default
+                    putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, _uiState.value.sendLocation)
+                    putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, _uiState.value.sendHeading)
+                    putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, _uiState.value.sendPressure)
+                }
+                context.startService(intent)
+            }
+        }
     }
     
     fun initializeSettings(context: Context) {

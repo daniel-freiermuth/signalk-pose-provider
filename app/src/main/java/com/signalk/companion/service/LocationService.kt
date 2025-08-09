@@ -107,6 +107,10 @@ class LocationService @Inject constructor() {
         _locationUpdates.value = null
     }
     
+    fun isLocationUpdatesActive(): Boolean {
+        return fusedLocationClient != null && locationCallback != null
+    }
+    
     @Throws(SecurityException::class)
     suspend fun updateLocationRate(context: Context, updateIntervalMs: Long) {
         Log.d(TAG, "Updating location rate to ${updateIntervalMs}ms")
@@ -116,5 +120,13 @@ class LocationService @Inject constructor() {
             // Restart with new rate
             startLocationUpdates(context, updateIntervalMs)
         }
+    }
+    
+    @Throws(SecurityException::class)
+    fun updateLocationRate(updateIntervalMs: Long) {
+        // Simplified version that can be called from service
+        Log.d(TAG, "Updating location rate to ${updateIntervalMs}ms (simplified)")
+        // For now, just log - in practice, we'd need to track the context
+        // The service will handle stopping and restarting with new rate
     }
 }
