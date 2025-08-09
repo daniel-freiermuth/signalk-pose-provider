@@ -5,6 +5,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.GeomagneticField
 import android.os.BatteryManager
 import android.content.Intent
 import android.content.IntentFilter
@@ -20,7 +21,8 @@ import kotlin.math.*
 
 @Singleton
 class SensorService @Inject constructor(
-    private val context: Context
+    private val context: Context,
+    private val locationService: LocationService
 ) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -247,13 +249,18 @@ class SensorService @Inject constructor(
             // Normalize heading to 0-2π range
             magneticHeading = normalizeHeading(magneticHeading)
             
+            // Calculate true heading by adding magnetic declination
+            val trueHeading = calculateTrueHeading(magneticHeading)
+            
             Log.d(TAG, "Magnetic heading: ${Math.toDegrees(magneticHeading.toDouble()).toFloat()}°, " +
+                      "True heading: ${Math.toDegrees(trueHeading.toDouble()).toFloat()}°, " +
                       "pitch: ${Math.toDegrees(pitch.toDouble()).toFloat()}°, " +
                       "roll: ${Math.toDegrees(roll.toDouble()).toFloat()}°")
             
             updateSensorData { 
                 copy(
                     magneticHeading = magneticHeading,
+                    trueHeading = trueHeading,
                     pitch = pitch,
                     roll = roll
                 ) 
@@ -292,6 +299,41 @@ class SensorService @Inject constructor(
         // Convert offset from degrees to radians and apply correction
         val offsetRadians = Math.toRadians(headingOffsetDegrees.toDouble()).toFloat()
         return heading + offsetRadians
+    }
+    
+    private fun calculateTrueHeading(magneticHeading: Float): Float {
+        // Get current location from LocationService
+        val locationData = locationService.locationUpdates.value
+        
+        if (locationData == null) {
+            Log.w(TAG, "No location data available for magnetic declination calculation, using magnetic heading as true heading")
+            return magneticHeading
+        }
+        
+        try {
+            // Calculate magnetic declination using Android's GeomagneticField
+            val geomagneticField = GeomagneticField(
+                locationData.latitude.toFloat(),
+                locationData.longitude.toFloat(),
+                locationData.altitude.toFloat(),
+                System.currentTimeMillis()
+            )
+            
+            // Get declination in degrees and convert to radians
+            val declinationDegrees = geomagneticField.declination
+            val declinationRadians = Math.toRadians(declinationDegrees.toDouble()).toFloat()
+            
+            Log.d(TAG, "Magnetic declination: ${declinationDegrees}° at ${locationData.latitude}, ${locationData.longitude}")
+            
+            // True heading = Magnetic heading + Declination
+            val trueHeading = normalizeHeading(magneticHeading + declinationRadians)
+            
+            return trueHeading
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error calculating magnetic declination: ${e.message}")
+            return magneticHeading
+        }
     }
 
     private fun updateGyroscopeData() {

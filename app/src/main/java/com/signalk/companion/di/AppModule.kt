@@ -30,8 +30,11 @@ object AppModule {
     
     @Provides
     @Singleton
-    fun provideSensorService(@ApplicationContext context: Context): SensorService {
-        return SensorService(context)
+    fun provideSensorService(
+        @ApplicationContext context: Context,
+        locationService: LocationService
+    ): SensorService {
+        return SensorService(context, locationService)
     }
     
     @Provides
