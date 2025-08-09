@@ -79,7 +79,6 @@ class SignalKTransmitter @Inject constructor(
         baseUrl = when (protocol) {
             TransmissionProtocol.UDP -> ""  // Not used for UDP
             TransmissionProtocol.WEBSOCKET -> "ws://$hostname:$port"
-            TransmissionProtocol.WEBSOCKET_SSL -> "wss://$hostname:$port"
         }
         
         // Don't resolve DNS immediately - do it when actually starting streaming
@@ -95,16 +94,15 @@ class SignalKTransmitter @Inject constructor(
     fun configureFromUrl(fullUrl: String, protocol: TransmissionProtocol = TransmissionProtocol.UDP) {
         val parsedUrl = parseUrl(fullUrl)
         
-        // Auto-detect WebSocket protocol based on HTTPS/HTTP
+        // Auto-detect WebSocket protocol (WEBSOCKET handles both HTTP and HTTPS)
         val detectedProtocol = when {
             protocol == TransmissionProtocol.UDP -> TransmissionProtocol.UDP
-            parsedUrl.isHttps -> TransmissionProtocol.WEBSOCKET_SSL
             else -> TransmissionProtocol.WEBSOCKET
         }
         
         val port = when (detectedProtocol) {
             TransmissionProtocol.UDP -> 55555  // Fixed UDP port
-            TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> parsedUrl.port
+            TransmissionProtocol.WEBSOCKET -> parsedUrl.port
         }
         
         serverAddress = parsedUrl.hostname
@@ -114,8 +112,11 @@ class SignalKTransmitter @Inject constructor(
         // Build WebSocket URL based on detected protocol
         baseUrl = when (detectedProtocol) {
             TransmissionProtocol.UDP -> ""
-            TransmissionProtocol.WEBSOCKET -> "ws://${parsedUrl.hostname}:${port}"
-            TransmissionProtocol.WEBSOCKET_SSL -> "wss://${parsedUrl.hostname}:${port}"
+            TransmissionProtocol.WEBSOCKET -> {
+                // Auto-detect ws:// or wss:// based on original URL protocol
+                val wsProtocol = if (parsedUrl.isHttps) "wss" else "ws"
+                "$wsProtocol://${parsedUrl.hostname}:${port}"
+            }
         }
         
         _connectionStatus.value = false
@@ -169,8 +170,7 @@ class SignalKTransmitter @Inject constructor(
     private fun getDefaultPort(protocol: TransmissionProtocol): Int {
         return when (protocol) {
             TransmissionProtocol.UDP -> 55555  // SignalK UDP port
-            TransmissionProtocol.WEBSOCKET -> 3000  // SignalK WebSocket port
-            TransmissionProtocol.WEBSOCKET_SSL -> 3443 // SignalK WebSocket SSL port (or 3000 if using SSL termination)
+            TransmissionProtocol.WEBSOCKET -> 3000  // SignalK WebSocket port (auto-detects SSL)
         }
     }
     
@@ -189,7 +189,7 @@ class SignalKTransmitter @Inject constructor(
                     // Start periodic DNS refresh to handle changing IP addresses
                     startDnsRefreshTimer()
                 }
-                TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
+                TransmissionProtocol.WEBSOCKET -> {
                     // Initial DNS resolution for WebSocket
                     withContext(Dispatchers.IO) {
                         refreshDnsResolution()
@@ -226,7 +226,7 @@ class SignalKTransmitter @Inject constructor(
             when (transmissionProtocol) {
                 TransmissionProtocol.UDP -> {
                 }
-                TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
+                TransmissionProtocol.WEBSOCKET -> {
                     // For WebSocket, test DNS resolution and reconnect if needed
                     
                     // Check if IP address actually changed
@@ -568,7 +568,7 @@ class SignalKTransmitter @Inject constructor(
                 TransmissionProtocol.UDP -> {
                     sendViaUDP(json)
                 }
-                TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
+                TransmissionProtocol.WEBSOCKET -> {
                     sendViaWebSocket(json)
                 }
             }

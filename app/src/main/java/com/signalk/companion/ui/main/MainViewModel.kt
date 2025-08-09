@@ -23,8 +23,7 @@ import javax.inject.Inject
 
 enum class TransmissionProtocol(val displayName: String, val description: String) {
     UDP("UDP", "Direct UDP transmission - fastest, requires network access"),
-    WEBSOCKET("WebSocket (Auto)", "Auto-detects WS/WSS from HTTP/HTTPS URL - real-time, firewall-friendly"),
-    WEBSOCKET_SSL("WebSocket SSL", "Forces secure WSS streaming - encrypted, same as HTTPS login")
+    WEBSOCKET("WebSocket (Auto)", "Auto-detects WS/WSS from HTTP/HTTPS URL - real-time, firewall-friendly")
 }
 
 enum class DeviceOrientation(val displayName: String, val rotationDegrees: Int, val description: String) {
@@ -38,7 +37,7 @@ data class MainUiState(
     val isConnected: Boolean = false,
     val isStreaming: Boolean = false,
     val serverUrl: String = "https://signalk.entrop.mywire.org",
-    val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.UDP,
+    val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.WEBSOCKET,
     val vesselId: String = "self",
     val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
     val compassTiltCorrection: Boolean = true,
