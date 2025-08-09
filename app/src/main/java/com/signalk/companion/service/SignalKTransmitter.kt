@@ -56,6 +56,12 @@ class SignalKTransmitter @Inject constructor(
     private val _lastTransmissionTime = MutableStateFlow<Long?>(null)
     val lastTransmissionTime: StateFlow<Long?> = _lastTransmissionTime
     
+    private val _lastDnsRefresh = MutableStateFlow<String?>(null)
+    val lastDnsRefresh: StateFlow<String?> = _lastDnsRefresh
+    
+    private val _currentResolvedIp = MutableStateFlow<String?>(null)
+    val currentResolvedIp: StateFlow<String?> = _currentResolvedIp
+    
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
     }
@@ -176,6 +182,11 @@ class SignalKTransmitter @Inject constructor(
                     startDnsRefreshTimer()
                 }
                 TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
+                    // Initial DNS resolution for WebSocket
+                    withContext(Dispatchers.IO) {
+                        refreshDnsResolution()
+                    }
+                    
                     // Initialize WebSocket connection
                     initializeWebSocket()
                     
@@ -193,19 +204,45 @@ class SignalKTransmitter @Inject constructor(
     
     private fun refreshDnsResolution() {
         try {
+            val oldAddress = targetAddress
+            val newAddress = InetAddress.getByName(serverAddress)
+                    
+            // Check if IP address actually changed
+            if (oldAddress == null || !oldAddress.equals(newAddress)) {
+                targetAddress = newAddress
+                val message = "DNS resolved: $serverAddress -> ${newAddress.hostAddress} (was: ${oldAddress?.hostAddress ?: "null"})"
+                println(message)
+                _lastDnsRefresh.value = message
+            }
+
             when (transmissionProtocol) {
                 TransmissionProtocol.UDP -> {
-                    targetAddress = InetAddress.getByName(serverAddress)
-                    // DNS resolution successful - connection is good
                 }
                 TransmissionProtocol.WEBSOCKET, TransmissionProtocol.WEBSOCKET_SSL -> {
-                    // For WebSocket, just validate that we can resolve the hostname
-                    // Actual connection will be made per WebSocket connection
-                    InetAddress.getByName(serverAddress)
-                    // DNS resolution successful
+                    // For WebSocket, test DNS resolution and reconnect if needed
+                    
+                    // Check if IP address actually changed
+                    if (oldAddress == null || !oldAddress.equals(newAddress)) {
+                        // IP changed - if WebSocket is disconnected, try to reconnect
+                        if (_connectionStatus.value == false && webSocket == null) {
+                            println("WebSocket disconnected and IP changed, attempting reconnection after DNS refresh")
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    initializeWebSocket()
+                                } catch (e: Exception) {
+                                    println("WebSocket reconnection failed: ${e.message}")
+                                }
+                            }
+                        }
+                    } else {
+                        // IP didn't change, just update the tracking without logging
+                        println("DNS refresh for WebSocket: $serverAddress -> ${newAddress.hostAddress} (no change)")
+                    }
                 }
             }
+            _currentResolvedIp.value = newAddress.hostAddress
         } catch (e: Exception) {
+            println("DNS resolution failed for $serverAddress: ${e.message}")
             // DNS resolution failed - but don't kill the entire streaming
             // Keep using the old IP if we had one, or fail if this is the first attempt
             if (targetAddress == null && transmissionProtocol == TransmissionProtocol.UDP) {
@@ -225,10 +262,14 @@ class SignalKTransmitter @Inject constructor(
                 delay(DNS_REFRESH_INTERVAL_MS)
                 if (socket != null || webSocket != null) { // Check again after delay
                     try {
+                        println("Performing periodic DNS refresh for $serverAddress...")
                         refreshDnsResolution()
                     } catch (e: Exception) {
-                        // Log DNS refresh failure, but don't stop streaming
-                        // In a real app, you might want to use a proper logger here
+                        println("DNS refresh failed: ${e.message}")
+                        // For UDP, if we lose DNS resolution completely, mark as disconnected
+                        if (transmissionProtocol == TransmissionProtocol.UDP && targetAddress == null) {
+                            _connectionStatus.value = false
+                        }
                     }
                 }
             }
@@ -254,6 +295,8 @@ class SignalKTransmitter @Inject constructor(
         _lastSentMessage.value = null
         _messagesSent.value = 0
         _lastTransmissionTime.value = null
+        _lastDnsRefresh.value = null
+        _currentResolvedIp.value = null
     }
     
     // Manual DNS refresh - can be called from UI if user reports connectivity issues
