@@ -43,6 +43,11 @@ class SignalKStreamingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val binder = LocalBinder()
     
+    // Configuration options
+    private var sendLocation: Boolean = true
+    private var sendHeading: Boolean = true
+    private var sendPressure: Boolean = true
+    
     private val _isStreaming = MutableStateFlow(false)
     val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
     
@@ -63,6 +68,9 @@ class SignalKStreamingService : Service() {
         const val EXTRA_SERVER_URL = "SERVER_URL"
         const val EXTRA_LOCATION_RATE = "LOCATION_RATE"
         const val EXTRA_SENSOR_RATE = "SENSOR_RATE"
+        const val EXTRA_SEND_LOCATION = "SEND_LOCATION"
+        const val EXTRA_SEND_HEADING = "SEND_HEADING"
+        const val EXTRA_SEND_PRESSURE = "SEND_PRESSURE"
     }
 
     inner class LocalBinder : Binder() {
@@ -83,7 +91,7 @@ class SignalKStreamingService : Service() {
             locationService.locationUpdates.collect { locationData ->
                 locationData?.let {
                     try {
-                        signalKTransmitter.sendLocationData(it)
+                        signalKTransmitter.sendLocationData(it, sendLocation)
                         updateTransmissionStats()
                         Log.d(TAG, "Sent location data: lat=${it.latitude}, lon=${it.longitude}")
                     } catch (e: Exception) {
@@ -96,7 +104,7 @@ class SignalKStreamingService : Service() {
         serviceScope.launch {
             sensorService.sensorData.collect { sensorData ->
                 try {
-                    signalKTransmitter.sendSensorData(sensorData)
+                    signalKTransmitter.sendSensorData(sensorData, sendHeading, sendPressure)
                     updateTransmissionStats()
                     Log.d(TAG, "Sent sensor data: timestamp=${sensorData.timestamp}")
                 } catch (e: Exception) {
@@ -124,8 +132,11 @@ class SignalKStreamingService : Service() {
                 val serverUrl = intent.getStringExtra(EXTRA_SERVER_URL) ?: "https://signalk.entrop.mywire.org"
                 val locationRate = intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L)
                 val sensorRate = intent.getIntExtra(EXTRA_SENSOR_RATE, 1000)
+                val sendLocation = intent.getBooleanExtra(EXTRA_SEND_LOCATION, true)
+                val sendHeading = intent.getBooleanExtra(EXTRA_SEND_HEADING, true)
+                val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
                 
-                startStreaming(serverUrl, locationRate, sensorRate)
+                startStreaming(serverUrl, locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
             }
             ACTION_STOP_STREAMING -> {
                 stopStreaming()
@@ -135,13 +146,19 @@ class SignalKStreamingService : Service() {
         return START_STICKY // Restart if killed by system
     }
 
-    private fun startStreaming(serverUrl: String, locationRate: Long, sensorRate: Int) {
+    private fun startStreaming(serverUrl: String, locationRate: Long, sensorRate: Int, 
+                               sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true) {
         if (_isStreaming.value) {
             Log.d(TAG, "Already streaming, ignoring start request")
             return
         }
         
-        Log.d(TAG, "Starting SignalK streaming to $serverUrl")
+        // Store configuration
+        this.sendLocation = sendLocation
+        this.sendHeading = sendHeading
+        this.sendPressure = sendPressure
+        
+        Log.d(TAG, "Starting SignalK streaming to $serverUrl (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")
         
         // Check battery optimization status
         val batteryOptimized = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)

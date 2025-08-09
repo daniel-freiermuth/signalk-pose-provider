@@ -42,6 +42,10 @@ data class MainUiState(
     val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
     val compassTiltCorrection: Boolean = true,
     val headingOffset: Float = 0.0f, // Heading correction in degrees (+/- for device mounting angle)
+    // Data transmission options
+    val sendLocation: Boolean = true,
+    val sendHeading: Boolean = true,
+    val sendPressure: Boolean = true,
     val locationData: LocationData? = null,
     val sensorData: SensorData? = null,
     val error: String? = null,
@@ -235,12 +239,41 @@ class MainViewModel @Inject constructor(
         currentContext?.let { AppSettings.setVesselId(it, trimmedId) }
     }
     
+    fun updateSendLocation(enabled: Boolean) {
+        _uiState.update { it.copy(sendLocation = enabled) }
+        // Save to shared preferences
+        currentContext?.let { AppSettings.setSendLocation(it, enabled) }
+    }
+    
+    fun updateSendHeading(enabled: Boolean) {
+        _uiState.update { it.copy(sendHeading = enabled) }
+        // Save to shared preferences
+        currentContext?.let { AppSettings.setSendHeading(it, enabled) }
+    }
+    
+    fun updateSendPressure(enabled: Boolean) {
+        _uiState.update { it.copy(sendPressure = enabled) }
+        // Save to shared preferences
+        currentContext?.let { AppSettings.setSendPressure(it, enabled) }
+    }
+    
     fun initializeSettings(context: Context) {
         if (currentContext == null) {
             currentContext = context
-            // Load vessel ID from shared preferences
+            // Load settings from shared preferences
             val savedVesselId = AppSettings.getVesselId(context)
-            _uiState.update { it.copy(vesselId = savedVesselId) }
+            val savedSendLocation = AppSettings.getSendLocation(context)
+            val savedSendHeading = AppSettings.getSendHeading(context)
+            val savedSendPressure = AppSettings.getSendPressure(context)
+            
+            _uiState.update { 
+                it.copy(
+                    vesselId = savedVesselId,
+                    sendLocation = savedSendLocation,
+                    sendHeading = savedSendHeading,
+                    sendPressure = savedSendPressure
+                )
+            }
         }
     }
 
@@ -260,6 +293,9 @@ class MainViewModel @Inject constructor(
             putExtra(SignalKStreamingService.EXTRA_SERVER_URL, currentState.serverUrl)
             putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Fixed 1-second interval
             putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, 1000) // Fixed 1-second interval
+            putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, currentState.sendLocation)
+            putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, currentState.sendHeading)
+            putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, currentState.sendPressure)
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

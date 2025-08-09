@@ -75,6 +75,16 @@ fun MainScreen(
                 onVesselIdChange = viewModel::updateVesselId
             )
             
+            // Data Transmission Options Card
+            DataTransmissionCard(
+                sendLocation = uiState.sendLocation,
+                sendHeading = uiState.sendHeading,
+                sendPressure = uiState.sendPressure,
+                onSendLocationChange = viewModel::updateSendLocation,
+                onSendHeadingChange = viewModel::updateSendHeading,
+                onSendPressureChange = viewModel::updateSendPressure
+            )
+            
             // Authentication Card (integrated login)
             AuthenticationCard(
                 isAuthenticated = uiState.isAuthenticated,
@@ -1017,6 +1027,112 @@ fun MarineConfigCard(
                             fontWeight = FontWeight.Medium
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DataTransmissionCard(
+    sendLocation: Boolean,
+    sendHeading: Boolean,
+    sendPressure: Boolean,
+    onSendLocationChange: (Boolean) -> Unit,
+    onSendHeadingChange: (Boolean) -> Unit,
+    onSendPressureChange: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Data Transmission",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Text(
+                text = "Choose which data types to transmit to SignalK server:",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            // Location checkbox
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = sendLocation,
+                    onCheckedChange = onSendLocationChange
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = "Location Data",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "GPS position, course, and speed",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            
+            // Heading checkbox
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = sendHeading,
+                    onCheckedChange = onSendHeadingChange
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = "Heading Data",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Magnetic and true compass heading",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            
+            // Pressure checkbox
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = sendPressure,
+                    onCheckedChange = onSendPressureChange
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = "Atmospheric Pressure",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Barometric pressure sensor data",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

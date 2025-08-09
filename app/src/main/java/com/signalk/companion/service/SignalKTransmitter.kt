@@ -321,13 +321,15 @@ class SignalKTransmitter @Inject constructor(
         _authenticationError.value = null
     }
     
-    suspend fun sendLocationData(locationData: LocationData) {
-        val signalKMessage = createLocationMessage(locationData)
-        sendMessage(signalKMessage)
+    suspend fun sendLocationData(locationData: LocationData, sendLocation: Boolean = true) {
+        if (sendLocation) {
+            val signalKMessage = createLocationMessage(locationData)
+            sendMessage(signalKMessage)
+        }
     }
     
-    suspend fun sendSensorData(sensorData: SensorData) {
-        val signalKMessage = createSensorMessage(sensorData)
+    suspend fun sendSensorData(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true) {
+        val signalKMessage = createSensorMessage(sensorData, sendHeading, sendPressure)
         sendMessage(signalKMessage)
     }
     
@@ -443,7 +445,7 @@ class SignalKTransmitter @Inject constructor(
             context = vesselContext,
             updates = listOf(update)
         )
-    }    private fun createSensorMessage(sensorData: SensorData): SignalKMessage {
+    }    private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage {
         val timestamp = dateFormat.format(Date(sensorData.timestamp))
         val source = SignalKSource(
             label = "SignalK Navigation Provider - Sensors",
@@ -452,24 +454,26 @@ class SignalKTransmitter @Inject constructor(
         
         val values = mutableListOf<SignalKValue>()
         
-        // Navigation orientation data
-        sensorData.magneticHeading?.let { heading ->
-            values.add(
-                SignalKValue(
-                    path = "navigation.headingMagnetic",
-                    value = SignalKValues.number(heading.toDouble()) // Already in radians
+        // Navigation orientation data (only if heading is enabled)
+        if (sendHeading) {
+            sensorData.magneticHeading?.let { heading ->
+                values.add(
+                    SignalKValue(
+                        path = "navigation.headingMagnetic",
+                        value = SignalKValues.number(heading.toDouble()) // Already in radians
+                    )
                 )
-            )
-        }
-        
-        sensorData.trueHeading?.let { heading ->
-            values.add(
-                SignalKValue(
-                    path = "navigation.headingTrue", 
-                    value = SignalKValues.number(heading.toDouble()) // Already in radians
+            }
+            
+            sensorData.trueHeading?.let { heading ->
+                values.add(
+                    SignalKValue(
+                        path = "navigation.headingTrue",
+                        value = SignalKValues.number(heading.toDouble()) // Already in radians
+                    )
                 )
-            )
-        }
+            }
+        } // End of sendHeading condition
         
         sensorData.courseOverGround?.let { course ->
             values.add(
@@ -513,14 +517,18 @@ class SignalKTransmitter @Inject constructor(
             )
         }
         
-        // Environmental sensors
-        sensorData.pressure?.let { pressure ->
-            values.add(
-                SignalKValue(
-                    path = "environment.outside.pressure",
-                    value = SignalKValues.number(pressure.toDouble()) // Already in Pa
+        // Environmental sensors (conditional based on settings)        } // End of sendHeading condition
+        
+        // Environmental sensors (conditional based on settings)
+        if (sendPressure) {
+            sensorData.pressure?.let { pressure ->
+                values.add(
+                    SignalKValue(
+                        path = "environment.outside.pressure",
+                        value = SignalKValues.number(pressure.toDouble()) // Already in Pa
+                    )
                 )
-            )
+            }
         }
         
         sensorData.temperature?.let { temperature ->
