@@ -284,7 +284,7 @@ class SignalKStreamingService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SignalK Navigation Provider")
+            .setContentTitle("SignalK Pose Provider")
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_dialog_info) // Use Android default icon
             .setContentIntent(pendingIntent)

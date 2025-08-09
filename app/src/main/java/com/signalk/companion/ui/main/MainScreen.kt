@@ -52,7 +52,7 @@ fun MainScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("SignalK Navigation Provider") }
+                title = { Text("SignalK Pose Provider") }
             )
         }
     ) { innerPadding ->

@@ -67,7 +67,7 @@ class SignalKBackgroundService : Service() {
     
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SignalK Companion")
+            .setContentTitle("SignalK Pose Provider")
             .setContentText("Streaming sensor data to SignalK server")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)

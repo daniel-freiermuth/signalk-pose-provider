@@ -15,7 +15,7 @@ fun main() {
     )
     
     val source = SignalKSource(
-        label = "SignalK Navigation Provider",
+        label = "SignalK Pose Provider",
         src = "signalk-nav-provider"
     )
     

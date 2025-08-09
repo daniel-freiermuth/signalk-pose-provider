@@ -336,7 +336,7 @@ class SignalKTransmitter @Inject constructor(
     private fun createLocationMessage(locationData: LocationData): SignalKMessage {
         val timestamp = dateFormat.format(Date(locationData.timestamp))
         val source = SignalKSource(
-            label = "SignalK Navigation Provider",
+            label = "SignalK Pose Provider",
             src = "signalk-nav-provider"
         )
         
@@ -448,7 +448,7 @@ class SignalKTransmitter @Inject constructor(
     }    private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage {
         val timestamp = dateFormat.format(Date(sensorData.timestamp))
         val source = SignalKSource(
-            label = "SignalK Navigation Provider - Sensors",
+            label = "SignalK Pose Provider - Sensors",
             src = "signalk-nav-provider-sensors"
         )
         
