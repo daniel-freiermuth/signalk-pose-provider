@@ -41,6 +41,9 @@ fun MainScreen(
     )
     
     LaunchedEffect(Unit) {
+        // Initialize settings when the screen is first shown
+        viewModel.initializeSettings(context)
+        
         if (!permissionsState.allPermissionsGranted) {
             permissionsState.launchMultiplePermissionRequest()
         }
@@ -66,8 +69,10 @@ fun MainScreen(
                 isConnected = uiState.isConnected,
                 serverUrl = uiState.serverUrl,
                 transmissionProtocol = uiState.transmissionProtocol,
+                vesselId = uiState.vesselId,
                 onServerUrlChange = viewModel::updateServerUrl,
-                onProtocolChange = viewModel::updateTransmissionProtocol
+                onProtocolChange = viewModel::updateTransmissionProtocol,
+                onVesselIdChange = viewModel::updateVesselId
             )
             
             // Authentication Card (integrated login)
@@ -148,8 +153,10 @@ fun ConnectionStatusCard(
     isConnected: Boolean,
     serverUrl: String,
     transmissionProtocol: TransmissionProtocol,
+    vesselId: String,
     onServerUrlChange: (String) -> Unit,
-    onProtocolChange: (TransmissionProtocol) -> Unit
+    onProtocolChange: (TransmissionProtocol) -> Unit,
+    onVesselIdChange: (String) -> Unit
 ) {
     var protocolDropdownExpanded by remember { mutableStateOf(false) }
     
@@ -172,6 +179,15 @@ fun ConnectionStatusCard(
                 label = { Text("Server URL") },
                 placeholder = { Text("http://192.168.1.100:3000") },
                 modifier = Modifier.fillMaxWidth()
+            )
+            
+            OutlinedTextField(
+                value = vesselId,
+                onValueChange = onVesselIdChange,
+                label = { Text("Vessel ID") },
+                placeholder = { Text("self") },
+                modifier = Modifier.fillMaxWidth(),
+                supportingText = { Text("Used in SignalK context: vessels.$vesselId") }
             )
             
             // Protocol Selection

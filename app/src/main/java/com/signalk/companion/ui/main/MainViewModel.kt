@@ -13,6 +13,7 @@ import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SensorService
 import com.signalk.companion.service.SignalKStreamingService
+import com.signalk.companion.util.AppSettings
 import com.signalk.companion.service.SignalKTransmitter
 import com.signalk.companion.service.AuthenticationService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -45,6 +46,7 @@ data class MainUiState(
     val isStreaming: Boolean = false,
     val serverUrl: String = "https://signalk.entrop.mywire.org",
     val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.UDP,
+    val vesselId: String = "self",
     val locationUpdateRate: UpdateRate = UpdateRate.NORMAL,
     val sensorUpdateRate: UpdateRate = UpdateRate.NORMAL,
     val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
@@ -246,6 +248,22 @@ class MainViewModel @Inject constructor(
         sensorService.setHeadingOffset(offsetDegrees)
         // If streaming service is bound, update it too
         streamingService?.updateHeadingOffset(offsetDegrees)
+    }
+    
+    fun updateVesselId(vesselId: String) {
+        val trimmedId = vesselId.trim()
+        _uiState.update { it.copy(vesselId = trimmedId) }
+        // Save to shared preferences
+        currentContext?.let { AppSettings.setVesselId(it, trimmedId) }
+    }
+    
+    fun initializeSettings(context: Context) {
+        if (currentContext == null) {
+            currentContext = context
+            // Load vessel ID from shared preferences
+            val savedVesselId = AppSettings.getVesselId(context)
+            _uiState.update { it.copy(vesselId = savedVesselId) }
+        }
     }
 
     fun startStreaming(context: android.content.Context) {

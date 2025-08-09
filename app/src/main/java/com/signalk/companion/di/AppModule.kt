@@ -36,7 +36,12 @@ object AppModule {
     
     @Provides
     @Singleton
-    fun provideSignalKTransmitter(authenticationService: AuthenticationService): SignalKTransmitter {
-        return SignalKTransmitter(authenticationService)
+    fun provideSignalKTransmitter(
+        @ApplicationContext context: Context,
+        authenticationService: AuthenticationService
+    ): SignalKTransmitter {
+        val transmitter = SignalKTransmitter(authenticationService)
+        transmitter.setContext(context)
+        return transmitter
     }
 }

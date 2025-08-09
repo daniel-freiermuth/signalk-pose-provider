@@ -1,7 +1,9 @@
 package com.signalk.companion.service
 
+import android.content.Context
 import com.signalk.companion.data.model.*
 import com.signalk.companion.ui.main.TransmissionProtocol
+import com.signalk.companion.util.AppSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.*
@@ -27,6 +29,7 @@ class SignalKTransmitter @Inject constructor(
     private val authenticationService: AuthenticationService
 ) {
     
+    private var context: Context? = null
     private var serverAddress: String = ""
     private var serverPort: Int = 55555
     private var baseUrl: String = ""  // Store the full base URL for HTTP(S) streaming
@@ -82,6 +85,10 @@ class SignalKTransmitter @Inject constructor(
         // Don't resolve DNS immediately - do it when actually starting streaming
         // This allows hostnames like "signalk.local", "my-boat.local", etc.
         _connectionStatus.value = false
+    }
+    
+    fun setContext(context: Context) {
+        this.context = context
     }
     
     // Configure from a full URL and auto-detect WebSocket protocol based on HTTP/HTTPS
@@ -423,20 +430,20 @@ class SignalKTransmitter @Inject constructor(
                 )
             )
         }
-        
+
         val update = SignalKUpdate(
             source = source,
             timestamp = timestamp,
             values = values
         )
         
+        val vesselContext = context?.let { AppSettings.getSignalKContext(it) } ?: "vessels.self"
+        
         return SignalKMessage(
-            context = "vessels.self",
+            context = vesselContext,
             updates = listOf(update)
         )
-    }
-    
-    private fun createSensorMessage(sensorData: SensorData): SignalKMessage {
+    }    private fun createSensorMessage(sensorData: SensorData): SignalKMessage {
         val timestamp = dateFormat.format(Date(sensorData.timestamp))
         val source = SignalKSource(
             label = "SignalK Navigation Provider - Sensors",
@@ -561,12 +568,14 @@ class SignalKTransmitter @Inject constructor(
                 )
             )
         }
+
+        val vesselContext = context?.let { AppSettings.getSignalKContext(it) } ?: "vessels.self"
         
         if (values.isEmpty()) return SignalKMessage(
-            context = "vessels.self", 
+            context = vesselContext, 
             updates = emptyList()
         )
-        
+
         val update = SignalKUpdate(
             source = source,
             timestamp = timestamp,
@@ -574,7 +583,7 @@ class SignalKTransmitter @Inject constructor(
         )
         
         return SignalKMessage(
-            context = "vessels.self",
+            context = vesselContext,
             updates = listOf(update)
         )
     }
