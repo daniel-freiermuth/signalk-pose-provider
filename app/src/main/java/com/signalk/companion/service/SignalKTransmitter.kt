@@ -18,6 +18,7 @@ import java.net.InetAddress
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -626,6 +627,10 @@ class SignalKTransmitter @Inject constructor(
     private suspend fun initializeWebSocket() {
         withContext(Dispatchers.IO) {
             okHttpClient = OkHttpClient.Builder()
+                .readTimeout(60, TimeUnit.SECONDS)
+                .writeTimeout(60, TimeUnit.SECONDS)
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
                 .build()
             
             val streamUrl = "${baseUrl}/signalk/v1/stream"

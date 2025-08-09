@@ -16,6 +16,7 @@ import com.signalk.companion.MainActivity
 import com.signalk.companion.R
 import com.signalk.companion.ui.main.UpdateRate
 import com.signalk.companion.ui.main.DeviceOrientation
+import com.signalk.companion.util.BatteryOptimizationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -142,6 +143,13 @@ class SignalKStreamingService : Service() {
         }
         
         Log.d(TAG, "Starting SignalK streaming to $serverUrl")
+        
+        // Check battery optimization status
+        val batteryOptimized = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)
+        Log.d(TAG, "Battery optimization disabled: $batteryOptimized")
+        if (!batteryOptimized) {
+            Log.w(TAG, "WARNING: Battery optimization is enabled - app may stop in background!")
+        }
         
         serviceScope.launch {
             try {
