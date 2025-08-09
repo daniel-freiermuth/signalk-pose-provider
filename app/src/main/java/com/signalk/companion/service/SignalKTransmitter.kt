@@ -284,6 +284,23 @@ class SignalKTransmitter @Inject constructor(
         }
     }
     
+    private fun scheduleReconnection(delayMs: Long) {
+        CoroutineScope(Dispatchers.IO).launch {
+            delay(delayMs)
+            if (_connectionStatus.value == false) { // Only reconnect if still disconnected
+                try {
+                    println("Executing scheduled WebSocket reconnection...")
+                    initializeWebSocket()
+                } catch (e: Exception) {
+                    println("Scheduled WebSocket reconnection failed: ${e.message}")
+                    // Could implement exponential backoff here if needed
+                }
+            } else {
+                println("Skipping scheduled reconnection - already connected")
+            }
+        }
+    }
+    
     fun stopStreaming() {
         // Cancel DNS refresh timer
         dnsRefreshJob?.cancel()
@@ -651,6 +668,20 @@ class SignalKTransmitter @Inject constructor(
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     _connectionStatus.value = false
                     println("WebSocket closed: $code $reason")
+                    
+                    // Attempt automatic reconnection after a delay (unless it's a normal close)
+                    if (code != 1000) { // 1000 = normal close, don't reconnect for intentional disconnections
+                        println("Unexpected WebSocket closure (code: $code), attempting reconnection in 5 seconds...")
+                        CoroutineScope(Dispatchers.IO).launch {
+                            delay(5000) // Wait 5 seconds before reconnecting
+                            try {
+                                initializeWebSocket()
+                                println("WebSocket reconnection attempt completed")
+                            } catch (e: Exception) {
+                                println("WebSocket reconnection failed: ${e.message}")
+                            }
+                        }
+                    }
                 }
                 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -691,10 +722,14 @@ class SignalKTransmitter @Inject constructor(
                         } else {
                             // Non-authentication error, could be network issue
                             _authenticationError.value = null
+                            println("Non-authentication WebSocket failure (${resp.code}), attempting reconnection in 10 seconds...")
+                            scheduleReconnection(10000) // Retry after 10 seconds for other HTTP errors
                         }
                     } ?: run {
-                        // No response means likely network error
+                        // No response means likely network error (connection refused, timeout, etc.)
                         _authenticationError.value = null
+                        println("Network-related WebSocket failure, attempting reconnection in 10 seconds...")
+                        scheduleReconnection(10000) // Retry after 10 seconds for network errors
                     }
                 }
             }
