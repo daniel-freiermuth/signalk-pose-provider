@@ -540,34 +540,6 @@ class SignalKTransmitter @Inject constructor(
                 )
             )
         }
-        
-        sensorData.illuminance?.let { illuminance ->
-            values.add(
-                SignalKValue(
-                    path = "environment.outside.illuminance",
-                    value = SignalKValues.number(illuminance.toDouble()) // Already in Lux
-                )
-            )
-        }
-        
-        // Device electrical information
-        sensorData.batteryLevel?.let { level ->
-            values.add(
-                SignalKValue(
-                    path = "electrical.batteries.phone.capacity.stateOfCharge",
-                    value = SignalKValues.number(level.toDouble()) // Already as ratio
-                )
-            )
-        }
-        
-        sensorData.batteryVoltage?.let { voltage ->
-            values.add(
-                SignalKValue(
-                    path = "electrical.batteries.phone.voltage",
-                    value = SignalKValues.number(voltage.toDouble()) // Already in V
-                )
-            )
-        }
 
         val vesselContext = context?.let { AppSettings.getSignalKContext(it) } ?: "vessels.self"
         

@@ -6,9 +6,6 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.hardware.GeomagneticField
-import android.os.BatteryManager
-import android.content.Intent
-import android.content.IntentFilter
 import android.util.Log
 import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.ui.main.DeviceOrientation
@@ -26,7 +23,6 @@ class SensorService @Inject constructor(
 ) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
 
     private val _sensorData = MutableStateFlow(SensorData())
     val sensorData: StateFlow<SensorData> = _sensorData.asStateFlow()
@@ -38,7 +34,6 @@ class SensorService @Inject constructor(
     private val pressure = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
     private val temperature = sensorManager.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)
     private val humidity = sensorManager.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY)
-    private val light = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
 
     // Sensor data storage
     private var magneticField = FloatArray(3)
@@ -97,10 +92,6 @@ class SensorService @Inject constructor(
         humidity?.let { 
             sensorManager.registerListener(this, it, currentSensorDelay)
             Log.d(TAG, "Humidity sensor registered")
-        }
-        light?.let { 
-            sensorManager.registerListener(this, it, currentSensorDelay)
-            Log.d(TAG, "Light sensor registered")
         }
 
         logAvailableSensors()
@@ -179,11 +170,6 @@ class SensorService @Inject constructor(
                 val humidityPercent = event.values[0]
                 val humidityRatio = humidityPercent / 100f  // Convert % to ratio
                 updateSensorData { copy(relativeHumidity = humidityRatio) }
-            }
-            
-            Sensor.TYPE_LIGHT -> {
-                val illuminanceLux = event.values[0]
-                updateSensorData { copy(illuminance = illuminanceLux) }
             }
         }
     }
@@ -360,14 +346,7 @@ class SensorService @Inject constructor(
         val currentData = _sensorData.value
         val newData = currentData.update().copy(timestamp = currentTime)
         
-        // Add battery information
-        val batteryLevel = getBatteryLevel()
-        val batteryVoltage = getBatteryVoltage()
-        
-        _sensorData.value = newData.copy(
-            batteryLevel = batteryLevel,
-            batteryVoltage = batteryVoltage
-        )
+        _sensorData.value = newData
         
         // Update the last update time to track rate limiting
         val actualInterval = if (lastUpdateTime > 0) currentTime - lastUpdateTime else 0
@@ -375,28 +354,6 @@ class SensorService @Inject constructor(
         pendingSensorUpdate = false
         
         Log.d(TAG, "Sensor data updated. Actual interval: ${actualInterval}ms (configured: ${updateIntervalMs}ms)")
-    }
-
-    private fun getBatteryLevel(): Float? {
-        return try {
-            val level = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-            if (level >= 0) level / 100f else null
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get battery level", e)
-            null
-        }
-    }
-
-    private fun getBatteryVoltage(): Float? {
-        return try {
-            val intentFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-            val batteryStatus = context.registerReceiver(null, intentFilter)
-            val voltage = batteryStatus?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
-            if (voltage > 0) voltage / 1000f else null  // Convert mV to V
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get battery voltage", e)
-            null
-        }
     }
 
     private fun logAvailableSensors() {
@@ -407,7 +364,6 @@ class SensorService @Inject constructor(
         if (pressure != null) availableSensors.add("Pressure")
         if (temperature != null) availableSensors.add("Temperature")
         if (humidity != null) availableSensors.add("Humidity")
-        if (light != null) availableSensors.add("Light")
         
         Log.i(TAG, "Available sensors: ${availableSensors.joinToString(", ")}")
     }
@@ -419,8 +375,7 @@ class SensorService @Inject constructor(
             "gyroscope" to (gyroscope != null),
             "pressure" to (pressure != null),
             "temperature" to (temperature != null),
-            "humidity" to (humidity != null),
-            "light" to (light != null)
+            "humidity" to (humidity != null)
         )
     }
     

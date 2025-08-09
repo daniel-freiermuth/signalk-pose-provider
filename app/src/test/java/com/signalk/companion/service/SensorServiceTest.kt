@@ -18,10 +18,7 @@ class SensorServiceTest {
             rateOfTurn = 0.05f,
             pressure = 101325.0f, // Standard atmospheric pressure in Pa
             temperature = 293.15f, // 20°C in Kelvin
-            relativeHumidity = 0.6f, // 60%
-            illuminance = 500.0f, // 500 Lux
-            batteryLevel = 0.85f, // 85%
-            batteryVoltage = 3.7f // 3.7V
+            relativeHumidity = 0.6f // 60%
         )
         
         assertNotNull(sensorData)
@@ -38,7 +35,6 @@ class SensorServiceTest {
         assertNull(sensorData.magneticHeading)
         assertNull(sensorData.pressure)
         assertNull(sensorData.temperature)
-        assertNull(sensorData.batteryLevel)
         assertTrue("Timestamp should be set even with null values", sensorData.timestamp > 0)
     }
 
@@ -63,7 +59,6 @@ class SensorServiceTest {
         assertNotNull(sensorData.pressure)
         assertNotNull(sensorData.temperature)
         assertNull(sensorData.magneticHeading)
-        assertNull(sensorData.batteryLevel)
     }
 
     @Test

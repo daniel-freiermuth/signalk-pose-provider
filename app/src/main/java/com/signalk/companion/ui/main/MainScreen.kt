@@ -373,7 +373,7 @@ fun SensorDataCard(
                 
                 // Environmental Data
                 if (sensor.pressure != null || sensor.temperature != null || 
-                    sensor.relativeHumidity != null || sensor.illuminance != null) {
+                    sensor.relativeHumidity != null) {
                     if (hasOrientationData) Divider(modifier = Modifier.padding(vertical = 4.dp))
                     hasEnvironmentalData = true
                     Text(
@@ -391,30 +391,9 @@ fun SensorDataCard(
                     sensor.relativeHumidity?.let { humidity ->
                         SensorDataRow("Humidity", "${String.format("%.1f", humidity * 100)}%")
                     }
-                    sensor.illuminance?.let { light ->
-                        SensorDataRow("Light Level", "${String.format("%.0f", light)} Lux")
-                    }
                 }
                 
-                // Device/Battery Data
-                if (sensor.batteryLevel != null || sensor.batteryVoltage != null) {
-                    if (hasOrientationData || hasEnvironmentalData) Divider(modifier = Modifier.padding(vertical = 4.dp))
-                    hasDeviceData = true
-                    Text(
-                        text = "Device Status",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    
-                    sensor.batteryLevel?.let { level ->
-                        SensorDataRow("Battery Level", "${String.format("%.0f", level * 100)}%")
-                    }
-                    sensor.batteryVoltage?.let { voltage ->
-                        SensorDataRow("Battery Voltage", "${String.format("%.2f", voltage)} V")
-                    }
-                }
-                
-                if (!hasOrientationData && !hasEnvironmentalData && !hasDeviceData) {
+                if (!hasOrientationData && !hasEnvironmentalData) {
                     Text(
                         text = "No device sensors available or active",
                         style = MaterialTheme.typography.bodyMedium,
@@ -736,8 +715,7 @@ fun SensorAvailabilityCard(viewModel: MainViewModel) {
                 "gyroscope" to "Gyroscope (Rotation)",
                 "pressure" to "Barometric Pressure",
                 "temperature" to "Ambient Temperature",
-                "humidity" to "Relative Humidity",
-                "light" to "Light Sensor"
+                "humidity" to "Relative Humidity"
             )
             
             sensorDisplayNames.forEach { (key, displayName) ->

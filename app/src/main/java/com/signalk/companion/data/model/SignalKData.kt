@@ -77,11 +77,6 @@ data class SensorData(
     val pressure: Float? = null,              // Pa, barometric pressure
     val temperature: Float? = null,           // K, ambient temperature
     val relativeHumidity: Float? = null,      // ratio (0-1), humidity
-    val illuminance: Float? = null,           // Lux, ambient light
-    
-    // Device info
-    val batteryLevel: Float? = null,          // ratio (0-1), battery state of charge
-    val batteryVoltage: Float? = null,        // V, estimated battery voltage
     
     val timestamp: Long = System.currentTimeMillis()
 )
