@@ -213,7 +213,7 @@ fun ConnectionStatusCard(
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = protocolDropdownExpanded) },
                     readOnly = true,
                     modifier = Modifier
-                        .menuAnchor()
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                         .fillMaxWidth()
                 )
                 
@@ -343,14 +343,14 @@ fun SensorDataCard(
                     SensorDataRow("Satellites", "$sats")
                 }
                 
-                Divider(modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             } ?: run {
                 Text(
                     text = "No GPS data available",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Divider(modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }
             
             // Device Sensors Section
@@ -393,7 +393,7 @@ fun SensorDataCard(
                 // Environmental Data
                 if (sensor.pressure != null || sensor.temperature != null || 
                     sensor.relativeHumidity != null) {
-                    if (hasOrientationData) Divider(modifier = Modifier.padding(vertical = 4.dp))
+                    if (hasOrientationData) HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     hasEnvironmentalData = true
                     Text(
                         text = "Environmental",
@@ -848,7 +848,7 @@ fun MarineConfigCard(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor()
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                     )
                     
                     ExposedDropdownMenu(
