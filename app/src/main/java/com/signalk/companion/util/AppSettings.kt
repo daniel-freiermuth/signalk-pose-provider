@@ -11,12 +11,16 @@ object AppSettings {
     private const val KEY_SEND_LOCATION = "send_location"
     private const val KEY_SEND_HEADING = "send_heading"
     private const val KEY_SEND_PRESSURE = "send_pressure"
+    private const val KEY_SERVER_URL = "server_url"
+    private const val KEY_USERNAME = "username"
+    private const val KEY_PASSWORD = "password"
     
     // Default values
     private const val DEFAULT_VESSEL_ID = "self"
     private const val DEFAULT_SEND_LOCATION = true
     private const val DEFAULT_SEND_HEADING = true
     private const val DEFAULT_SEND_PRESSURE = true
+    private const val DEFAULT_SERVER_URL = ""
     
     private fun getPreferences(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -97,5 +101,76 @@ object AppSettings {
         getPreferences(context).edit()
             .putBoolean(KEY_SEND_PRESSURE, enabled)
             .apply()
+    }
+    
+    // Server URL settings
+    
+    /**
+     * Get the SignalK server URL
+     */
+    fun getServerUrl(context: Context): String {
+        return getPreferences(context).getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
+    }
+    
+    /**
+     * Set the SignalK server URL
+     */
+    fun setServerUrl(context: Context, url: String) {
+        getPreferences(context).edit()
+            .putString(KEY_SERVER_URL, url.trim())
+            .apply()
+    }
+    
+    // Authentication credentials
+    
+    /**
+     * Get the stored username
+     */
+    fun getUsername(context: Context): String {
+        return getPreferences(context).getString(KEY_USERNAME, "") ?: ""
+    }
+    
+    /**
+     * Set the username
+     */
+    fun setUsername(context: Context, username: String) {
+        getPreferences(context).edit()
+            .putString(KEY_USERNAME, username.trim())
+            .apply()
+    }
+    
+    /**
+     * Get the stored password (Note: stored in plain text, consider encryption for production)
+     */
+    fun getPassword(context: Context): String {
+        return getPreferences(context).getString(KEY_PASSWORD, "") ?: ""
+    }
+    
+    /**
+     * Set the password
+     */
+    fun setPassword(context: Context, password: String) {
+        getPreferences(context).edit()
+            .putString(KEY_PASSWORD, password)
+            .apply()
+    }
+    
+    /**
+     * Clear all credentials
+     */
+    fun clearCredentials(context: Context) {
+        getPreferences(context).edit()
+            .remove(KEY_USERNAME)
+            .remove(KEY_PASSWORD)
+            .apply()
+    }
+    
+    /**
+     * Check if credentials are stored
+     */
+    fun hasCredentials(context: Context): Boolean {
+        val username = getUsername(context)
+        val password = getPassword(context)
+        return username.isNotBlank() && password.isNotBlank()
     }
 }

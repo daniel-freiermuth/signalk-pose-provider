@@ -72,6 +72,9 @@ dependencies {
     ksp("com.google.dagger:hilt-compiler:2.48")
     implementation("androidx.hilt:hilt-navigation-compose:1.1.0")
     
+    // Navigation
+    implementation("androidx.navigation:navigation-compose:2.7.5")
+    
     // Location Services
     implementation("com.google.android.gms:play-services-location:21.0.1")
     

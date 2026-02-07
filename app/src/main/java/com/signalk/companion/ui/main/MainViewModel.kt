@@ -36,7 +36,7 @@ enum class DeviceOrientation(val displayName: String, val rotationDegrees: Int, 
 data class MainUiState(
     val isConnected: Boolean = false,
     val isStreaming: Boolean = false,
-    val serverUrl: String = "https://signalk.entrop.mywire.org",
+    val serverUrl: String = "",
     val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.WEBSOCKET,
     val vesselId: String = "self",
     val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
@@ -53,7 +53,7 @@ data class MainUiState(
     val messagesSent: Int = 0,
     val lastTransmissionTime: Long? = null,
     val isAuthenticated: Boolean = false,
-    val username: String? = "test",
+    val username: String? = null,
     val isLoggingIn: Boolean = false
 ) {
     // Parse the URL to extract components
@@ -202,6 +202,8 @@ class MainViewModel @Inject constructor(
     
     fun updateServerUrl(url: String) {
         _uiState.update { it.copy(serverUrl = url) }
+        // Save to shared preferences
+        currentContext?.let { AppSettings.setServerUrl(it, url) }
     }
 
     fun updateTransmissionProtocol(protocol: TransmissionProtocol) {
@@ -283,17 +285,48 @@ class MainViewModel @Inject constructor(
         if (currentContext == null) {
             currentContext = context
             // Load settings from shared preferences
+            val savedServerUrl = AppSettings.getServerUrl(context)
             val savedVesselId = AppSettings.getVesselId(context)
             val savedSendLocation = AppSettings.getSendLocation(context)
             val savedSendHeading = AppSettings.getSendHeading(context)
             val savedSendPressure = AppSettings.getSendPressure(context)
+            val savedUsername = AppSettings.getUsername(context)
             
             _uiState.update { 
                 it.copy(
+                    serverUrl = savedServerUrl,
                     vesselId = savedVesselId,
                     sendLocation = savedSendLocation,
                     sendHeading = savedSendHeading,
-                    sendPressure = savedSendPressure
+                    sendPressure = savedSendPressure,
+                    username = savedUsername.ifBlank { null }
+                )
+            }
+            
+            // Auto-login if credentials are stored
+            if (AppSettings.hasCredentials(context) && savedServerUrl.isNotBlank()) {
+                val savedPassword = AppSettings.getPassword(context)
+                viewModelScope.launch {
+                    authenticationService.login(savedServerUrl, savedUsername, savedPassword)
+                }
+            }
+        } else {
+            // Reload settings when returning from settings screen
+            val savedServerUrl = AppSettings.getServerUrl(context)
+            val savedVesselId = AppSettings.getVesselId(context)
+            val savedSendLocation = AppSettings.getSendLocation(context)
+            val savedSendHeading = AppSettings.getSendHeading(context)
+            val savedSendPressure = AppSettings.getSendPressure(context)
+            val savedUsername = AppSettings.getUsername(context)
+            
+            _uiState.update { 
+                it.copy(
+                    serverUrl = savedServerUrl,
+                    vesselId = savedVesselId,
+                    sendLocation = savedSendLocation,
+                    sendHeading = savedSendHeading,
+                    sendPressure = savedSendPressure,
+                    username = savedUsername.ifBlank { null }
                 )
             }
         }

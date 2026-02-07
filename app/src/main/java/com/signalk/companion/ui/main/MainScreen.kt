@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ import java.util.*
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
+    onNavigateToSettings: () -> Unit = {},
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -52,7 +54,24 @@ fun MainScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("SignalK Pose Provider") }
+                title = { Text("SignalK Pose Provider") },
+                actions = {
+                    // Authentication status indicator
+                    if (uiState.isAuthenticated) {
+                        Text(
+                            text = "✓",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    // Settings button
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings"
+                        )
+                    }
+                }
             )
         }
     ) { innerPadding ->
@@ -83,16 +102,6 @@ fun MainScreen(
                 onSendLocationChange = viewModel::updateSendLocation,
                 onSendHeadingChange = viewModel::updateSendHeading,
                 onSendPressureChange = viewModel::updateSendPressure
-            )
-            
-            // Authentication Card (integrated login)
-            AuthenticationCard(
-                isAuthenticated = uiState.isAuthenticated,
-                username = uiState.username,
-                serverUrl = uiState.serverUrl,
-                isLoggingIn = uiState.isLoggingIn,
-                onLogin = { username, password -> viewModel.login(username, password) },
-                onLogout = { viewModel.logout() }
             )
             
             // Control Card
