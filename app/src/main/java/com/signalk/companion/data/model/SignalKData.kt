@@ -64,8 +64,6 @@ data class SensorData(
     // Navigation orientation data
     val magneticHeading: Float? = null,        // radians, from magnetometer
     val trueHeading: Float? = null,           // radians, magnetic + declination
-    val courseOverGround: Float? = null,      // radians, from GPS
-    val speedOverGround: Float? = null,       // m/s, from GPS
     
     // Device attitude (roll, pitch, yaw in radians)
     val roll: Float? = null,                  // radians, device roll

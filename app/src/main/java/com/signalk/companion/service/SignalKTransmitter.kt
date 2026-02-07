@@ -492,24 +492,6 @@ class SignalKTransmitter @Inject constructor(
             }
         } // End of sendHeading condition
         
-        sensorData.courseOverGround?.let { course ->
-            values.add(
-                SignalKValue(
-                    path = "navigation.courseOverGroundTrue",
-                    value = SignalKValues.number(course.toDouble()) // Already in radians
-                )
-            )
-        }
-        
-        sensorData.speedOverGround?.let { speed ->
-            values.add(
-                SignalKValue(
-                    path = "navigation.speedOverGround",
-                    value = SignalKValues.number(speed.toDouble()) // Already in m/s
-                )
-            )
-        }
-        
         // Device attitude (roll, pitch, yaw)
         if (sensorData.roll != null || sensorData.pitch != null || sensorData.yaw != null) {
             val attitude = buildJsonObject {
