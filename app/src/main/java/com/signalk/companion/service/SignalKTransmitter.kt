@@ -230,7 +230,7 @@ class SignalKTransmitter @Inject constructor(
             if (oldAddress == null || !oldAddress.equals(newAddress)) {
                 targetAddress = newAddress
                 val message = "DNS resolved: $serverAddress -> ${newAddress.hostAddress} (was: ${oldAddress?.hostAddress ?: "null"})"
-                println(message)
+                Log.d(TAG, message)
                 _lastDnsRefresh.value = message
             }
 
@@ -249,19 +249,19 @@ class SignalKTransmitter @Inject constructor(
                                 try {
                                     initializeWebSocket()
                                 } catch (e: Exception) {
-                                    println("WebSocket reconnection failed: ${e.message}")
+                                    Log.e(TAG, "WebSocket reconnection failed: ${e.message}", e)
                                 }
-                            }
+                            } ?: Log.w(TAG, "Cannot attempt reconnection - transmitter scope is null")
                         }
                     } else {
                         // IP didn't change, just update the tracking without logging
-                        println("DNS refresh for WebSocket: $serverAddress -> ${newAddress.hostAddress} (no change)")
+                        Log.d(TAG, "DNS refresh for WebSocket: $serverAddress -> ${newAddress.hostAddress} (no change)")
                     }
                 }
             }
             _currentResolvedIp.value = newAddress.hostAddress
         } catch (e: Exception) {
-            println("DNS resolution failed for $serverAddress: ${e.message}")
+            Log.e(TAG, "DNS resolution failed for $serverAddress: ${e.message}", e)
             // DNS resolution failed - but don't kill the entire streaming
             // Keep using the old IP if we had one, or fail if this is the first attempt
             if (targetAddress == null && transmissionProtocol == TransmissionProtocol.UDP) {
@@ -286,10 +286,10 @@ class SignalKTransmitter @Inject constructor(
                 delay(DNS_REFRESH_INTERVAL_MS)
                 if (socket != null || webSocket != null) { // Check again after delay
                     try {
-                        println("Performing periodic DNS refresh for $serverAddress...")
+                        Log.d(TAG, "Performing periodic DNS refresh for $serverAddress...")
                         refreshDnsResolution()
                     } catch (e: Exception) {
-                        println("DNS refresh failed: ${e.message}")
+                        Log.e(TAG, "DNS refresh failed: ${e.message}", e)
                         // For UDP, if we lose DNS resolution completely, mark as disconnected
                         if (transmissionProtocol == TransmissionProtocol.UDP && targetAddress == null) {
                             _connectionStatus.value = false
@@ -314,14 +314,13 @@ class SignalKTransmitter @Inject constructor(
             if (webSocketState.get() == WebSocketState.DISCONNECTED) {
                 Log.d(TAG, "Executing scheduled WebSocket reconnection...")
                 try {
-                    println("Executing scheduled WebSocket reconnection...")
                     initializeWebSocket()
                 } catch (e: Exception) {
-                    println("Scheduled WebSocket reconnection failed: ${e.message}")
-                    // Could implement exponential backoff here if needed
+                    Log.e(TAG, "Scheduled WebSocket reconnection failed: ${e.message}", e)
+                    // State is already DISCONNECTED, so future reconnection attempts are possible
                 }
             } else {
-                println("Skipping scheduled reconnection - already connected")
+                Log.d(TAG, "Skipping scheduled reconnection - state: ${webSocketState.get()}")
             }
         }
     }
@@ -615,8 +614,7 @@ class SignalKTransmitter @Inject constructor(
         } catch (e: Exception) {
             _connectionStatus.value = false
             // Log the error details for debugging
-            println("SignalK transmission error: ${e.javaClass.simpleName} - ${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "SignalK transmission error: ${e.javaClass.simpleName} - ${e.message}", e)
         }
     }
     
