@@ -46,7 +46,7 @@ class SensorService @Inject constructor(
     private val alpha = 0.8f  // Low-pass filter constant
     
     // Marine navigation configuration
-    private var deviceOrientation = DeviceOrientation.LANDSCAPE_LEFT
+    private var deviceOrientation = DeviceOrientation.DEFAULT
     private var tiltCorrectionEnabled = true
     private var headingOffsetDegrees = 0.0f // Correction for device mounting angle
     

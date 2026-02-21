@@ -29,7 +29,11 @@ enum class DeviceOrientation(val displayName: String, val rotationDegrees: Int, 
     PORTRAIT("Portrait", 0, "Phone held normally (top of phone = bow)"),
     LANDSCAPE_LEFT("Landscape Left", 90, "Phone rotated 90° CCW (left side = bow)"),
     LANDSCAPE_RIGHT("Landscape Right", 270, "Phone rotated 90° CW (right side = bow)"),
-    PORTRAIT_INVERTED("Portrait Inverted", 180, "Phone upside down (bottom = bow)")
+    PORTRAIT_INVERTED("Portrait Inverted", 180, "Phone upside down (bottom = bow)");
+    
+    companion object {
+        val DEFAULT = LANDSCAPE_LEFT
+    }
 }
 
 data class MainUiState(
@@ -37,7 +41,7 @@ data class MainUiState(
     val isStreaming: Boolean = false,
     val parsedUrl: UrlParser.ParsedUrl? = null,
     val vesselId: String = "self",
-    val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
+    val deviceOrientation: DeviceOrientation = DeviceOrientation.DEFAULT,
     val compassTiltCorrection: Boolean = true,
     val headingOffset: Float = 0.0f, // Heading correction in degrees (+/- for device mounting angle)
     // Data transmission options
@@ -146,7 +150,7 @@ class MainViewModel @Inject constructor(
     
     init {
         // Configure sensor service for boat mounting (landscape left by default)
-        sensorService.setDeviceOrientation(DeviceOrientation.LANDSCAPE_LEFT)
+        sensorService.setDeviceOrientation(DeviceOrientation.DEFAULT)
         sensorService.setTiltCorrection(true)
         sensorService.setHeadingOffset(0.0f) // No offset by default
         
@@ -214,6 +218,8 @@ class MainViewModel @Inject constructor(
 
     fun updateDeviceOrientation(orientation: DeviceOrientation) {
         _uiState.update { it.copy(deviceOrientation = orientation) }
+        // Save to shared preferences
+        AppSettings.setDeviceOrientation(applicationContext, orientation.name)
         // Update sensor service with new orientation
         sensorService.setDeviceOrientation(orientation)
         // If streaming service is bound, update it too
@@ -222,6 +228,8 @@ class MainViewModel @Inject constructor(
 
     fun updateCompassTiltCorrection(enabled: Boolean) {
         _uiState.update { it.copy(compassTiltCorrection = enabled) }
+        // Save to shared preferences
+        AppSettings.setCompassTiltCorrection(applicationContext, enabled)
         // Update sensor service with tilt correction setting
         sensorService.setTiltCorrection(enabled)
         // If streaming service is bound, update it too
@@ -230,6 +238,8 @@ class MainViewModel @Inject constructor(
 
     fun updateHeadingOffset(offsetDegrees: Float) {
         _uiState.update { it.copy(headingOffset = offsetDegrees) }
+        // Save to shared preferences
+        AppSettings.setHeadingOffset(applicationContext, offsetDegrees)
         // Update sensor service with heading offset
         sensorService.setHeadingOffset(offsetDegrees)
         // If streaming service is bound, update it too
@@ -297,6 +307,19 @@ class MainViewModel @Inject constructor(
         val savedSendPressure = AppSettings.getSendPressure(applicationContext)
         val savedUsername = AppSettings.getUsername(applicationContext)
         
+        // Load device orientation and compass settings
+        val savedOrientationName = AppSettings.getDeviceOrientation(applicationContext)
+        val savedOrientation = DeviceOrientation.values()
+            .find { it.name == savedOrientationName } 
+            ?: DeviceOrientation.DEFAULT
+        val savedTiltCorrection = AppSettings.getCompassTiltCorrection(applicationContext)
+        val savedHeadingOffset = AppSettings.getHeadingOffset(applicationContext)
+        
+        // Apply orientation and compass settings to sensor service
+        sensorService.setDeviceOrientation(savedOrientation)
+        sensorService.setTiltCorrection(savedTiltCorrection)
+        sensorService.setHeadingOffset(savedHeadingOffset)
+        
         _uiState.update { 
             it.copy(
                 parsedUrl = savedParsedUrl,
@@ -304,7 +327,10 @@ class MainViewModel @Inject constructor(
                 sendLocation = savedSendLocation,
                 sendHeading = savedSendHeading,
                 sendPressure = savedSendPressure,
-                username = savedUsername.ifBlank { null }
+                username = savedUsername.ifBlank { null },
+                deviceOrientation = savedOrientation,
+                compassTiltCorrection = savedTiltCorrection,
+                headingOffset = savedHeadingOffset
             )
         }
         

@@ -14,6 +14,9 @@ object AppSettings {
     private const val KEY_SERVER_URL = "server_url"
     private const val KEY_USERNAME = "username"
     private const val KEY_PASSWORD = "password"
+    private const val KEY_DEVICE_ORIENTATION = "device_orientation"
+    private const val KEY_COMPASS_TILT_CORRECTION = "compass_tilt_correction"
+    private const val KEY_HEADING_OFFSET = "heading_offset"
     
     // Default values
     private const val DEFAULT_VESSEL_ID = "self"
@@ -21,6 +24,9 @@ object AppSettings {
     private const val DEFAULT_SEND_HEADING = true
     private const val DEFAULT_SEND_PRESSURE = true
     private const val DEFAULT_SERVER_URL = ""
+    private const val DEFAULT_DEVICE_ORIENTATION = "LANDSCAPE_LEFT"
+    private const val DEFAULT_COMPASS_TILT_CORRECTION = true
+    private const val DEFAULT_HEADING_OFFSET = 0.0f
     
     private fun getPreferences(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -172,5 +178,61 @@ object AppSettings {
         val username = getUsername(context)
         val password = getPassword(context)
         return username.isNotBlank() && password.isNotBlank()
+    }
+    
+    // Device orientation and compass settings
+    
+    /**
+     * Get the device orientation setting
+     * @return device orientation name (e.g., "LANDSCAPE_LEFT", "PORTRAIT")
+     */
+    fun getDeviceOrientation(context: Context): String {
+        return getPreferences(context).getString(KEY_DEVICE_ORIENTATION, DEFAULT_DEVICE_ORIENTATION) 
+            ?: DEFAULT_DEVICE_ORIENTATION
+    }
+    
+    /**
+     * Set the device orientation
+     * @param orientation the orientation name (e.g., "LANDSCAPE_LEFT", "PORTRAIT")
+     */
+    fun setDeviceOrientation(context: Context, orientation: String) {
+        require(orientation.isNotBlank()) { "Device orientation cannot be blank" }
+        getPreferences(context).edit()
+            .putString(KEY_DEVICE_ORIENTATION, orientation)
+            .apply()
+    }
+    
+    /**
+     * Get whether compass tilt correction is enabled
+     */
+    fun getCompassTiltCorrection(context: Context): Boolean {
+        return getPreferences(context).getBoolean(KEY_COMPASS_TILT_CORRECTION, DEFAULT_COMPASS_TILT_CORRECTION)
+    }
+    
+    /**
+     * Set whether compass tilt correction is enabled
+     */
+    fun setCompassTiltCorrection(context: Context, enabled: Boolean) {
+        getPreferences(context).edit()
+            .putBoolean(KEY_COMPASS_TILT_CORRECTION, enabled)
+            .apply()
+    }
+    
+    /**
+     * Get the heading offset in degrees
+     */
+    fun getHeadingOffset(context: Context): Float {
+        return getPreferences(context).getFloat(KEY_HEADING_OFFSET, DEFAULT_HEADING_OFFSET)
+    }
+    
+    /**
+     * Set the heading offset in degrees
+     * @param offsetDegrees heading correction offset (+/- degrees)
+     */
+    fun setHeadingOffset(context: Context, offsetDegrees: Float) {
+        require(offsetDegrees in -360f..360f) { "Heading offset must be between -360 and 360 degrees" }
+        getPreferences(context).edit()
+            .putFloat(KEY_HEADING_OFFSET, offsetDegrees)
+            .apply()
     }
 }
