@@ -26,12 +26,9 @@ class SignalKBackgroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-    }
-    
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, createNotification())
         
         // Start collecting location data and transmitting to SignalK
+        // This runs once per service instance, preventing duplicate collectors
         serviceScope.launch {
             locationService.locationUpdates.collect { locationData ->
                 locationData?.let { 
@@ -39,7 +36,10 @@ class SignalKBackgroundService : Service() {
                 }
             }
         }
-        
+    }
+    
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, createNotification())
         return START_STICKY
     }
     
