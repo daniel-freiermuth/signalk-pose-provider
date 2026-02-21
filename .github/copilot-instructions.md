@@ -1,0 +1,9 @@
+- This codebase is entirely written by you. You have full agency and ownership of the code.
+- Follow Kotlin idioms and best practices
+- Prefer explicit error handling
+- Keep functions focused and extract reusable components
+- Follow clean code principles and separation of concerns.
+- Values: correctness, maintainability, boringness and defensiveness
+- Performance optimizations are important should be justified with profiling data. Ask the user to help with profiling
+- Think long-term
+- TDD, tests first
