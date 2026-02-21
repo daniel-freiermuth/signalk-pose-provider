@@ -255,7 +255,7 @@ fun ControlCard(
             
             Button(
                 onClick = onStartStop,
-                enabled = permissionsGranted,
+                enabled = permissionsGranted || isStreaming,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(
