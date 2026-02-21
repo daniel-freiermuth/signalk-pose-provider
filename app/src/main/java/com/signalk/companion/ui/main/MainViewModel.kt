@@ -14,6 +14,7 @@ import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SensorService
 import com.signalk.companion.service.SignalKStreamingService
 import com.signalk.companion.util.AppSettings
+import com.signalk.companion.util.UrlParser
 import com.signalk.companion.service.SignalKTransmitter
 import com.signalk.companion.service.AuthenticationService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,7 +37,7 @@ enum class DeviceOrientation(val displayName: String, val rotationDegrees: Int, 
 data class MainUiState(
     val isConnected: Boolean = false,
     val isStreaming: Boolean = false,
-    val serverUrl: String = "",
+    val parsedUrl: UrlParser.ParsedUrl? = null,
     val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.WEBSOCKET,
     val vesselId: String = "self",
     val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
@@ -56,47 +57,7 @@ data class MainUiState(
     val username: String? = null,
     val isLoggingIn: Boolean = false
 ) {
-    // Parse the URL to extract components
-    private val parsedUrl: ParsedUrl get() = parseUrl(serverUrl)
-    
-    val hostname: String get() = parsedUrl.hostname
-    val port: Int get() = parsedUrl.port
-    val isHttps: Boolean get() = parsedUrl.isHttps
-    
-    // For UDP streaming, use hostname with port 55555
-    val udpAddress: String get() = "$hostname:55555"
-}
-
-private data class ParsedUrl(
-    val hostname: String,
-    val port: Int,
-    val isHttps: Boolean
-)
-
-private fun parseUrl(url: String): ParsedUrl {
-    return try {
-        val cleanUrl = url.lowercase().let { 
-            if (!it.startsWith("http://") && !it.startsWith("https://")) {
-                "http://$it" // Default to HTTP if no protocol specified
-            } else it
-        }
-        
-        val isHttps = cleanUrl.startsWith("https://")
-        val withoutProtocol = cleanUrl.removePrefix("https://").removePrefix("http://")
-        val parts = withoutProtocol.split(":")
-        
-        val hostname = parts[0].trim()
-        val port = if (parts.size > 1) {
-            parts[1].split("/")[0].toIntOrNull() ?: (if (isHttps) 443 else 80)
-        } else {
-            if (isHttps) 443 else 80
-        }
-        
-        ParsedUrl(hostname, port, isHttps)
-    } catch (e: Exception) {
-        // Fallback for invalid URLs
-        ParsedUrl("192.168.1.100", 3000, false)
-    }
+    val serverUrl: String get() = parsedUrl?.toUrlString() ?: ""
 }
 
 @HiltViewModel
@@ -133,6 +94,14 @@ class MainViewModel @Inject constructor(
             viewModelScope.launch {
                 streamingService?.lastTransmissionTime?.collect { time ->
                     _uiState.update { it.copy(lastTransmissionTime = time) }
+                }
+            }
+            
+            viewModelScope.launch {
+                streamingService?.error?.collect { errorMsg ->
+                    if (errorMsg != null) {
+                        _uiState.update { it.copy(error = errorMsg) }
+                    }
                 }
             }
         }
@@ -201,9 +170,17 @@ class MainViewModel @Inject constructor(
     }
     
     fun updateServerUrl(url: String) {
-        _uiState.update { it.copy(serverUrl = url) }
+        val parsed = UrlParser.parseUrl(url)
+        _uiState.update { it.copy(parsedUrl = parsed) }
         // Save to shared preferences
-        currentContext?.let { AppSettings.setServerUrl(it, url) }
+        currentContext?.let { AppSettings.setServerUrl(it, parsed?.toUrlString() ?: url) }
+        
+        // Warn if URL contains a path that will be ignored
+        if (parsed?.hasPath == true) {
+            _uiState.update { 
+                it.copy(error = "Warning: URL path will be ignored. SignalK uses /signalk/v1/stream")
+            }
+        }
     }
 
     fun updateTransmissionProtocol(protocol: TransmissionProtocol) {
@@ -286,6 +263,7 @@ class MainViewModel @Inject constructor(
             currentContext = context
             // Load settings from shared preferences
             val savedServerUrl = AppSettings.getServerUrl(context)
+            val savedParsedUrl = UrlParser.parseUrl(savedServerUrl)
             val savedVesselId = AppSettings.getVesselId(context)
             val savedSendLocation = AppSettings.getSendLocation(context)
             val savedSendHeading = AppSettings.getSendHeading(context)
@@ -294,7 +272,7 @@ class MainViewModel @Inject constructor(
             
             _uiState.update { 
                 it.copy(
-                    serverUrl = savedServerUrl,
+                    parsedUrl = savedParsedUrl,
                     vesselId = savedVesselId,
                     sendLocation = savedSendLocation,
                     sendHeading = savedSendHeading,
@@ -313,6 +291,7 @@ class MainViewModel @Inject constructor(
         } else {
             // Reload settings when returning from settings screen
             val savedServerUrl = AppSettings.getServerUrl(context)
+            val savedParsedUrl = UrlParser.parseUrl(savedServerUrl)
             val savedVesselId = AppSettings.getVesselId(context)
             val savedSendLocation = AppSettings.getSendLocation(context)
             val savedSendHeading = AppSettings.getSendHeading(context)
@@ -321,7 +300,7 @@ class MainViewModel @Inject constructor(
             
             _uiState.update { 
                 it.copy(
-                    serverUrl = savedServerUrl,
+                    parsedUrl = savedParsedUrl,
                     vesselId = savedVesselId,
                     sendLocation = savedSendLocation,
                     sendHeading = savedSendHeading,
@@ -335,6 +314,18 @@ class MainViewModel @Inject constructor(
     fun startStreaming(context: android.content.Context) {
         currentContext = context
         
+        // Validate URL before starting service
+        val currentState = _uiState.value
+        if (currentState.parsedUrl == null) {
+            _uiState.update { 
+                it.copy(error = "Invalid server URL: ${currentState.serverUrl}. Please use http://, https://, ws://, or wss:// protocol.") 
+            }
+            return
+        }
+        
+        // Clear any previous errors
+        _uiState.update { it.copy(error = null) }
+        
         // Bind to service if not already bound
         if (!bound) {
             val intent = Intent(context, SignalKStreamingService::class.java)
@@ -342,10 +333,9 @@ class MainViewModel @Inject constructor(
         }
         
         // Start streaming service
-        val currentState = _uiState.value
         val serviceIntent = Intent(context, SignalKStreamingService::class.java).apply {
             action = SignalKStreamingService.ACTION_START_STREAMING
-            putExtra(SignalKStreamingService.EXTRA_SERVER_URL, currentState.serverUrl)
+            putExtra(SignalKStreamingService.EXTRA_PARSED_URL, currentState.parsedUrl)
             putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Fixed 1-second interval
             putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, 1000) // Fixed 1-second interval
             putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, currentState.sendLocation)

@@ -15,7 +15,9 @@ import androidx.core.app.NotificationCompat
 import com.signalk.companion.MainActivity
 import com.signalk.companion.R
 import com.signalk.companion.ui.main.DeviceOrientation
+import com.signalk.companion.ui.main.TransmissionProtocol
 import com.signalk.companion.util.BatteryOptimizationHelper
+import com.signalk.companion.util.UrlParser
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,6 +58,9 @@ class SignalKStreamingService : Service() {
     
     private val _lastTransmissionTime = MutableStateFlow<Long?>(null)
     val lastTransmissionTime: StateFlow<Long?> = _lastTransmissionTime.asStateFlow()
+    
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
 
     companion object {
         private const val TAG = "SignalKStreamingService"
@@ -66,7 +71,7 @@ class SignalKStreamingService : Service() {
         const val ACTION_STOP_STREAMING = "STOP_STREAMING"
         const val ACTION_UPDATE_CONFIG = "UPDATE_CONFIG"
         
-        const val EXTRA_SERVER_URL = "SERVER_URL"
+        const val EXTRA_PARSED_URL = "PARSED_URL"
         const val EXTRA_LOCATION_RATE = "LOCATION_RATE"
         const val EXTRA_SENSOR_RATE = "SENSOR_RATE"
         const val EXTRA_SEND_LOCATION = "SEND_LOCATION"
@@ -130,14 +135,18 @@ class SignalKStreamingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_STREAMING -> {
-                val serverUrl = intent.getStringExtra(EXTRA_SERVER_URL) ?: "https://signalk.entrop.mywire.org"
+                val parsedUrl = intent.getParcelableExtra(EXTRA_PARSED_URL, UrlParser.ParsedUrl::class.java)
                 val locationRate = intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L)
                 val sensorRate = intent.getIntExtra(EXTRA_SENSOR_RATE, 1000)
                 val sendLocation = intent.getBooleanExtra(EXTRA_SEND_LOCATION, true)
                 val sendHeading = intent.getBooleanExtra(EXTRA_SEND_HEADING, true)
                 val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
                 
-                startStreaming(serverUrl, locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
+                if (parsedUrl != null) {
+                    startStreaming(parsedUrl, locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
+                } else {
+                    Log.w(TAG, "ACTION_START_STREAMING received but parsedUrl is null - ignoring request")
+                }
             }
             ACTION_UPDATE_CONFIG -> {
                 val locationRate = intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L)
@@ -156,7 +165,8 @@ class SignalKStreamingService : Service() {
         return START_STICKY // Restart if killed by system
     }
 
-    private fun startStreaming(serverUrl: String, locationRate: Long, sensorRate: Int, 
+    private fun startStreaming(parsedUrl: UrlParser.ParsedUrl,
+                               locationRate: Long, sensorRate: Int,
                                sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true) {
         if (_isStreaming.value) {
             Log.d(TAG, "Already streaming, ignoring start request")
@@ -168,7 +178,7 @@ class SignalKStreamingService : Service() {
         this.sendHeading = sendHeading
         this.sendPressure = sendPressure
         
-        Log.d(TAG, "Starting SignalK streaming to $serverUrl (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")
+        Log.d(TAG, "Starting SignalK streaming to ${parsedUrl.toUrlString()} (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")
         
         // Check battery optimization status
         val batteryOptimized = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)
@@ -179,10 +189,18 @@ class SignalKStreamingService : Service() {
         
         serviceScope.launch {
             try {
-                Log.d(TAG, "Configuring SignalK transmitter for: $serverUrl")
+                _error.value = null // Clear any previous errors
+                Log.d(TAG, "Configuring SignalK transmitter")
                 
-                // Configure SignalK transmitter
-                signalKTransmitter.configureWebSocketFromHttpUrl(serverUrl)
+                // Configure SignalK transmitter with parsed components
+                signalKTransmitter.configure(
+                    hostname = parsedUrl.hostname,
+                    port = parsedUrl.port,
+                    protocol = TransmissionProtocol.WEBSOCKET
+                )
+                
+                // Update base URL with correct protocol
+                signalKTransmitter.updateProtocol(parsedUrl.isHttps)
                 
                 // Start SignalK streaming (this is crucial!)
                 Log.d(TAG, "Starting SignalK transmitter...")
@@ -220,7 +238,15 @@ class SignalKStreamingService : Service() {
                 Log.d(TAG, "SignalK streaming started successfully")
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to start streaming", e)
+                val errorMessage = when (e) {
+                    is IllegalArgumentException -> "Invalid server URL: ${e.message?.substringAfter(":")?.trim() ?: "unknown error"}"
+                    is java.net.UnknownHostException -> "Cannot resolve hostname: ${e.message}"
+                    is SecurityException -> "Permission denied: ${e.message}"
+                    else -> "Failed to start streaming: ${e.message}"
+                }
+                Log.e(TAG, errorMessage, e)
+                _error.value = errorMessage
+                _isStreaming.value = false
                 stopSelf()
             }
         }

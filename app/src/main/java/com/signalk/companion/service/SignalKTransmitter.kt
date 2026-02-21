@@ -4,6 +4,7 @@ import android.content.Context
 import com.signalk.companion.data.model.*
 import com.signalk.companion.ui.main.TransmissionProtocol
 import com.signalk.companion.util.AppSettings
+import com.signalk.companion.util.UrlParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.*
@@ -86,13 +87,25 @@ class SignalKTransmitter @Inject constructor(
         _connectionStatus.value = false
     }
     
+    fun updateProtocol(isHttps: Boolean) {
+        if (transmissionProtocol == TransmissionProtocol.WEBSOCKET) {
+            val wsProtocol = if (isHttps) "wss" else "ws"
+            baseUrl = "$wsProtocol://$serverAddress:$serverPort"
+        }
+    }
+    
     fun setContext(context: Context) {
         this.context = context
     }
     
     // Configure from a full URL and auto-detect WebSocket protocol based on HTTP/HTTPS
+    // Note: URL should be pre-validated before calling this method
     fun configureFromUrl(fullUrl: String, protocol: TransmissionProtocol = TransmissionProtocol.UDP) {
-        val parsedUrl = parseUrl(fullUrl)
+        val parsedUrl = UrlParser.parseUrl(fullUrl)
+        if (parsedUrl == null) {
+            // This should not happen if URL was pre-validated, but handle defensively
+            throw IllegalArgumentException("Invalid SignalK server URL: $fullUrl")
+        }
         
         // Auto-detect WebSocket protocol (WEBSOCKET handles both HTTP and HTTPS)
         val detectedProtocol = when {
@@ -125,38 +138,6 @@ class SignalKTransmitter @Inject constructor(
     // Convenient method to configure WebSocket from HTTP URL with auto-detection
     fun configureWebSocketFromHttpUrl(fullUrl: String) {
         configureFromUrl(fullUrl, TransmissionProtocol.WEBSOCKET) // Will auto-detect WSS if HTTPS
-    }
-    
-    private data class ParsedUrl(val hostname: String, val port: Int, val isHttps: Boolean)
-    
-    private fun parseUrl(url: String): ParsedUrl {
-        return try {
-            val cleanUrl = url.lowercase().let { 
-                if (!it.startsWith("http://") && !it.startsWith("https://") && 
-                    !it.startsWith("ws://") && !it.startsWith("wss://")) {
-                    "http://$it"
-                } else it
-            }
-            
-            val isHttps = cleanUrl.startsWith("https://") || cleanUrl.startsWith("wss://")
-            val withoutProtocol = cleanUrl
-                .removePrefix("https://")
-                .removePrefix("http://")
-                .removePrefix("wss://")
-                .removePrefix("ws://")
-            val parts = withoutProtocol.split(":")
-            
-            val hostname = parts[0].trim()
-            val port = if (parts.size > 1) {
-                parts[1].split("/")[0].toIntOrNull() ?: (if (isHttps) 443 else 80)
-            } else {
-                if (isHttps) 443 else 80
-            }
-            
-            ParsedUrl(hostname, port, isHttps)
-        } catch (e: Exception) {
-            ParsedUrl("192.168.1.100", 3000, false)
-        }
     }
     
     // Keep backwards compatibility method
