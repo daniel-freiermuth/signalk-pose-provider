@@ -25,13 +25,22 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class SignalKStreamingService : Service() {
+
+    enum class StreamingState {
+        IDLE,      // Not streaming
+        STARTING,  // Initialization in progress
+        STREAMING  // Successfully streaming
+    }
 
     @Inject
     lateinit var locationService: LocationService
@@ -50,8 +59,17 @@ class SignalKStreamingService : Service() {
     private var sendHeading: Boolean = true
     private var sendPressure: Boolean = true
     
-    private val _isStreaming = MutableStateFlow(false)
-    val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
+    private val _streamingState = MutableStateFlow(StreamingState.IDLE)
+    val streamingState: StateFlow<StreamingState> = _streamingState.asStateFlow()
+    
+    // Derived property for consumers expecting Boolean - always consistent with streamingState
+    val isStreaming: StateFlow<Boolean> = _streamingState
+        .map { it == StreamingState.STREAMING }
+        .stateIn(
+            scope = serviceScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false
+        )
     
     private val _messagesSent = MutableStateFlow(0)
     val messagesSent: StateFlow<Int> = _messagesSent.asStateFlow()
@@ -168,10 +186,13 @@ class SignalKStreamingService : Service() {
     private fun startStreaming(parsedUrl: UrlParser.ParsedUrl,
                                locationRate: Long, sensorRate: Int,
                                sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true) {
-        if (_isStreaming.value) {
-            Log.d(TAG, "Already streaming, ignoring start request")
+        if (_streamingState.value != StreamingState.IDLE) {
+            Log.d(TAG, "Already streaming or starting (state=${_streamingState.value}), ignoring start request")
             return
         }
+        
+        // Set to STARTING immediately to prevent race condition
+        _streamingState.value = StreamingState.STARTING
         
         // Store configuration
         this.sendLocation = sendLocation
@@ -229,7 +250,8 @@ class SignalKStreamingService : Service() {
                     Log.d(TAG, "All sensor transmission disabled - skipping sensor activation")
                 }
                 
-                _isStreaming.value = true
+                // Mark as successfully streaming
+                _streamingState.value = StreamingState.STREAMING
                 
                 // Start foreground service with notification
                 val notification = createNotification("Streaming to SignalK server")
@@ -246,7 +268,7 @@ class SignalKStreamingService : Service() {
                 }
                 Log.e(TAG, errorMessage, e)
                 _error.value = errorMessage
-                _isStreaming.value = false
+                _streamingState.value = StreamingState.IDLE
                 stopSelf()
             }
         }
@@ -260,7 +282,7 @@ class SignalKStreamingService : Service() {
             sensorService.stopSensorUpdates() 
             signalKTransmitter.stopStreaming()
             
-            _isStreaming.value = false
+            _streamingState.value = StreamingState.IDLE
             
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -268,8 +290,8 @@ class SignalKStreamingService : Service() {
     }
 
     private fun updateStreamingConfig(locationRate: Long, sensorRate: Int, sendLocation: Boolean, sendHeading: Boolean, sendPressure: Boolean) {
-        if (!_isStreaming.value) {
-            Log.d(TAG, "Not currently streaming, ignoring config update")
+        if (_streamingState.value != StreamingState.STREAMING) {
+            Log.d(TAG, "Not currently streaming (state=${_streamingState.value}), ignoring config update")
             return
         }
         
