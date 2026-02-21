@@ -73,6 +73,7 @@ class MainViewModel @Inject constructor(
     private var streamingService: SignalKStreamingService? = null
     private var bound = false
     private var serviceCollectorJob: Job? = null
+    private var authJob: Job? = null
     
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
@@ -393,13 +394,15 @@ class MainViewModel @Inject constructor(
     }
     
     fun login(username: String, password: String) {
-        viewModelScope.launch {
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             authenticationService.login(_uiState.value.serverUrl, username, password)
         }
     }
     
     fun logout() {
-        viewModelScope.launch {
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             authenticationService.logout()
         }
     }

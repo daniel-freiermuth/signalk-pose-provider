@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.signalk.companion.data.model.AuthState
 import com.signalk.companion.service.AuthenticationService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -15,15 +16,18 @@ class LoginViewModel @Inject constructor(
 ) : ViewModel() {
     
     val authState: StateFlow<AuthState> = authenticationService.authState
+    private var authJob: Job? = null
     
     fun login(serverUrl: String, username: String, password: String) {
-        viewModelScope.launch {
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             authenticationService.login(serverUrl, username, password)
         }
     }
     
     fun logout() {
-        viewModelScope.launch {
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             authenticationService.logout()
         }
     }

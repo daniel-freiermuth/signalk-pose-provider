@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.signalk.companion.service.AuthenticationService
 import com.signalk.companion.util.AppSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,6 +33,7 @@ class SettingsViewModel @Inject constructor(
     
     private var isInitialized = false
     private var lastAuthError: String? = null
+    private var authJob: Job? = null
     
     init {
         // Observe authentication state
@@ -122,7 +124,8 @@ class SettingsViewModel @Inject constructor(
     }
     
     fun testConnection(context: Context) {
-        viewModelScope.launch {
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             val currentState = _uiState.value
             
             if (currentState.serverUrl.isBlank()) {
@@ -147,7 +150,8 @@ class SettingsViewModel @Inject constructor(
     }
     
     fun logout() {
-        viewModelScope.launch {
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             authenticationService.logout()
         }
     }
