@@ -124,3 +124,4 @@ gradle-dist/
 
 # Custom - Project specific
 # Add any project-specific files/folders to ignore here
+.kotlin/sessions/*.salive
