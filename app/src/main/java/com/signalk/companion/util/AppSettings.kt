@@ -59,6 +59,13 @@ object AppSettings {
      */
     fun getSignalKContext(context: Context): String {
         val vesselId = getVesselId(context)
+        // If already a full context path, return as-is to prevent double-prefixing
+        if (vesselId.startsWith("vessels.") ||
+            vesselId.startsWith("aircraft.") ||
+            vesselId.startsWith("aton.") ||
+            vesselId.startsWith("shore.")) {
+            return vesselId
+        }
         return "vessels.$vesselId"
     }
     
