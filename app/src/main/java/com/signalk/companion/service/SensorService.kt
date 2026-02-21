@@ -55,6 +55,9 @@ class SensorService @Inject constructor(
     private var updateIntervalMs = 1000 // Default 1 second
     private var lastUpdateTime = 0L
     
+    // Cached sensor data to prevent data loss during rate limiting
+    private var pendingData = SensorData()
+    
     // Accumulated sensor readings for rate limiting
     private var pendingSensorUpdate = false
     
@@ -361,24 +364,26 @@ class SensorService @Inject constructor(
     }
 
     private fun updateSensorData(update: SensorData.() -> SensorData) {
-        // Rate limiting: only emit sensor data at configured intervals
         val currentTime = System.currentTimeMillis()
+        
+        // Always cache the latest sensor values to prevent data loss
+        pendingData = pendingData.update()
+        
+        // Rate limiting: only emit to StateFlow at configured intervals
         if (lastUpdateTime != 0L && currentTime - lastUpdateTime < updateIntervalMs) {
             pendingSensorUpdate = true
-            return // Skip this update to maintain configured rate
+            return // Skip emission but data is cached
         }
         
-        val currentData = _sensorData.value
-        val newData = currentData.update().copy(timestamp = currentTime)
-        
-        _sensorData.value = newData
+        // Emit cached data with current timestamp
+        _sensorData.value = pendingData.copy(timestamp = currentTime)
         
         // Update the last update time to track rate limiting
         val actualInterval = if (lastUpdateTime > 0) currentTime - lastUpdateTime else 0
         lastUpdateTime = currentTime
         pendingSensorUpdate = false
         
-        Log.d(TAG, "Sensor data updated. Actual interval: ${actualInterval}ms (configured: ${updateIntervalMs}ms)")
+        Log.d(TAG, "Sensor data emitted. Actual interval: ${actualInterval}ms (configured: ${updateIntervalMs}ms)")
     }
 
     private fun logAvailableSensors() {
@@ -405,11 +410,11 @@ class SensorService @Inject constructor(
     }
     
     private fun getSensorDelayFromInterval(updateIntervalMs: Int): Int {
+        // Match sensor sampling rate to emission rate for battery efficiency
         return when {
-            updateIntervalMs <= 100 -> SensorManager.SENSOR_DELAY_FASTEST  // ~100Hz
-            updateIntervalMs <= 500 -> SensorManager.SENSOR_DELAY_GAME     // ~50Hz  
-            updateIntervalMs <= 1000 -> SensorManager.SENSOR_DELAY_UI      // ~60Hz (but limited by interval)
-            else -> SensorManager.SENSOR_DELAY_NORMAL                      // ~5Hz
+            updateIntervalMs <= 100 -> SensorManager.SENSOR_DELAY_GAME     // ~50Hz for very fast updates
+            updateIntervalMs <= 500 -> SensorManager.SENSOR_DELAY_NORMAL   // ~5Hz provides good smoothing
+            else -> SensorManager.SENSOR_DELAY_NORMAL                      // ~5Hz for 1+ second intervals
         }
     }
 }
