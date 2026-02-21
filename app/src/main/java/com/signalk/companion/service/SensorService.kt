@@ -322,10 +322,11 @@ class SensorService @Inject constructor(
         
         try {
             // Calculate magnetic declination using Android's GeomagneticField
+            // Use 0.0 for altitude if not available (has minimal impact on declination)
             val geomagneticField = GeomagneticField(
                 locationData.latitude.toFloat(),
                 locationData.longitude.toFloat(),
-                locationData.altitude.toFloat(),
+                (locationData.altitude ?: 0.0).toFloat(),
                 System.currentTimeMillis()
             )
             

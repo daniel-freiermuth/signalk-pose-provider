@@ -292,7 +292,8 @@ class SignalKTransmitter @Inject constructor(
         }
         
         // Speed over ground with accuracy
-        if (locationData.speed > 0) {
+        // Use null check instead of > 0 to allow valid zero speed (stationary)
+        if (locationData.speed != null) {
             values.add(
                 SignalKValue(
                     path = "navigation.speedOverGround",
@@ -312,7 +313,8 @@ class SignalKTransmitter @Inject constructor(
         }
         
         // Course over ground with accuracy
-        if (locationData.bearing > 0) {
+        // Use null check instead of > 0 to allow valid zero bearing (True North)
+        if (locationData.bearing != null) {
             values.add(
                 SignalKValue(
                     path = "navigation.courseOverGroundTrue",
@@ -332,7 +334,8 @@ class SignalKTransmitter @Inject constructor(
         }
         
         // Altitude with accuracy
-        if (locationData.altitude != 0.0) {
+        // Use null check instead of != 0.0 to allow valid zero altitude (sea level)
+        if (locationData.altitude != null) {
             values.add(
                 SignalKValue(
                     path = "navigation.gnss.altitude",

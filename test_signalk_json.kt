@@ -19,20 +19,31 @@ fun main() {
         src = "signalk-nav-provider"
     )
     
-    val values = listOf(
-        SignalKValue(
-            path = "navigation.position",
-            value = SignalKValues.position(locationData.latitude, locationData.longitude)
-        ),
-        SignalKValue(
-            path = "navigation.speedOverGround",
-            value = SignalKValues.number(locationData.speed.toDouble())
-        ),
-        SignalKValue(
-            path = "navigation.gnss.type",
-            value = SignalKValues.string("GPS")
+    val values = buildList {
+        add(
+            SignalKValue(
+                path = "navigation.position",
+                value = SignalKValues.position(locationData.latitude, locationData.longitude)
+            )
         )
-    )
+        
+        // Only include speed if measured
+        locationData.speed?.let { speed ->
+            add(
+                SignalKValue(
+                    path = "navigation.speedOverGround",
+                    value = SignalKValues.number(speed.toDouble())
+                )
+            )
+        }
+        
+        add(
+            SignalKValue(
+                path = "navigation.gnss.type",
+                value = SignalKValues.string("GPS")
+            )
+        )
+    }
     
     val update = SignalKUpdate(
         source = source,

@@ -47,9 +47,9 @@ data class LocationData(
     val latitude: Double,
     val longitude: Double,
     val accuracy: Float,              // Horizontal accuracy in meters
-    val bearing: Float,
-    val speed: Float,
-    val altitude: Double,
+    val bearing: Float?,              // Course over ground in degrees (null if not available)
+    val speed: Float?,                // Speed over ground in m/s (null if not available)
+    val altitude: Double?,            // Altitude in meters (null if not available)
     val timestamp: Long,
     // Additional quality measures
     val verticalAccuracy: Float? = null,  // Vertical accuracy in meters (API 26+)

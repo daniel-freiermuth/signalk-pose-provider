@@ -48,9 +48,9 @@ class SignalKTransmitterTest {
         assertEquals(59.3293, locationData.latitude, 0.0001)
         assertEquals(18.0686, locationData.longitude, 0.0001)
         assertEquals(5.0f, locationData.accuracy)
-        assertEquals(180.0f, locationData.bearing)
-        assertEquals(5.0f, locationData.speed)
-        assertEquals(10.0, locationData.altitude, 0.0001)
+        assertEquals(180.0f, locationData.bearing!!)
+        assertEquals(5.0f, locationData.speed!!)
+        assertEquals(10.0, locationData.altitude!!, 0.0001)
     }
     
     @Test
@@ -99,5 +99,100 @@ class SignalKTransmitterTest {
             val shortJson = json.take(200) + "..."
             assertTrue("JSON should be well-formed: $shortJson", json.startsWith("{"))
         }
+    }
+    
+    @Test
+    fun testLocationDataWithZeroBearing() {
+        // Zero bearing (True North) is a valid measurement and should be preserved
+        val locationData = LocationData(
+            latitude = 59.3293,
+            longitude = 18.0686,
+            accuracy = 5.0f,
+            bearing = 0.0f,  // True North - valid measurement
+            speed = 5.0f,
+            altitude = 10.0,
+            timestamp = System.currentTimeMillis()
+        )
+        
+        assertNotNull(locationData.bearing)
+        assertEquals(0.0f, locationData.bearing!!)
+        // A SignalK message created from this should include COG=0.0
+    }
+    
+    @Test
+    fun testLocationDataWithZeroSpeed() {
+        // Zero speed (stationary) is a valid measurement and should be preserved
+        val locationData = LocationData(
+            latitude = 59.3293,
+            longitude = 18.0686,
+            accuracy = 5.0f,
+            bearing = 180.0f,
+            speed = 0.0f,  // Stationary - valid measurement
+            altitude = 10.0,
+            timestamp = System.currentTimeMillis()
+        )
+        
+        assertNotNull(locationData.speed)
+        assertEquals(0.0f, locationData.speed!!)
+        // A SignalK message created from this should include SOG=0.0
+    }
+    
+    @Test
+    fun testLocationDataWithZeroAltitude() {
+        // Zero altitude (sea level) is a valid measurement and should be preserved
+        val locationData = LocationData(
+            latitude = 59.3293,
+            longitude = 18.0686,
+            accuracy = 5.0f,
+            bearing = 180.0f,
+            speed = 5.0f,
+            altitude = 0.0,  // Sea level - valid measurement
+            timestamp = System.currentTimeMillis()
+        )
+        
+        assertNotNull(locationData.altitude)
+        assertEquals(0.0, locationData.altitude!!, 0.0001)
+        // A SignalK message created from this should include altitude=0.0
+    }
+    
+    @Test
+    fun testLocationDataWithNullValues() {
+        // Null values should represent "not measured" and be omitted from SignalK message
+        val locationData = LocationData(
+            latitude = 59.3293,
+            longitude = 18.0686,
+            accuracy = 5.0f,
+            bearing = null,  // Not measured
+            speed = null,    // Not measured
+            altitude = null, // Not measured
+            timestamp = System.currentTimeMillis()
+        )
+        
+        assertNull(locationData.bearing)
+        assertNull(locationData.speed)
+        assertNull(locationData.altitude)
+        // A SignalK message created from this should NOT include COG, SOG, or altitude paths
+    }
+    
+    @Test
+    fun testLocationDataAllZeroValues() {
+        // Edge case: vessel at anchor, heading North, at sea level - all zeros are valid
+        val locationData = LocationData(
+            latitude = 59.3293,
+            longitude = 18.0686,
+            accuracy = 5.0f,
+            bearing = 0.0f,   // True North
+            speed = 0.0f,     // Stationary
+            altitude = 0.0,   // Sea level
+            timestamp = System.currentTimeMillis()
+        )
+        
+        assertNotNull(locationData.bearing)
+        assertNotNull(locationData.speed)
+        assertNotNull(locationData.altitude)
+        assertEquals(0.0f, locationData.bearing!!)
+        assertEquals(0.0f, locationData.speed!!)
+        assertEquals(0.0, locationData.altitude!!, 0.0001)
+        // A SignalK message should include all these zero values
     }
 }

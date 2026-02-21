@@ -67,9 +67,9 @@ class LocationService @Inject constructor() {
                         latitude = location.latitude,
                         longitude = location.longitude,
                         accuracy = location.accuracy,
-                        bearing = if (location.hasBearing()) location.bearing else 0f,
-                        speed = if (location.hasSpeed()) location.speed else 0f,
-                        altitude = if (location.hasAltitude()) location.altitude else 0.0,
+                        bearing = if (location.hasBearing()) location.bearing else null,
+                        speed = if (location.hasSpeed()) location.speed else null,
+                        altitude = if (location.hasAltitude()) location.altitude else null,
                         timestamp = location.time,
                         // Enhanced quality measures (API 26+)
                         verticalAccuracy = if (android.os.Build.VERSION.SDK_INT >= 26 && location.hasVerticalAccuracy()) {
