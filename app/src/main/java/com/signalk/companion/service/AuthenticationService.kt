@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -23,9 +24,20 @@ class AuthenticationService @Inject constructor() {
     
     private val json = Json { ignoreUnknownKeys = true }
     
+    private fun setAuthError(errorMessage: String) {
+        _authState.update { currentState ->
+            currentState.copy(
+                isAuthenticated = false,
+                token = null,
+                isLoading = false,
+                error = errorMessage
+            )
+        }
+    }
+    
     suspend fun login(serverUrl: String, username: String, password: String): Result<LoginResponse> {
         return try {
-            _authState.value = _authState.value.copy(isLoading = true, error = null)
+            _authState.update { it.copy(isLoading = true, error = null) }
             
             // Use IO dispatcher for network operations
             withContext(Dispatchers.IO) {
@@ -62,7 +74,7 @@ class AuthenticationService @Inject constructor() {
                     200 -> {
                         val loginResponse = json.decodeFromString<LoginResponse>(responseBody)
                         
-                        _authState.value = _authState.value.copy(
+                        _authState.update { it.copy(
                             isAuthenticated = true,
                             token = loginResponse.token,
                             username = username,
@@ -70,67 +82,43 @@ class AuthenticationService @Inject constructor() {
                             serverUrl = serverUrl,
                             isLoading = false,
                             error = null
-                        )
+                        ) }
                         
                         Result.success(loginResponse)
                     }
                     401 -> {
-                        _authState.value = _authState.value.copy(
-                            isLoading = false, 
-                            error = "Invalid username or password"
-                        )
+                        setAuthError("Invalid username or password")
                         Result.failure(Exception("Invalid credentials"))
                     }
                     501 -> {
-                        _authState.value = _authState.value.copy(
-                            isLoading = false, 
-                            error = "Server does not support authentication"
-                        )
+                        setAuthError("Server does not support authentication")
                         Result.failure(Exception("Authentication not supported"))
                     }
                     else -> {
-                        _authState.value = _authState.value.copy(
-                            isLoading = false, 
-                            error = "Login failed: $responseCode"
-                        )
+                        setAuthError("Login failed: $responseCode")
                         Result.failure(Exception("HTTP $responseCode: $responseBody"))
                     }
                 }
             } // Close withContext(Dispatchers.IO)
         } catch (e: java.net.UnknownHostException) {
             val error = "Cannot resolve hostname: ${e.message ?: "Unknown host"}"
-            _authState.value = _authState.value.copy(
-                isLoading = false, 
-                error = error
-            )
+            setAuthError(error)
             Result.failure(Exception(error))
         } catch (e: java.net.ConnectException) {
             val error = "Cannot connect to server: ${e.message ?: "Connection refused"}"
-            _authState.value = _authState.value.copy(
-                isLoading = false, 
-                error = error
-            )
+            setAuthError(error)
             Result.failure(Exception(error))
         } catch (e: java.net.SocketTimeoutException) {
             val error = "Connection timeout: Server not responding"
-            _authState.value = _authState.value.copy(
-                isLoading = false, 
-                error = error
-            )
+            setAuthError(error)
             Result.failure(Exception(error))
         } catch (e: java.io.IOException) {
             val error = "Network error: ${e.message ?: "I/O error"}"
-            _authState.value = _authState.value.copy(
-                isLoading = false, 
-                error = error
-            )
+            setAuthError(error)
             Result.failure(Exception(error))
         } catch (e: Exception) {
             val error = "Login failed: ${e.javaClass.simpleName} - ${e.message ?: "Unknown error"}"
-            _authState.value = _authState.value.copy(
-                isLoading = false, 
-                error = error
-            )
+            setAuthError(error)
             Result.failure(e)
         }
     }
@@ -160,11 +148,11 @@ class AuthenticationService @Inject constructor() {
             }
             
             // Always clear local auth state
-            _authState.value = AuthState()
+            _authState.update { AuthState() }
             Result.success(Unit)
         } catch (e: Exception) {
             // Still clear local state even if server logout failed
-            _authState.value = AuthState()
+            _authState.update { AuthState() }
             Result.success(Unit)
         }
     }
@@ -203,6 +191,6 @@ class AuthenticationService @Inject constructor() {
     }
     
     fun clearError() {
-        _authState.value = _authState.value.copy(error = null)
+        _authState.update { it.copy(error = null) }
     }
 }
