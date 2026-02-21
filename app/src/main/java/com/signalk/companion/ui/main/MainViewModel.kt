@@ -22,11 +22,6 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class TransmissionProtocol(val displayName: String, val description: String) {
-    UDP("UDP", "Direct UDP transmission - fastest, requires network access"),
-    WEBSOCKET("WebSocket (Auto)", "Auto-detects WS/WSS from HTTP/HTTPS URL - real-time, firewall-friendly")
-}
-
 enum class DeviceOrientation(val displayName: String, val rotationDegrees: Int, val description: String) {
     PORTRAIT("Portrait", 0, "Phone held normally (top of phone = bow)"),
     LANDSCAPE_LEFT("Landscape Left", 90, "Phone rotated 90° CCW (left side = bow)"),
@@ -38,7 +33,6 @@ data class MainUiState(
     val isConnected: Boolean = false,
     val isStreaming: Boolean = false,
     val parsedUrl: UrlParser.ParsedUrl? = null,
-    val transmissionProtocol: TransmissionProtocol = TransmissionProtocol.WEBSOCKET,
     val vesselId: String = "self",
     val deviceOrientation: DeviceOrientation = DeviceOrientation.LANDSCAPE_LEFT,
     val compassTiltCorrection: Boolean = true,
@@ -181,10 +175,6 @@ class MainViewModel @Inject constructor(
                 it.copy(error = "Warning: URL path will be ignored. SignalK uses /signalk/v1/stream")
             }
         }
-    }
-
-    fun updateTransmissionProtocol(protocol: TransmissionProtocol) {
-        _uiState.update { it.copy(transmissionProtocol = protocol) }
     }
 
     fun updateDeviceOrientation(orientation: DeviceOrientation) {

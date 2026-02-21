@@ -15,7 +15,6 @@ import androidx.core.app.NotificationCompat
 import com.signalk.companion.MainActivity
 import com.signalk.companion.R
 import com.signalk.companion.ui.main.DeviceOrientation
-import com.signalk.companion.ui.main.TransmissionProtocol
 import com.signalk.companion.util.BatteryOptimizationHelper
 import com.signalk.companion.util.UrlParser
 import dagger.hilt.android.AndroidEntryPoint
@@ -213,15 +212,8 @@ class SignalKStreamingService : Service() {
                 _error.value = null // Clear any previous errors
                 Log.d(TAG, "Configuring SignalK transmitter")
                 
-                // Configure SignalK transmitter with parsed components
-                signalKTransmitter.configure(
-                    hostname = parsedUrl.hostname,
-                    port = parsedUrl.port,
-                    protocol = TransmissionProtocol.WEBSOCKET
-                )
-                
-                // Update base URL with correct protocol
-                signalKTransmitter.updateProtocol(parsedUrl.isHttps)
+                // Configure SignalK transmitter with parsed URL
+                signalKTransmitter.configure(parsedUrl)
                 
                 // Start SignalK streaming (this is crucial!)
                 Log.d(TAG, "Starting SignalK transmitter...")

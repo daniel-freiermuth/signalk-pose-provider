@@ -3,7 +3,6 @@ package com.signalk.companion.service
 import android.content.Context
 import android.util.Log
 import com.signalk.companion.data.model.*
-import com.signalk.companion.ui.main.TransmissionProtocol
 import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.UrlParser
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,12 +13,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import okhttp3.*
-import java.io.OutputStreamWriter
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.HttpURLConnection
 import java.net.InetAddress
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -28,7 +22,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Transmits SignalK messages over UDP or WebSocket.
+ * Transmits SignalK messages over WebSocket.
  * 
  * Lifecycle: Call stopStreaming() when done to cancel all background jobs.
  */
@@ -53,11 +47,8 @@ class SignalKTransmitter @Inject constructor(
     
     private var context: Context? = null
     private var serverAddress: String = ""
-    private var serverPort: Int = 55555
+    private var serverPort: Int = 3000
     private var baseUrl: String = ""  // Store the full base URL for HTTP(S) streaming
-    private var transmissionProtocol: TransmissionProtocol = TransmissionProtocol.UDP
-    private var socket: DatagramSocket? = null
-    private var targetAddress: InetAddress? = null
     
     // WebSocket support
     private var okHttpClient: OkHttpClient? = null
@@ -97,88 +88,19 @@ class SignalKTransmitter @Inject constructor(
         timeZone = TimeZone.getTimeZone("UTC")
     }
     
-    fun configure(hostname: String, port: Int, protocol: TransmissionProtocol = TransmissionProtocol.UDP) {
-        serverAddress = hostname.trim()
-        serverPort = port
-        transmissionProtocol = protocol
+    fun configure(parsedUrl: UrlParser.ParsedUrl) {
+        serverAddress = parsedUrl.hostname
+        serverPort = parsedUrl.port
         
-        // For WebSocket/HTTP(S), construct the base URL using the protocol from the enum
-        baseUrl = when (protocol) {
-            TransmissionProtocol.UDP -> ""  // Not used for UDP
-            TransmissionProtocol.WEBSOCKET -> "ws://$hostname:$port"
-        }
+        // Build WebSocket URL - auto-detect ws:// or wss:// based on original URL protocol
+        val wsProtocol = if (parsedUrl.isHttps) "wss" else "ws"
+        baseUrl = "$wsProtocol://${parsedUrl.hostname}:${parsedUrl.port}"
         
-        // Don't resolve DNS immediately - do it when actually starting streaming
-        // This allows hostnames like "signalk.local", "my-boat.local", etc.
         _connectionStatus.value = false
-    }
-    
-    fun updateProtocol(isHttps: Boolean) {
-        if (transmissionProtocol == TransmissionProtocol.WEBSOCKET) {
-            val wsProtocol = if (isHttps) "wss" else "ws"
-            baseUrl = "$wsProtocol://$serverAddress:$serverPort"
-        }
     }
     
     fun setContext(context: Context) {
         this.context = context
-    }
-    
-    // Configure from a full URL and auto-detect WebSocket protocol based on HTTP/HTTPS
-    // Note: URL should be pre-validated before calling this method
-    fun configureFromUrl(fullUrl: String, protocol: TransmissionProtocol = TransmissionProtocol.UDP) {
-        val parsedUrl = UrlParser.parseUrl(fullUrl)
-        if (parsedUrl == null) {
-            // This should not happen if URL was pre-validated, but handle defensively
-            throw IllegalArgumentException("Invalid SignalK server URL: $fullUrl")
-        }
-        
-        // Auto-detect WebSocket protocol (WEBSOCKET handles both HTTP and HTTPS)
-        val detectedProtocol = when {
-            protocol == TransmissionProtocol.UDP -> TransmissionProtocol.UDP
-            else -> TransmissionProtocol.WEBSOCKET
-        }
-        
-        val port = when (detectedProtocol) {
-            TransmissionProtocol.UDP -> 55555  // Fixed UDP port
-            TransmissionProtocol.WEBSOCKET -> parsedUrl.port
-        }
-        
-        serverAddress = parsedUrl.hostname
-        serverPort = port
-        transmissionProtocol = detectedProtocol
-        
-        // Build WebSocket URL based on detected protocol
-        baseUrl = when (detectedProtocol) {
-            TransmissionProtocol.UDP -> ""
-            TransmissionProtocol.WEBSOCKET -> {
-                // Auto-detect ws:// or wss:// based on original URL protocol
-                val wsProtocol = if (parsedUrl.isHttps) "wss" else "ws"
-                "$wsProtocol://${parsedUrl.hostname}:${port}"
-            }
-        }
-        
-        _connectionStatus.value = false
-    }
-    
-    // Convenient method to configure WebSocket from HTTP URL with auto-detection
-    fun configureWebSocketFromHttpUrl(fullUrl: String) {
-        configureFromUrl(fullUrl, TransmissionProtocol.WEBSOCKET) // Will auto-detect WSS if HTTPS
-    }
-    
-    // Keep backwards compatibility method
-    fun configure(address: String, protocol: TransmissionProtocol = TransmissionProtocol.UDP) {
-        val parts = address.split(":")
-        val hostname = parts[0].trim()
-        val port = if (parts.size > 1) parts[1].toIntOrNull() ?: getDefaultPort(protocol) else getDefaultPort(protocol)
-        configure(hostname, port, protocol)
-    }
-    
-    private fun getDefaultPort(protocol: TransmissionProtocol): Int {
-        return when (protocol) {
-            TransmissionProtocol.UDP -> 55555  // SignalK UDP port
-            TransmissionProtocol.WEBSOCKET -> 3000  // SignalK WebSocket port (auto-detects SSL)
-        }
     }
     
     suspend fun startStreaming() {
@@ -187,32 +109,16 @@ class SignalKTransmitter @Inject constructor(
         transmitterScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         
         try {
-            when (transmissionProtocol) {
-                TransmissionProtocol.UDP -> {
-                    // Initialize UDP socket
-                    socket = DatagramSocket()
-                    
-                    // Initial DNS resolution on IO dispatcher
-                    withContext(Dispatchers.IO) {
-                        refreshDnsResolution()
-                    }
-                    
-                    // Start periodic DNS refresh to handle changing IP addresses
-                    startDnsRefreshTimer()
-                }
-                TransmissionProtocol.WEBSOCKET -> {
-                    // Initial DNS resolution for WebSocket
-                    withContext(Dispatchers.IO) {
-                        refreshDnsResolution()
-                    }
-                    
-                    // Initialize WebSocket connection
-                    initializeWebSocket()
-                    
-                    // Start periodic DNS refresh for hostname resolution
-                    startDnsRefreshTimer()
-                }
+            // Initial DNS resolution for WebSocket
+            withContext(Dispatchers.IO) {
+                refreshDnsResolution()
             }
+            
+            // Initialize WebSocket connection
+            initializeWebSocket()
+            
+            // Start periodic DNS refresh for hostname resolution
+            startDnsRefreshTimer()
             
             _connectionStatus.value = true
         } catch (e: Exception) {
@@ -223,51 +129,38 @@ class SignalKTransmitter @Inject constructor(
     
     private fun refreshDnsResolution() {
         try {
-            val oldAddress = targetAddress
             val newAddress = InetAddress.getByName(serverAddress)
-                    
-            // Check if IP address actually changed
-            if (oldAddress == null || !oldAddress.equals(newAddress)) {
-                targetAddress = newAddress
-                val message = "DNS resolved: $serverAddress -> ${newAddress.hostAddress} (was: ${oldAddress?.hostAddress ?: "null"})"
-                Log.d(TAG, message)
-                _lastDnsRefresh.value = message
+            val oldIp = _currentResolvedIp.value
+            val newIp = newAddress.hostAddress
+            
+            // Track whether IP changed for diagnostic purposes
+            val ipChanged = oldIp != null && oldIp != newIp
+            val message = if (ipChanged) {
+                "DNS resolved: $serverAddress -> $newIp (changed from $oldIp)"
+            } else if (oldIp == null) {
+                "DNS resolved: $serverAddress -> $newIp (initial)"
+            } else {
+                "DNS resolved: $serverAddress -> $newIp (unchanged)"
             }
-
-            when (transmissionProtocol) {
-                TransmissionProtocol.UDP -> {
-                }
-                TransmissionProtocol.WEBSOCKET -> {
-                    // For WebSocket, test DNS resolution and reconnect if needed
-                    
-                    // Check if IP address actually changed
-                    if (oldAddress == null || !oldAddress.equals(newAddress)) {
-                        // IP changed - if WebSocket is disconnected, try to reconnect
-                        if (_connectionStatus.value == false && webSocket == null) {
-                            Log.d(TAG, "WebSocket disconnected and IP changed, attempting reconnection after DNS refresh")
-                            transmitterScope?.launch {
-                                try {
-                                    initializeWebSocket()
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "WebSocket reconnection failed: ${e.message}", e)
-                                }
-                            } ?: Log.w(TAG, "Cannot attempt reconnection - transmitter scope is null")
-                        }
-                    } else {
-                        // IP didn't change, just update the tracking without logging
-                        Log.d(TAG, "DNS refresh for WebSocket: $serverAddress -> ${newAddress.hostAddress} (no change)")
+            Log.d(TAG, message)
+            _lastDnsRefresh.value = message
+            _currentResolvedIp.value = newIp
+            
+            // If WebSocket is disconnected, try to reconnect
+            if (!_connectionStatus.value && webSocket == null) {
+                Log.d(TAG, "WebSocket disconnected, attempting reconnection after DNS refresh")
+                transmitterScope?.launch {
+                    try {
+                        initializeWebSocket()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "WebSocket reconnection failed: ${e.message}", e)
                     }
-                }
+                } ?: Log.w(TAG, "Cannot attempt reconnection - transmitter scope is null")
             }
-            _currentResolvedIp.value = newAddress.hostAddress
         } catch (e: Exception) {
             Log.e(TAG, "DNS resolution failed for $serverAddress: ${e.message}", e)
             // DNS resolution failed - but don't kill the entire streaming
-            // Keep using the old IP if we had one, or fail if this is the first attempt
-            if (targetAddress == null && transmissionProtocol == TransmissionProtocol.UDP) {
-                throw e // First time and failed - propagate the error
-            }
-            // Otherwise, keep using the cached address or continue for WebSocket
+            // Keep the WebSocket going, it will handle its own reconnection
         }
     }
     
@@ -282,18 +175,14 @@ class SignalKTransmitter @Inject constructor(
         
         // Start new refresh timer
         dnsRefreshJob = scope.launch {
-            while (socket != null || webSocket != null) {
+            while (webSocket != null) {
                 delay(DNS_REFRESH_INTERVAL_MS)
-                if (socket != null || webSocket != null) { // Check again after delay
+                if (webSocket != null) { // Check again after delay
                     try {
                         Log.d(TAG, "Performing periodic DNS refresh for $serverAddress...")
                         refreshDnsResolution()
                     } catch (e: Exception) {
                         Log.e(TAG, "DNS refresh failed: ${e.message}", e)
-                        // For UDP, if we lose DNS resolution completely, mark as disconnected
-                        if (transmissionProtocol == TransmissionProtocol.UDP && targetAddress == null) {
-                            _connectionStatus.value = false
-                        }
                     }
                 }
             }
@@ -332,11 +221,6 @@ class SignalKTransmitter @Inject constructor(
         dnsRefreshJob = null
         reconnectionJob = null
         
-        // Close socket and reset state
-        socket?.close()
-        socket = null
-        targetAddress = null
-        
         // Close WebSocket connection
         webSocket?.close(1000, "Streaming stopped")
         webSocket = null
@@ -353,7 +237,7 @@ class SignalKTransmitter @Inject constructor(
     
     // Manual DNS refresh - can be called from UI if user reports connectivity issues
     suspend fun refreshDns() {
-        if (socket != null || webSocket != null) {
+        if (webSocket != null) {
             withContext(Dispatchers.IO) {
                 refreshDnsResolution()
             }
@@ -489,7 +373,9 @@ class SignalKTransmitter @Inject constructor(
             context = vesselContext,
             updates = listOf(update)
         )
-    }    private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage {
+    }
+    
+    private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage {
         val timestamp = dateFormat.format(Date(sensorData.timestamp))
         val source = SignalKSource(
             label = "SignalK Pose Provider - Sensors",
@@ -542,8 +428,6 @@ class SignalKTransmitter @Inject constructor(
                 )
             )
         }
-        
-        // Environmental sensors (conditional based on settings)        } // End of sendHeading condition
         
         // Environmental sensors (conditional based on settings)
         if (sendPressure) {
@@ -598,13 +482,10 @@ class SignalKTransmitter @Inject constructor(
         try {
             val json = Json.encodeToString(message)
             
-            when (transmissionProtocol) {
-                TransmissionProtocol.UDP -> {
-                    sendViaUDP(json)
-                }
-                TransmissionProtocol.WEBSOCKET -> {
-                    sendViaWebSocket(json)
-                }
+            webSocket?.let { ws ->
+                ws.send(json)
+            } ?: run {
+                throw Exception("WebSocket connection not established")
             }
             
             // Update tracking state
@@ -615,26 +496,6 @@ class SignalKTransmitter @Inject constructor(
             _connectionStatus.value = false
             // Log the error details for debugging
             Log.e(TAG, "SignalK transmission error: ${e.javaClass.simpleName} - ${e.message}", e)
-        }
-    }
-    
-    private suspend fun sendViaUDP(json: String) {
-        val data = json.toByteArray()
-        socket?.let { socket ->
-            targetAddress?.let { address ->
-                val packet = DatagramPacket(data, data.size, address, serverPort)
-                withContext(Dispatchers.IO) {
-                    socket.send(packet)
-                }
-            }
-        }
-    }
-    
-    private suspend fun sendViaWebSocket(json: String) {
-        webSocket?.let { ws ->
-            ws.send(json)
-        } ?: run {
-            throw Exception("WebSocket connection not established")
         }
     }
     

@@ -87,10 +87,8 @@ fun MainScreen(
             ConnectionStatusCard(
                 isConnected = uiState.isConnected,
                 serverUrl = uiState.serverUrl,
-                transmissionProtocol = uiState.transmissionProtocol,
                 vesselId = uiState.vesselId,
                 onServerUrlChange = viewModel::updateServerUrl,
-                onProtocolChange = viewModel::updateTransmissionProtocol,
                 onVesselIdChange = viewModel::updateVesselId
             )
             
@@ -163,14 +161,10 @@ fun MainScreen(
 fun ConnectionStatusCard(
     isConnected: Boolean,
     serverUrl: String,
-    transmissionProtocol: TransmissionProtocol,
     vesselId: String,
     onServerUrlChange: (String) -> Unit,
-    onProtocolChange: (TransmissionProtocol) -> Unit,
     onVesselIdChange: (String) -> Unit
 ) {
-    var protocolDropdownExpanded by remember { mutableStateOf(false) }
-    
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -200,47 +194,6 @@ fun ConnectionStatusCard(
                 modifier = Modifier.fillMaxWidth(),
                 supportingText = { Text("Used in SignalK context: vessels.$vesselId") }
             )
-            
-            // Protocol Selection
-            ExposedDropdownMenuBox(
-                expanded = protocolDropdownExpanded,
-                onExpandedChange = { protocolDropdownExpanded = it }
-            ) {
-                OutlinedTextField(
-                    value = transmissionProtocol.displayName,
-                    onValueChange = {},
-                    label = { Text("Protocol") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = protocolDropdownExpanded) },
-                    readOnly = true,
-                    modifier = Modifier
-                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                        .fillMaxWidth()
-                )
-                
-                ExposedDropdownMenu(
-                    expanded = protocolDropdownExpanded,
-                    onDismissRequest = { protocolDropdownExpanded = false }
-                ) {
-                    TransmissionProtocol.values().forEach { protocol ->
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(protocol.displayName)
-                                    Text(
-                                        text = protocol.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            },
-                            onClick = {
-                                onProtocolChange(protocol)
-                                protocolDropdownExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
             
             Row(
                 verticalAlignment = Alignment.CenterVertically,
