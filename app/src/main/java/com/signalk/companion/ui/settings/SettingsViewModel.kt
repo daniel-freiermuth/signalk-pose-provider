@@ -31,6 +31,7 @@ class SettingsViewModel @Inject constructor(
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
     
     private var isInitialized = false
+    private var lastAuthError: String? = null
     
     init {
         // Observe authentication state
@@ -39,9 +40,22 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update { 
                     it.copy(
                         isAuthenticated = authState.isAuthenticated,
-                        isLoggingIn = authState.isLoading,
-                        error = authState.error
+                        isLoggingIn = authState.isLoading
                     )
+                }
+                
+                // Update error state only if the auth error changed
+                // This prevents:
+                // 1. Overwriting local errors with null
+                // 2. Repeated emissions of the same error overwriting newer local errors
+                if (authState.error != null && authState.error != lastAuthError) {
+                    // New auth error arrived - update both tracking and UI
+                    lastAuthError = authState.error
+                    _uiState.update { it.copy(error = authState.error) }
+                } else if (authState.error == null && lastAuthError != null) {
+                    // Auth error cleared - reset tracking but preserve any local error in UI
+                    // This allows the same auth error to update UI again if it reappears
+                    lastAuthError = null
                 }
             }
         }
@@ -140,6 +154,8 @@ class SettingsViewModel @Inject constructor(
     
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+        lastAuthError = null
+        authenticationService.clearError()
     }
     
     fun clearSaveSuccess() {
