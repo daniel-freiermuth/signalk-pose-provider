@@ -18,6 +18,9 @@ import com.signalk.companion.util.UrlParser
 import com.signalk.companion.service.SignalKTransmitter
 import com.signalk.companion.service.AuthenticationService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -56,15 +59,16 @@ data class MainUiState(
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
+    @ApplicationContext private val applicationContext: Context,
     private val locationService: LocationService,
     private val sensorService: SensorService,
     private val signalKTransmitter: SignalKTransmitter,
     private val authenticationService: AuthenticationService
 ) : ViewModel() {
     
-    private var currentContext: Context? = null
     private var streamingService: SignalKStreamingService? = null
     private var bound = false
+    private var serviceCollectorJob: Job? = null
     
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
@@ -72,38 +76,69 @@ class MainViewModel @Inject constructor(
             streamingService = binder.getService()
             bound = true
             
-            // Observe service state
+            // Cancel any previous collectors and wait for completion before starting new ones
             viewModelScope.launch {
-                streamingService?.isStreaming?.collect { isStreaming ->
+                serviceCollectorJob?.cancelAndJoin()
+                startServiceCollectors()
+            }
+        }
+
+        override fun onServiceDisconnected(arg0: ComponentName) {
+            cleanupServiceBinding(unbind = false)
+        }
+    }
+    
+    /**
+     * Starts coroutines to collect service state flows.
+     * Must be called from a coroutine context after ensuring previous collectors are cancelled.
+     */
+    private fun startServiceCollectors() {
+        // Capture service reference to ensure all collectors use the same instance
+        val service = streamingService ?: return
+        
+        serviceCollectorJob = viewModelScope.launch {
+            launch {
+                service.isStreaming.collect { isStreaming ->
                     _uiState.update { it.copy(isStreaming = isStreaming) }
                 }
             }
             
-            viewModelScope.launch {
-                streamingService?.messagesSent?.collect { count ->
+            launch {
+                service.messagesSent.collect { count ->
                     _uiState.update { it.copy(messagesSent = count) }
                 }
             }
             
-            viewModelScope.launch {
-                streamingService?.lastTransmissionTime?.collect { time ->
+            launch {
+                service.lastTransmissionTime.collect { time ->
                     _uiState.update { it.copy(lastTransmissionTime = time) }
                 }
             }
             
-            viewModelScope.launch {
-                streamingService?.error?.collect { errorMsg ->
+            launch {
+                service.error.collect { errorMsg ->
                     if (errorMsg != null) {
                         _uiState.update { it.copy(error = errorMsg) }
                     }
                 }
             }
         }
-
-        override fun onServiceDisconnected(arg0: ComponentName) {
-            streamingService = null
-            bound = false
+    }
+    
+    /**
+     * Cleans up service binding state. Call when disconnecting from the service.
+     * @param unbind If true, unbinds from the service. Set to false when called from onServiceDisconnected
+     *               since the system has already unbound us.
+     */
+    private fun cleanupServiceBinding(unbind: Boolean) {
+        serviceCollectorJob?.cancel()
+        serviceCollectorJob = null
+        
+        if (unbind && bound) {
+            applicationContext.unbindService(serviceConnection)
         }
+        bound = false
+        streamingService = null
     }
     
     private val _uiState = MutableStateFlow(MainUiState())
@@ -167,7 +202,7 @@ class MainViewModel @Inject constructor(
         val parsed = UrlParser.parseUrl(url)
         _uiState.update { it.copy(parsedUrl = parsed) }
         // Save to shared preferences
-        currentContext?.let { AppSettings.setServerUrl(it, parsed?.toUrlString() ?: url) }
+        AppSettings.setServerUrl(applicationContext, parsed?.toUrlString() ?: url)
         
         // Warn if URL contains a path that will be ignored
         if (parsed?.hasPath == true) {
@@ -205,13 +240,13 @@ class MainViewModel @Inject constructor(
         val trimmedId = vesselId.trim()
         _uiState.update { it.copy(vesselId = trimmedId) }
         // Save to shared preferences
-        currentContext?.let { AppSettings.setVesselId(it, trimmedId) }
+        AppSettings.setVesselId(applicationContext, trimmedId)
     }
     
     fun updateSendLocation(enabled: Boolean) {
         _uiState.update { it.copy(sendLocation = enabled) }
         // Save to shared preferences
-        currentContext?.let { AppSettings.setSendLocation(it, enabled) }
+        AppSettings.setSendLocation(applicationContext, enabled)
         // Update running service if active
         sendConfigUpdateToService()
     }
@@ -219,7 +254,7 @@ class MainViewModel @Inject constructor(
     fun updateSendHeading(enabled: Boolean) {
         _uiState.update { it.copy(sendHeading = enabled) }
         // Save to shared preferences
-        currentContext?.let { AppSettings.setSendHeading(it, enabled) }
+        AppSettings.setSendHeading(applicationContext, enabled)
         // Update running service if active
         sendConfigUpdateToService()
     }
@@ -227,83 +262,65 @@ class MainViewModel @Inject constructor(
     fun updateSendPressure(enabled: Boolean) {
         _uiState.update { it.copy(sendPressure = enabled) }
         // Save to shared preferences
-        currentContext?.let { AppSettings.setSendPressure(it, enabled) }
+        AppSettings.setSendPressure(applicationContext, enabled)
         // Update running service if active
         sendConfigUpdateToService()
     }
     
     private fun sendConfigUpdateToService() {
-        currentContext?.let { context ->
-            if (_uiState.value.isStreaming) {
-                val intent = Intent(context, SignalKStreamingService::class.java).apply {
-                    action = SignalKStreamingService.ACTION_UPDATE_CONFIG
-                    putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Use current default
-                    putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, 1000)   // Use current default
-                    putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, _uiState.value.sendLocation)
-                    putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, _uiState.value.sendHeading)
-                    putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, _uiState.value.sendPressure)
-                }
-                context.startService(intent)
+        if (_uiState.value.isStreaming) {
+            val intent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
+                action = SignalKStreamingService.ACTION_UPDATE_CONFIG
+                putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Use current default
+                putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, 1000)   // Use current default
+                putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, _uiState.value.sendLocation)
+                putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, _uiState.value.sendHeading)
+                putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, _uiState.value.sendPressure)
             }
+            applicationContext.startService(intent)
         }
     }
     
-    fun initializeSettings(context: Context) {
-        if (currentContext == null) {
-            currentContext = context
-            // Load settings from shared preferences
-            val savedServerUrl = AppSettings.getServerUrl(context)
-            val savedParsedUrl = UrlParser.parseUrl(savedServerUrl)
-            val savedVesselId = AppSettings.getVesselId(context)
-            val savedSendLocation = AppSettings.getSendLocation(context)
-            val savedSendHeading = AppSettings.getSendHeading(context)
-            val savedSendPressure = AppSettings.getSendPressure(context)
-            val savedUsername = AppSettings.getUsername(context)
-            
-            _uiState.update { 
-                it.copy(
-                    parsedUrl = savedParsedUrl,
-                    vesselId = savedVesselId,
-                    sendLocation = savedSendLocation,
-                    sendHeading = savedSendHeading,
-                    sendPressure = savedSendPressure,
-                    username = savedUsername.ifBlank { null }
-                )
-            }
-            
-            // Auto-login if credentials are stored
-            if (AppSettings.hasCredentials(context) && savedServerUrl.isNotBlank()) {
-                val savedPassword = AppSettings.getPassword(context)
-                viewModelScope.launch {
-                    authenticationService.login(savedServerUrl, savedUsername, savedPassword)
-                }
-            }
-        } else {
-            // Reload settings when returning from settings screen
-            val savedServerUrl = AppSettings.getServerUrl(context)
-            val savedParsedUrl = UrlParser.parseUrl(savedServerUrl)
-            val savedVesselId = AppSettings.getVesselId(context)
-            val savedSendLocation = AppSettings.getSendLocation(context)
-            val savedSendHeading = AppSettings.getSendHeading(context)
-            val savedSendPressure = AppSettings.getSendPressure(context)
-            val savedUsername = AppSettings.getUsername(context)
-            
-            _uiState.update { 
-                it.copy(
-                    parsedUrl = savedParsedUrl,
-                    vesselId = savedVesselId,
-                    sendLocation = savedSendLocation,
-                    sendHeading = savedSendHeading,
-                    sendPressure = savedSendPressure,
-                    username = savedUsername.ifBlank { null }
-                )
+    private var settingsInitialized = false
+    
+    /**
+     * Loads settings from shared preferences. Safe to call multiple times;
+     * auto-login only occurs on first invocation.
+     */
+    fun initializeSettings() {
+        // Load settings from shared preferences
+        val savedServerUrl = AppSettings.getServerUrl(applicationContext)
+        val savedParsedUrl = UrlParser.parseUrl(savedServerUrl)
+        val savedVesselId = AppSettings.getVesselId(applicationContext)
+        val savedSendLocation = AppSettings.getSendLocation(applicationContext)
+        val savedSendHeading = AppSettings.getSendHeading(applicationContext)
+        val savedSendPressure = AppSettings.getSendPressure(applicationContext)
+        val savedUsername = AppSettings.getUsername(applicationContext)
+        
+        _uiState.update { 
+            it.copy(
+                parsedUrl = savedParsedUrl,
+                vesselId = savedVesselId,
+                sendLocation = savedSendLocation,
+                sendHeading = savedSendHeading,
+                sendPressure = savedSendPressure,
+                username = savedUsername.ifBlank { null }
+            )
+        }
+        
+        // Auto-login if credentials are stored (only on first initialization)
+        if (!settingsInitialized && 
+            AppSettings.hasCredentials(applicationContext) && 
+            savedServerUrl.isNotBlank()) {
+            val savedPassword = AppSettings.getPassword(applicationContext)
+            viewModelScope.launch {
+                authenticationService.login(savedServerUrl, savedUsername, savedPassword)
             }
         }
+        settingsInitialized = true
     }
 
-    fun startStreaming(context: android.content.Context) {
-        currentContext = context
-        
+    fun startStreaming() {
         // Validate URL before starting service
         val currentState = _uiState.value
         if (currentState.parsedUrl == null) {
@@ -318,12 +335,12 @@ class MainViewModel @Inject constructor(
         
         // Bind to service if not already bound
         if (!bound) {
-            val intent = Intent(context, SignalKStreamingService::class.java)
-            context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+            val intent = Intent(applicationContext, SignalKStreamingService::class.java)
+            applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
         
         // Start streaming service
-        val serviceIntent = Intent(context, SignalKStreamingService::class.java).apply {
+        val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
             action = SignalKStreamingService.ACTION_START_STREAMING
             putExtra(SignalKStreamingService.EXTRA_PARSED_URL, currentState.parsedUrl)
             putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Fixed 1-second interval
@@ -334,26 +351,19 @@ class MainViewModel @Inject constructor(
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
+            applicationContext.startForegroundService(serviceIntent)
         } else {
-            context.startService(serviceIntent)
+            applicationContext.startService(serviceIntent)
         }
     }
 
     fun stopStreaming() {
-        currentContext?.let { context ->
-            val serviceIntent = Intent(context, SignalKStreamingService::class.java).apply {
-                action = SignalKStreamingService.ACTION_STOP_STREAMING
-            }
-            context.startService(serviceIntent)
-            
-            // Unbind from service
-            if (bound) {
-                context.unbindService(serviceConnection)
-                bound = false
-            }
+        val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
+            action = SignalKStreamingService.ACTION_STOP_STREAMING
         }
-        currentContext = null
+        applicationContext.startService(serviceIntent)
+        
+        cleanupServiceBinding(unbind = true)
     }
     
     fun login(username: String, password: String) {
@@ -378,10 +388,6 @@ class MainViewModel @Inject constructor(
     
     override fun onCleared() {
         super.onCleared()
-        // Unbind service when ViewModel is cleared
-        if (bound && currentContext != null) {
-            currentContext!!.unbindService(serviceConnection)
-            bound = false
-        }
+        cleanupServiceBinding(unbind = true)
     }
 }

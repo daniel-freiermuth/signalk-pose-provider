@@ -44,7 +44,7 @@ fun MainScreen(
     
     LaunchedEffect(Unit) {
         // Initialize settings when the screen is first shown
-        viewModel.initializeSettings(context)
+        viewModel.initializeSettings()
         
         if (!permissionsState.allPermissionsGranted) {
             permissionsState.launchMultiplePermissionRequest()
@@ -110,7 +110,7 @@ fun MainScreen(
                         viewModel.stopStreaming()
                     } else {
                         if (permissionsState.allPermissionsGranted) {
-                            viewModel.startStreaming(context)
+                            viewModel.startStreaming()
                         }
                     }
                 },
