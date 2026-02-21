@@ -45,8 +45,11 @@ object AppSettings {
      * @param vesselId the vessel ID to use (e.g., "self", "urn:mrn:imo:imo-number:1234567", etc.)
      */
     fun setVesselId(context: Context, vesselId: String) {
+        val trimmedId = vesselId.trim()
+        // Prevent saving blank vessel ID which would create invalid context "vessels."
+        val validId = if (trimmedId.isBlank()) DEFAULT_VESSEL_ID else trimmedId
         getPreferences(context).edit()
-            .putString(KEY_VESSEL_ID, vesselId.trim())
+            .putString(KEY_VESSEL_ID, validId)
             .apply()
     }
     
