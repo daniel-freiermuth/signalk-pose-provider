@@ -39,6 +39,7 @@ enum class DeviceOrientation(val displayName: String, val rotationDegrees: Int, 
 data class MainUiState(
     val isConnected: Boolean = false,
     val isStreaming: Boolean = false,
+    val serverUrl: String = "", // Raw user input for the URL field
     val parsedUrl: UrlParser.ParsedUrl? = null,
     val vesselId: String = "self",
     val deviceOrientation: DeviceOrientation = DeviceOrientation.DEFAULT,
@@ -57,9 +58,7 @@ data class MainUiState(
     val isAuthenticated: Boolean = false,
     val username: String? = null,
     val isLoggingIn: Boolean = false
-) {
-    val serverUrl: String get() = parsedUrl?.toUrlString() ?: ""
-}
+)
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -205,9 +204,9 @@ class MainViewModel @Inject constructor(
     
     fun updateServerUrl(url: String) {
         val parsed = UrlParser.parseUrl(url)
-        _uiState.update { it.copy(parsedUrl = parsed) }
+        _uiState.update { it.copy(serverUrl = url, parsedUrl = parsed) }
         // Save to shared preferences
-        AppSettings.setServerUrl(applicationContext, parsed?.toUrlString() ?: url)
+        AppSettings.setServerUrl(applicationContext, url)
         
         // Warn if URL contains a path that will be ignored
         if (parsed?.hasPath == true) {
@@ -323,6 +322,7 @@ class MainViewModel @Inject constructor(
         
         _uiState.update { 
             it.copy(
+                serverUrl = savedServerUrl,
                 parsedUrl = savedParsedUrl,
                 vesselId = savedVesselId,
                 sendLocation = savedSendLocation,

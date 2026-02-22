@@ -11,30 +11,30 @@ class MainUiStateTest {
     @Test
     fun testHostnameParsingWithTrailingPath() {
         val url = "http://192.168.1.1/signalk"
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertEquals("Hostname should be extracted correctly from URL with path", 
             "192.168.1.1", uiState.parsedUrl?.hostname)
         assertEquals(80, uiState.parsedUrl?.port)
         assertEquals(false, uiState.parsedUrl?.isHttps)
-        assertEquals("http://192.168.1.1", uiState.serverUrl)
+        assertEquals("http://192.168.1.1/signalk", uiState.serverUrl)
     }
 
     @Test
     fun testHostnameParsingWithoutProtocol() {
         val url = "192.168.1.1/signalk"
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertEquals("Hostname should be extracted correctly from URL without protocol but with path", 
             "192.168.1.1", uiState.parsedUrl?.hostname)
         assertEquals(80, uiState.parsedUrl?.port)
-        assertEquals("http://192.168.1.1", uiState.serverUrl)
+        assertEquals("192.168.1.1/signalk", uiState.serverUrl)
     }
 
     @Test
     fun testHostnameParsingWithPort() {
         val url = "http://192.168.1.1:3000"
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertEquals("192.168.1.1", uiState.parsedUrl?.hostname)
         assertEquals(3000, uiState.parsedUrl?.port)
@@ -45,18 +45,18 @@ class MainUiStateTest {
     @Test
     fun testHostnameParsingWithPortAndPath() {
         val url = "http://192.168.1.1:3000/signalk/v1"
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertEquals("192.168.1.1", uiState.parsedUrl?.hostname)
         assertEquals(3000, uiState.parsedUrl?.port)
         assertEquals(false, uiState.parsedUrl?.isHttps)
-        assertEquals("http://192.168.1.1:3000", uiState.serverUrl)
+        assertEquals("http://192.168.1.1:3000/signalk/v1", uiState.serverUrl)
     }
 
     @Test
     fun testHostnameParsingWithHttps() {
         val url = "https://signalk.local:3443"
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertEquals("signalk.local", uiState.parsedUrl?.hostname)
         assertEquals(3443, uiState.parsedUrl?.port)
@@ -67,7 +67,7 @@ class MainUiStateTest {
     @Test
     fun testHostnameParsingWithHttpsNoPort() {
         val url = "https://signalk.local"
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertEquals("signalk.local", uiState.parsedUrl?.hostname)
         assertEquals(443, uiState.parsedUrl?.port)
@@ -78,16 +78,16 @@ class MainUiStateTest {
     @Test
     fun testInvalidUrlReturnsNullValues() {
         val url = "ftp://invalid.server"
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertNull("ParsedUrl should be null for invalid URL", uiState.parsedUrl)
-        assertEquals("", uiState.serverUrl)
+        assertEquals("ftp://invalid.server", uiState.serverUrl)
     }
     
     @Test
     fun testEmptyUrlReturnsNullValues() {
         val url = ""
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertNull(uiState.parsedUrl)
         assertEquals("", uiState.serverUrl)
@@ -96,7 +96,7 @@ class MainUiStateTest {
     @Test
     fun testValidUrlHasValidFlag() {
         val url = "http://192.168.1.1:3000"
-        val uiState = MainUiState(parsedUrl = UrlParser.parseUrl(url))
+        val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
         assertTrue("Should have valid parsed URL", uiState.parsedUrl != null)
         assertEquals("http://192.168.1.1:3000", uiState.serverUrl)
