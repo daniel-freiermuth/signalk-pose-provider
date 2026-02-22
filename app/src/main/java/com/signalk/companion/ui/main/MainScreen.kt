@@ -96,15 +96,6 @@ fun MainScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Connection Status Card
-            ConnectionStatusCard(
-                isConnected = uiState.isConnected,
-                serverUrl = uiState.serverUrl,
-                vesselId = uiState.vesselId,
-                onServerUrlChange = viewModel::updateServerUrl,
-                onVesselIdChange = viewModel::updateVesselId
-            )
-            
             // Data Transmission Options Card
             DataTransmissionCard(
                 sendLocation = uiState.sendLocation,
@@ -163,63 +154,6 @@ fun MainScreen(
                     lastSentMessage = uiState.lastSentMessage,
                     messagesSent = uiState.messagesSent,
                     lastTransmissionTime = uiState.lastTransmissionTime
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ConnectionStatusCard(
-    isConnected: Boolean,
-    serverUrl: String,
-    vesselId: String,
-    onServerUrlChange: (String) -> Unit,
-    onVesselIdChange: (String) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "Connection",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            
-            OutlinedTextField(
-                value = serverUrl,
-                onValueChange = onServerUrlChange,
-                label = { Text("Server URL") },
-                placeholder = { Text("http://192.168.1.100:3000") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            
-            OutlinedTextField(
-                value = vesselId,
-                onValueChange = onVesselIdChange,
-                label = { Text("Vessel ID") },
-                placeholder = { Text("self") },
-                modifier = Modifier.fillMaxWidth(),
-                supportingText = { Text("Used in SignalK context: vessels.$vesselId") }
-            )
-            
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val statusColor = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = statusColor),
-                    modifier = Modifier.size(12.dp)
-                ) {}
-                Text(
-                    text = if (isConnected) "Connected" else "Disconnected",
-                    style = MaterialTheme.typography.bodyMedium
                 )
             }
         }
