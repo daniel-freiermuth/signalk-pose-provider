@@ -152,7 +152,12 @@ class SignalKStreamingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_STREAMING -> {
-                val parsedUrl = intent.getParcelableExtra(EXTRA_PARSED_URL, UrlParser.ParsedUrl::class.java)
+                @Suppress("DEPRECATION")
+                val parsedUrl = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_PARSED_URL, UrlParser.ParsedUrl::class.java)
+                } else {
+                    intent.getParcelableExtra(EXTRA_PARSED_URL)
+                }
                 val locationRate = intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L)
                 val sensorRate = intent.getIntExtra(EXTRA_SENSOR_RATE, 1000)
                 val sendLocation = intent.getBooleanExtra(EXTRA_SEND_LOCATION, true)

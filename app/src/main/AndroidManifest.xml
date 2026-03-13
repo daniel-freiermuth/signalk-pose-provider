@@ -11,12 +11,17 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     
     <!-- Sensor permissions -->
+    <!-- HIGH_SAMPLING_RATE_SENSORS only exists on API 31+; silently ignored on older devices -->
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     
     <!-- Background service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- FOREGROUND_SERVICE_LOCATION only exists on API 34+; the location foreground type is declared in the service tag -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"
+        android:minSdkVersion="34" />
+    <!-- POST_NOTIFICATIONS is a runtime permission introduced in API 33 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"
+        android:minSdkVersion="33" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
