@@ -17,6 +17,8 @@ object AppSettings {
     private const val KEY_DEVICE_ORIENTATION = "device_orientation"
     private const val KEY_COMPASS_TILT_CORRECTION = "compass_tilt_correction"
     private const val KEY_HEADING_OFFSET = "heading_offset"
+    private const val KEY_LOCATION_INTERVAL_MS = "location_interval_ms"
+    private const val KEY_SENSOR_INTERVAL_MS = "sensor_interval_ms"
     
     // Default values
     private const val DEFAULT_VESSEL_ID = "self"
@@ -27,6 +29,8 @@ object AppSettings {
     private const val DEFAULT_DEVICE_ORIENTATION = "LANDSCAPE_LEFT"
     private const val DEFAULT_COMPASS_TILT_CORRECTION = true
     private const val DEFAULT_HEADING_OFFSET = 0.0f
+    private const val DEFAULT_LOCATION_INTERVAL_MS = 1000L
+    private const val DEFAULT_SENSOR_INTERVAL_MS = 250L
     
     private fun getPreferences(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -243,6 +247,28 @@ object AppSettings {
         require(offsetDegrees in -360f..360f) { "Heading offset must be between -360 and 360 degrees" }
         getPreferences(context).edit()
             .putFloat(KEY_HEADING_OFFSET, offsetDegrees)
+            .apply()
+    }
+
+    fun getLocationIntervalMs(context: Context): Long {
+        return getPreferences(context).getLong(KEY_LOCATION_INTERVAL_MS, DEFAULT_LOCATION_INTERVAL_MS)
+    }
+
+    fun setLocationIntervalMs(context: Context, intervalMs: Long) {
+        require(intervalMs > 0) { "Location interval must be positive" }
+        getPreferences(context).edit()
+            .putLong(KEY_LOCATION_INTERVAL_MS, intervalMs)
+            .apply()
+    }
+
+    fun getSensorIntervalMs(context: Context): Long {
+        return getPreferences(context).getLong(KEY_SENSOR_INTERVAL_MS, DEFAULT_SENSOR_INTERVAL_MS)
+    }
+
+    fun setSensorIntervalMs(context: Context, intervalMs: Long) {
+        require(intervalMs > 0) { "Sensor interval must be positive" }
+        getPreferences(context).edit()
+            .putLong(KEY_SENSOR_INTERVAL_MS, intervalMs)
             .apply()
     }
 }

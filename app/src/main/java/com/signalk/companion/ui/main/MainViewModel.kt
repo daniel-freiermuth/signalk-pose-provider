@@ -49,6 +49,8 @@ data class MainUiState(
     val sendLocation: Boolean = true,
     val sendHeading: Boolean = true,
     val sendPressure: Boolean = true,
+    val locationIntervalMs: Long = 1000L,
+    val sensorIntervalMs: Long = 250L,
     val locationData: LocationData? = null,
     val sensorData: SensorData? = null,
     val error: String? = null,
@@ -276,13 +278,25 @@ class MainViewModel @Inject constructor(
         // Update running service if active
         sendConfigUpdateToService()
     }
+
+    fun updateLocationIntervalMs(intervalMs: Long) {
+        _uiState.update { it.copy(locationIntervalMs = intervalMs) }
+        AppSettings.setLocationIntervalMs(applicationContext, intervalMs)
+        sendConfigUpdateToService()
+    }
+
+    fun updateSensorIntervalMs(intervalMs: Long) {
+        _uiState.update { it.copy(sensorIntervalMs = intervalMs) }
+        AppSettings.setSensorIntervalMs(applicationContext, intervalMs)
+        sendConfigUpdateToService()
+    }
     
     private fun sendConfigUpdateToService() {
         if (_uiState.value.isStreaming) {
             val intent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
                 action = SignalKStreamingService.ACTION_UPDATE_CONFIG
-                putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Use current default
-                putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, 1000)   // Use current default
+                putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, _uiState.value.locationIntervalMs)
+                putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, _uiState.value.sensorIntervalMs.toInt())
                 putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, _uiState.value.sendLocation)
                 putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, _uiState.value.sendHeading)
                 putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, _uiState.value.sendPressure)
@@ -305,6 +319,8 @@ class MainViewModel @Inject constructor(
         val savedSendLocation = AppSettings.getSendLocation(applicationContext)
         val savedSendHeading = AppSettings.getSendHeading(applicationContext)
         val savedSendPressure = AppSettings.getSendPressure(applicationContext)
+        val savedLocationIntervalMs = AppSettings.getLocationIntervalMs(applicationContext)
+        val savedSensorIntervalMs = AppSettings.getSensorIntervalMs(applicationContext)
         val savedUsername = AppSettings.getUsername(applicationContext)
         
         // Load device orientation and compass settings
@@ -328,6 +344,8 @@ class MainViewModel @Inject constructor(
                 sendLocation = savedSendLocation,
                 sendHeading = savedSendHeading,
                 sendPressure = savedSendPressure,
+                locationIntervalMs = savedLocationIntervalMs,
+                sensorIntervalMs = savedSensorIntervalMs,
                 username = savedUsername.ifBlank { null },
                 deviceOrientation = savedOrientation,
                 compassTiltCorrection = savedTiltCorrection,
@@ -370,8 +388,8 @@ class MainViewModel @Inject constructor(
         val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
             action = SignalKStreamingService.ACTION_START_STREAMING
             putExtra(SignalKStreamingService.EXTRA_PARSED_URL, currentState.parsedUrl)
-            putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, 1000L) // Fixed 1-second interval
-            putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, 1000) // Fixed 1-second interval
+            putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, currentState.locationIntervalMs)
+            putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, currentState.sensorIntervalMs.toInt())
             putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, currentState.sendLocation)
             putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, currentState.sendHeading)
             putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, currentState.sendPressure)

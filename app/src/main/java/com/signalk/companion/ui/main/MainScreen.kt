@@ -101,9 +101,13 @@ fun MainScreen(
                 sendLocation = uiState.sendLocation,
                 sendHeading = uiState.sendHeading,
                 sendPressure = uiState.sendPressure,
+                locationIntervalMs = uiState.locationIntervalMs,
+                sensorIntervalMs = uiState.sensorIntervalMs,
                 onSendLocationChange = viewModel::updateSendLocation,
                 onSendHeadingChange = viewModel::updateSendHeading,
-                onSendPressureChange = viewModel::updateSendPressure
+                onSendPressureChange = viewModel::updateSendPressure,
+                onLocationIntervalChange = viewModel::updateLocationIntervalMs,
+                onSensorIntervalChange = viewModel::updateSensorIntervalMs
             )
             
             // Control Card
@@ -942,14 +946,32 @@ fun MarineConfigCard(
     }
 }
 
+private val LOCATION_INTERVAL_OPTIONS: List<Pair<Long, String>> = listOf(
+    500L to "500 ms",
+    1000L to "1 s",
+    2000L to "2 s",
+    5000L to "5 s",
+)
+
+private val SENSOR_INTERVAL_OPTIONS: List<Pair<Long, String>> = listOf(
+    100L to "100 ms",
+    250L to "250 ms",
+    500L to "500 ms",
+    1000L to "1 s",
+)
+
 @Composable
 fun DataTransmissionCard(
     sendLocation: Boolean,
     sendHeading: Boolean,
     sendPressure: Boolean,
+    locationIntervalMs: Long,
+    sensorIntervalMs: Long,
     onSendLocationChange: (Boolean) -> Unit,
     onSendHeadingChange: (Boolean) -> Unit,
-    onSendPressureChange: (Boolean) -> Unit
+    onSendPressureChange: (Boolean) -> Unit,
+    onLocationIntervalChange: (Long) -> Unit,
+    onSensorIntervalChange: (Long) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -973,7 +995,7 @@ fun DataTransmissionCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             
-            // Location checkbox
+            // Location checkbox + interval
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -983,7 +1005,7 @@ fun DataTransmissionCard(
                     onCheckedChange = onSendLocationChange
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Location Data",
                         style = MaterialTheme.typography.bodyLarge,
@@ -995,9 +1017,15 @@ fun DataTransmissionCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                IntervalDropdown(
+                    options = LOCATION_INTERVAL_OPTIONS,
+                    selected = locationIntervalMs,
+                    onSelected = onLocationIntervalChange,
+                    enabled = sendLocation
+                )
             }
             
-            // Heading checkbox
+            // Heading checkbox + interval
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -1007,7 +1035,7 @@ fun DataTransmissionCard(
                     onCheckedChange = onSendHeadingChange
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Heading Data",
                         style = MaterialTheme.typography.bodyLarge,
@@ -1019,6 +1047,12 @@ fun DataTransmissionCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                IntervalDropdown(
+                    options = SENSOR_INTERVAL_OPTIONS,
+                    selected = sensorIntervalMs,
+                    onSelected = onSensorIntervalChange,
+                    enabled = sendHeading
+                )
             }
             
             // Pressure checkbox
@@ -1043,6 +1077,50 @@ fun DataTransmissionCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun IntervalDropdown(
+    options: List<Pair<Long, String>>,
+    selected: Long,
+    onSelected: (Long) -> Unit,
+    enabled: Boolean,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = options.find { it.first == selected }?.second ?: "${selected} ms"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded && enabled,
+        onExpandedChange = { if (enabled) expanded = it }
+    ) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            modifier = Modifier
+                .width(100.dp)
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            textStyle = MaterialTheme.typography.bodySmall,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && enabled) },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded && enabled,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { (value, name) ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        onSelected(value)
+                        expanded = false
+                    }
+                )
             }
         }
     }
