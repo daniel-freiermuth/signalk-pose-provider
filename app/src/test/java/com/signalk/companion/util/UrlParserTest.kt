@@ -211,8 +211,7 @@ class UrlParserTest {
         val urls = listOf(
             "ftp://192.168.1.1",
             "file:///path/to/file",
-            "ssh://server.com",
-            "mailto:test@example.com"
+            "ssh://server.com"
         )
         
         urls.forEach { url ->
@@ -306,4 +305,46 @@ class UrlParserTest {
             assertNotNull("URL should parse: $url", parsed)
             assertFalse("URL should not have path flag set: $url", parsed?.hasPath ?: true)
         }
-    }}
+    }
+
+    @Test
+    fun testParseUrlWithLocalhost() {
+        val result = UrlParser.parseUrl("localhost")
+        assertNotNull("localhost should parse successfully", result)
+        assertEquals("localhost", result?.hostname)
+        assertEquals(80, result?.port)
+        assertEquals(false, result?.isHttps)
+    }
+
+    @Test
+    fun testParseUrlWithLocalhostAndPort() {
+        val result = UrlParser.parseUrl("localhost:3000")
+        assertNotNull("localhost:3000 should parse successfully", result)
+        assertEquals("localhost", result?.hostname)
+        assertEquals(3000, result?.port)
+        assertEquals(false, result?.isHttps)
+    }
+
+    @Test
+    fun testParseUrlWithLocalhostScheme() {
+        val result = UrlParser.parseUrl("http://localhost:3000")
+        assertNotNull("http://localhost:3000 should parse successfully", result)
+        assertEquals("localhost", result?.hostname)
+        assertEquals(3000, result?.port)
+        assertEquals(false, result?.isHttps)
+    }
+
+    @Test
+    fun testToUrlStringLocalhostRoundTrip() {
+        val urls = listOf("localhost", "localhost:3000", "http://localhost", "http://localhost:3000")
+        urls.forEach { url ->
+            val parsed = UrlParser.parseUrl(url)
+            assertNotNull("localhost URL should parse: $url", parsed)
+            // toUrlString() must produce an absolute URL (with scheme) so it can be used in URL()
+            assertTrue(
+                "toUrlString() must start with http:// or https:// for: $url",
+                parsed!!.toUrlString().startsWith("http://") || parsed.toUrlString().startsWith("https://")
+            )
+        }
+    }
+}

@@ -55,9 +55,9 @@ object UrlParser {
      */
     fun parseUrl(url: String): ParsedUrl? {
         return try {
-            // Check if URL already has a scheme
-            // Don't add http:// if there's already any scheme (even if not ://)
-            val hasScheme = url.matches(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:.*"))
+            // Check if URL already has a scheme (must have "://" to be a hierarchical scheme)
+            // Using just ":" would incorrectly treat "localhost:3000" as having scheme "localhost"
+            val hasScheme = url.matches(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))
             val urlWithScheme = if (hasScheme) url else "http://$url"
             
             // Parse using standard URI parser

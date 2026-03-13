@@ -1,6 +1,7 @@
 package com.signalk.companion.service
 
 import com.signalk.companion.data.model.*
+import com.signalk.companion.util.UrlParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,7 +42,12 @@ class AuthenticationService @Inject constructor() {
             
             // Use IO dispatcher for network operations
             withContext(Dispatchers.IO) {
-                val loginUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/login"
+                val parsedUrl = UrlParser.parseUrl(serverUrl)
+                if (parsedUrl == null) {
+                    setAuthError("Invalid server URL: $serverUrl")
+                    return@withContext Result.failure(Exception("Invalid server URL: $serverUrl"))
+                }
+                val loginUrl = "${parsedUrl.toUrlString()}/signalk/v1/auth/login"
                 val loginRequest = LoginRequest(username, password)
                 
                 val url = URL(loginUrl)
@@ -79,7 +85,7 @@ class AuthenticationService @Inject constructor() {
                             token = loginResponse.token,
                             username = username,
                             password = password,  // Store temporarily for re-authentication
-                            serverUrl = serverUrl,
+                            serverUrl = parsedUrl.toUrlString(),
                             isLoading = false,
                             error = null
                         ) }
