@@ -389,7 +389,11 @@ class MainViewModel @Inject constructor(
             action = SignalKStreamingService.ACTION_STOP_STREAMING
         }
         applicationContext.startService(serviceIntent)
-        
+
+        // Update state eagerly: cleanupServiceBinding cancels the service collector before
+        // the service can emit isStreaming=false, which would leave the button stuck in "Stop" state.
+        _uiState.update { it.copy(isStreaming = false) }
+
         cleanupServiceBinding(unbind = true)
     }
     
