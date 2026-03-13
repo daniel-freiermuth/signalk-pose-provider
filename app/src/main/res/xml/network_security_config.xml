@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Allow cleartext HTTP to loopback addresses so users can connect to a
+        SignalK server running on the same device (localhost / 127.0.0.1) or on
+        the Android emulator host (10.0.2.2).
+        All other traffic follows the platform default (cleartext blocked on API 28+).
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
