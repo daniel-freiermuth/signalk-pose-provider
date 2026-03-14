@@ -211,34 +211,58 @@ class SensorService @Inject constructor(
             // Apply device orientation compensation for marine mounting
             val orientationMatrix = FloatArray(9)
             when (deviceOrientation) {
-                DeviceOrientation.PORTRAIT -> {
-                    // No rotation needed - default phone orientation
+                DeviceOrientation.FLAT_TOP_TO_BOW -> {
+                    // Device flat face-up, top edge toward bow.
+                    // X=+X(right)→starboard, Y=+Y(top)→bow, Z=+Z(screen)→sky. No remap needed.
                     System.arraycopy(rotationMatrix, 0, orientationMatrix, 0, 9)
                 }
-                DeviceOrientation.LANDSCAPE_LEFT -> {
-                    // Phone rotated 90° counter-clockwise (left side toward bow)
+                DeviceOrientation.FLAT_LEFT_TO_BOW -> {
+                    // Device flat face-up, left edge toward bow.
+                    // X=+Y(top)→starboard, Y=−X(left)→bow, Z=+Z(screen)→sky.
                     SensorManager.remapCoordinateSystem(
-                        rotationMatrix, 
-                        SensorManager.AXIS_Y, 
-                        SensorManager.AXIS_MINUS_X, 
+                        rotationMatrix,
+                        SensorManager.AXIS_MINUS_Y,
+                        SensorManager.AXIS_X,
                         orientationMatrix
                     )
                 }
-                DeviceOrientation.LANDSCAPE_RIGHT -> {
-                    // Phone rotated 90° clockwise (right side toward bow) 
+                DeviceOrientation.FLAT_RIGHT_TO_BOW -> {
+                    // Device flat face-up, right edge toward bow.
+                    // X=−Y(bottom)→starboard, Y=+X(right)→bow, Z=+Z(screen)→sky.
                     SensorManager.remapCoordinateSystem(
-                        rotationMatrix, 
-                        SensorManager.AXIS_MINUS_Y, 
-                        SensorManager.AXIS_X, 
+                        rotationMatrix,
+                        SensorManager.AXIS_Y,
+                        SensorManager.AXIS_MINUS_X,
                         orientationMatrix
                     )
                 }
-                DeviceOrientation.PORTRAIT_INVERTED -> {
-                    // Phone upside down (bottom toward bow)
+                DeviceOrientation.VERTICAL_TOP_UP -> {
+                    // Device upright portrait, back toward bow, top toward sky.
+                    // X=+X(right)→starboard, Y=−Z(back)→bow, Z=+Y(top)→sky.
                     SensorManager.remapCoordinateSystem(
-                        rotationMatrix, 
-                        SensorManager.AXIS_MINUS_X, 
-                        SensorManager.AXIS_MINUS_Y, 
+                        rotationMatrix,
+                        SensorManager.AXIS_X,
+                        SensorManager.AXIS_Z,
+                        orientationMatrix
+                    )
+                }
+                DeviceOrientation.VERTICAL_LEFT_UP -> {
+                    // Device on its right side, back toward bow, left edge toward sky.
+                    // X=+Y(top)→starboard, Y=−Z(back)→bow, Z=−X(left)→sky.
+                    SensorManager.remapCoordinateSystem(
+                        rotationMatrix,
+                        SensorManager.AXIS_MINUS_Z,
+                        SensorManager.AXIS_X,
+                        orientationMatrix
+                    )
+                }
+                DeviceOrientation.VERTICAL_RIGHT_UP -> {
+                    // Device on its left side, back toward bow, right edge toward sky.
+                    // X=−Y(bottom)→starboard, Y=−Z(back)→bow, Z=+X(right)→sky.
+                    SensorManager.remapCoordinateSystem(
+                        rotationMatrix,
+                        SensorManager.AXIS_Z,
+                        SensorManager.AXIS_MINUS_X,
                         orientationMatrix
                     )
                 }
@@ -248,13 +272,16 @@ class SensorService @Inject constructor(
             SensorManager.getOrientation(orientationMatrix, orientation)
             
             var magneticHeading = orientation[0]  // Azimuth in radians
-            val pitch = orientation[1]           // Pitch in radians  
+            val rawPitch = orientation[1]        // Pitch in sensor frame (Android: positive = bow down)
             val roll = orientation[2]            // Roll in radians
             
-            // Apply tilt compensation if enabled (improves accuracy when device is tilted)
+            // Apply tilt compensation if enabled (uses raw sensor-frame pitch)
             if (tiltCorrectionEnabled) {
-                magneticHeading = applyTiltCompensation(magneticHeading, pitch, roll)
+                magneticHeading = applyTiltCompensation(magneticHeading, rawPitch, roll)
             }
+            
+            // Negate pitch: Android positive = bow down; nautical positive = bow up
+            val pitch = -rawPitch
             
             // Apply heading offset correction for device mounting angle
             magneticHeading = applyHeadingOffset(magneticHeading)

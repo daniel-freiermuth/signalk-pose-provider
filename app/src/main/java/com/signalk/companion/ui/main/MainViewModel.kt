@@ -25,14 +25,18 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class DeviceOrientation(val displayName: String, val rotationDegrees: Int, val description: String) {
-    PORTRAIT("Portrait", 0, "Phone held normally (top of phone = bow)"),
-    LANDSCAPE_LEFT("Landscape Left", 90, "Phone rotated 90° CCW (left side = bow)"),
-    LANDSCAPE_RIGHT("Landscape Right", 270, "Phone rotated 90° CW (right side = bow)"),
-    PORTRAIT_INVERTED("Portrait Inverted", 180, "Phone upside down (bottom = bow)");
-    
+enum class DeviceOrientation(val displayName: String, val description: String) {
+    // Device lying flat face-up on a table
+    FLAT_TOP_TO_BOW("Flat — top to bow", "Lying flat, top edge toward bow"),
+    FLAT_LEFT_TO_BOW("Flat — left to bow", "Lying flat, left edge toward bow"),
+    FLAT_RIGHT_TO_BOW("Flat — right to bow", "Lying flat, right edge toward bow"),
+    // Device mounted vertically, back face toward bow, screen facing the sailor
+    VERTICAL_TOP_UP("Vertical — top up", "Upright portrait, back toward bow, top toward sky"),
+    VERTICAL_LEFT_UP("Vertical — left up", "Upright landscape, back toward bow, left edge toward sky"),
+    VERTICAL_RIGHT_UP("Vertical — right up", "Upright landscape, back toward bow, right edge toward sky");
+
     companion object {
-        val DEFAULT = LANDSCAPE_LEFT
+        val DEFAULT = FLAT_TOP_TO_BOW
     }
 }
 
