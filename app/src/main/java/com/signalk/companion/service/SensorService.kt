@@ -47,7 +47,6 @@ class SensorService @Inject constructor(
     
     // Marine navigation configuration
     private var deviceOrientation = DeviceOrientation.DEFAULT
-    private var tiltCorrectionEnabled = true
     private var headingOffsetDegrees = 0.0f // Correction for device mounting angle
     
     // Current sensor delay setting and rate limiting
@@ -132,11 +131,6 @@ class SensorService @Inject constructor(
     fun setDeviceOrientation(orientation: DeviceOrientation) {
         Log.d(TAG, "Setting device orientation to: ${orientation.displayName}")
         this.deviceOrientation = orientation
-    }
-
-    fun setTiltCorrection(enabled: Boolean) {
-        Log.d(TAG, "Setting tilt correction to: $enabled")
-        this.tiltCorrectionEnabled = enabled
     }
 
     fun setHeadingOffset(offsetDegrees: Float) {
@@ -271,14 +265,13 @@ class SensorService @Inject constructor(
             // Get orientation values from the corrected matrix
             SensorManager.getOrientation(orientationMatrix, orientation)
             
-            var magneticHeading = orientation[0]  // Azimuth in radians
-            val rawPitch = orientation[1]        // Pitch in sensor frame (Android: positive = bow down)
-            val roll = orientation[2]            // Roll in radians
+            var magneticHeading = orientation[0]  // Azimuth in radians (already tilt-compensated by Android)
+            val rawPitch = orientation[1]        // Pitch relative to Earth horizontal
+            val roll = orientation[2]            // Roll relative to Earth horizontal
             
-            // Apply tilt compensation if enabled (uses raw sensor-frame pitch)
-            if (tiltCorrectionEnabled) {
-                magneticHeading = applyTiltCompensation(magneticHeading, rawPitch, roll)
-            }
+            // Note: magneticHeading is already tilt-compensated by SensorManager.getRotationMatrix()
+            // which uses gravity vector to define Earth's vertical axis and projects the magnetic
+            // field onto the horizontal plane via cross product. No additional compensation needed.
             
             // Negate pitch: Android positive = bow down; nautical positive = bow up
             val pitch = -rawPitch
@@ -306,26 +299,6 @@ class SensorService @Inject constructor(
                 ) 
             }
         }
-    }
-
-    private fun applyTiltCompensation(heading: Float, pitch: Float, roll: Float): Float {
-        // Tilt compensation algorithm for more accurate heading when device is tilted
-        // This is particularly important for boat-mounted devices that may not be perfectly level
-        
-        val cosPitch = cos(pitch)
-        val sinPitch = sin(pitch)
-        val cosRoll = cos(roll)
-        val sinRoll = sin(roll)
-        
-        // Calculate tilt-compensated heading
-        val cosHeading = cos(heading)
-        val sinHeading = sin(heading)
-        
-        // Apply tilt compensation matrix
-        val compensatedX = cosHeading * cosPitch + sinHeading * sinRoll * sinPitch
-        val compensatedY = sinHeading * cosRoll
-        
-        return atan2(compensatedY, compensatedX)
     }
 
     private fun normalizeHeading(heading: Float): Float {

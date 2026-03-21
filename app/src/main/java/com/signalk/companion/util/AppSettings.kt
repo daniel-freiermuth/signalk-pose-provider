@@ -15,7 +15,6 @@ object AppSettings {
     private const val KEY_USERNAME = "username"
     private const val KEY_PASSWORD = "password"
     private const val KEY_DEVICE_ORIENTATION = "device_orientation"
-    private const val KEY_COMPASS_TILT_CORRECTION = "compass_tilt_correction"
     private const val KEY_HEADING_OFFSET = "heading_offset"
     private const val KEY_LOCATION_INTERVAL_MS = "location_interval_ms"
     private const val KEY_SENSOR_INTERVAL_MS = "sensor_interval_ms"
@@ -28,7 +27,6 @@ object AppSettings {
     private const val DEFAULT_SEND_PRESSURE = true
     private const val DEFAULT_SERVER_URL = ""
     private const val DEFAULT_DEVICE_ORIENTATION = "LANDSCAPE_LEFT"
-    private const val DEFAULT_COMPASS_TILT_CORRECTION = true
     private const val DEFAULT_HEADING_OFFSET = 0.0f
     private const val DEFAULT_LOCATION_INTERVAL_MS = 1000L
     private const val DEFAULT_SENSOR_INTERVAL_MS = 250L
@@ -214,22 +212,6 @@ object AppSettings {
         require(orientation.isNotBlank()) { "Device orientation cannot be blank" }
         getPreferences(context).edit()
             .putString(KEY_DEVICE_ORIENTATION, orientation)
-            .apply()
-    }
-    
-    /**
-     * Get whether compass tilt correction is enabled
-     */
-    fun getCompassTiltCorrection(context: Context): Boolean {
-        return getPreferences(context).getBoolean(KEY_COMPASS_TILT_CORRECTION, DEFAULT_COMPASS_TILT_CORRECTION)
-    }
-    
-    /**
-     * Set whether compass tilt correction is enabled
-     */
-    fun setCompassTiltCorrection(context: Context, enabled: Boolean) {
-        getPreferences(context).edit()
-            .putBoolean(KEY_COMPASS_TILT_CORRECTION, enabled)
             .apply()
     }
     

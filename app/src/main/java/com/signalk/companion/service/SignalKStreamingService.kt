@@ -401,11 +401,6 @@ class SignalKStreamingService : Service() {
         Log.d(TAG, "Updated device orientation to: ${orientation.displayName}")
     }
 
-    fun updateTiltCorrection(enabled: Boolean) {
-        sensorService.setTiltCorrection(enabled)
-        Log.d(TAG, "Updated tilt correction to: $enabled")
-    }
-
     fun updateHeadingOffset(offsetDegrees: Float) {
         sensorService.setHeadingOffset(offsetDegrees)
         Log.d(TAG, "Updated heading offset to: ${offsetDegrees}°")

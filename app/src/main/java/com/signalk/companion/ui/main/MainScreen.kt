@@ -128,10 +128,8 @@ fun MainScreen(
             // Marine Configuration Card
             MarineConfigCard(
                 deviceOrientation = uiState.deviceOrientation,
-                compassTiltCorrection = uiState.compassTiltCorrection,
                 headingOffset = uiState.headingOffset,
                 onDeviceOrientationChange = viewModel::updateDeviceOrientation,
-                onTiltCorrectionChange = viewModel::updateCompassTiltCorrection,
                 onHeadingOffsetChange = viewModel::updateHeadingOffset
             )
             
@@ -760,10 +758,8 @@ fun SensorAvailabilityRow(sensorName: String, isAvailable: Boolean) {
 @Composable
 fun MarineConfigCard(
     deviceOrientation: DeviceOrientation,
-    compassTiltCorrection: Boolean,
     headingOffset: Float,
     onDeviceOrientationChange: (DeviceOrientation) -> Unit,
-    onTiltCorrectionChange: (Boolean) -> Unit,
     onHeadingOffsetChange: (Float) -> Unit
 ) {
     var orientationDropdownExpanded by remember { mutableStateOf(false) }
@@ -848,42 +844,6 @@ fun MarineConfigCard(
                             )
                         }
                     }
-                }
-            }
-            
-            // Compass Tilt Correction Toggle
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = "Compass Tilt Correction",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Compensate for boat heel and pitch",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = if (compassTiltCorrection) "✓ Enabled - More accurate heading when boat tilts" 
-                                  else "✗ Disabled - Basic compass reading only",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (compassTiltCorrection) MaterialTheme.colorScheme.primary 
-                                   else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    
-                    Switch(
-                        checked = compassTiltCorrection,
-                        onCheckedChange = onTiltCorrectionChange
-                    )
                 }
             }
             
@@ -983,12 +943,6 @@ fun MarineConfigCard(
                     
                     Text(
                         text = "• Orientation: ${deviceOrientation.displayName}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    
-                    Text(
-                        text = "• Tilt correction: ${if (compassTiltCorrection) "Enabled" else "Disabled"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
                     )

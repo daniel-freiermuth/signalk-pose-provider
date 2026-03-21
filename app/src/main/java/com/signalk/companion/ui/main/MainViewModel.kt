@@ -47,7 +47,6 @@ data class MainUiState(
     val parsedUrl: UrlParser.ParsedUrl? = null,
     val vesselId: String = "self",
     val deviceOrientation: DeviceOrientation = DeviceOrientation.DEFAULT,
-    val compassTiltCorrection: Boolean = true,
     val headingOffset: Float = 0.0f, // Heading correction in degrees (+/- for device mounting angle)
     // Data transmission options
     val sendLocation: Boolean = true,
@@ -157,7 +156,6 @@ class MainViewModel @Inject constructor(
     init {
         // Configure sensor service for boat mounting (landscape left by default)
         sensorService.setDeviceOrientation(DeviceOrientation.DEFAULT)
-        sensorService.setTiltCorrection(true)
         sensorService.setHeadingOffset(0.0f) // No offset by default
         
         // Still observe location and sensor data for UI display (but not for transmission)
@@ -237,16 +235,6 @@ class MainViewModel @Inject constructor(
         sensorService.setDeviceOrientation(orientation)
         // If streaming service is bound, update it too
         streamingService?.updateDeviceOrientation(orientation)
-    }
-
-    fun updateCompassTiltCorrection(enabled: Boolean) {
-        _uiState.update { it.copy(compassTiltCorrection = enabled) }
-        // Save to shared preferences
-        AppSettings.setCompassTiltCorrection(applicationContext, enabled)
-        // Update sensor service with tilt correction setting
-        sensorService.setTiltCorrection(enabled)
-        // If streaming service is bound, update it too
-        streamingService?.updateTiltCorrection(enabled)
     }
 
     fun updateHeadingOffset(offsetDegrees: Float) {
@@ -339,12 +327,10 @@ class MainViewModel @Inject constructor(
         val savedOrientation = DeviceOrientation.values()
             .find { it.name == savedOrientationName } 
             ?: DeviceOrientation.DEFAULT
-        val savedTiltCorrection = AppSettings.getCompassTiltCorrection(applicationContext)
         val savedHeadingOffset = AppSettings.getHeadingOffset(applicationContext)
         
         // Apply orientation and compass settings to sensor service
         sensorService.setDeviceOrientation(savedOrientation)
-        sensorService.setTiltCorrection(savedTiltCorrection)
         sensorService.setHeadingOffset(savedHeadingOffset)
         
         _uiState.update { 
@@ -359,7 +345,6 @@ class MainViewModel @Inject constructor(
                 sensorIntervalMs = savedSensorIntervalMs,
                 username = savedUsername.ifBlank { null },
                 deviceOrientation = savedOrientation,
-                compassTiltCorrection = savedTiltCorrection,
                 headingOffset = savedHeadingOffset
             )
         }
