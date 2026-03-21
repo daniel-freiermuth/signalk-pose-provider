@@ -4,8 +4,8 @@ import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import org.junit.Test
-import org.junit.Assert.*
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.*
 
 class SignalKTransmitterTest {
     
@@ -91,13 +91,13 @@ class SignalKTransmitterTest {
         
         // Basic verification
         assertNotNull(json)
-        assertTrue("Should contain navigation.position", json.contains("navigation.position"))
-        assertFalse("Should not contain 'type' field in source", json.contains("\"type\":"))
+        assertTrue(json.contains("navigation.position"), "Should contain navigation.position")
+        assertFalse(json.contains("\"type\":"), "Should not contain 'type' field in source")
         
         // For debugging - this will appear in test failure messages if needed
         if (json.length > 100) {
             val shortJson = json.take(200) + "..."
-            assertTrue("JSON should be well-formed: $shortJson", json.startsWith("{"))
+            assertTrue(json.startsWith("{"), "JSON should be well-formed: $shortJson")
         }
     }
     

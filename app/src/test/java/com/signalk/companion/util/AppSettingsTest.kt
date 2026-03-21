@@ -2,8 +2,9 @@ package com.signalk.companion.util
 
 import android.content.Context
 import android.content.SharedPreferences
-import org.junit.Test
-import org.junit.Before
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.assertThrows
 import org.mockito.Mockito.*
 
 class AppSettingsTest {
@@ -12,7 +13,7 @@ class AppSettingsTest {
     private lateinit var mockSharedPreferences: SharedPreferences
     private lateinit var mockEditor: SharedPreferences.Editor
 
-    @Before
+    @BeforeEach
     fun setup() {
         mockContext = mock(Context::class.java)
         mockSharedPreferences = mock(SharedPreferences::class.java)
@@ -25,24 +26,32 @@ class AppSettingsTest {
         `when`(mockEditor.putFloat(anyString(), anyFloat())).thenReturn(mockEditor)
     }
 
-    @Test(expected = IllegalArgumentException::class)
+    @Test
     fun testSetDeviceOrientation_rejectsBlankString() {
-        AppSettings.setDeviceOrientation(mockContext, "")
+        assertThrows<IllegalArgumentException> {
+            AppSettings.setDeviceOrientation(mockContext, "")
+        }
     }
 
-    @Test(expected = IllegalArgumentException::class)
+    @Test
     fun testSetDeviceOrientation_rejectsWhitespaceString() {
-        AppSettings.setDeviceOrientation(mockContext, "   ")
+        assertThrows<IllegalArgumentException> {
+            AppSettings.setDeviceOrientation(mockContext, "   ")
+        }
     }
 
-    @Test(expected = IllegalArgumentException::class)
+    @Test
     fun testSetHeadingOffset_rejectsTooLargePositiveValue() {
-        AppSettings.setHeadingOffset(mockContext, 361f)
+        assertThrows<IllegalArgumentException> {
+            AppSettings.setHeadingOffset(mockContext, 361f)
+        }
     }
 
-    @Test(expected = IllegalArgumentException::class)
+    @Test
     fun testSetHeadingOffset_rejectsTooLargeNegativeValue() {
-        AppSettings.setHeadingOffset(mockContext, -361f)
+        assertThrows<IllegalArgumentException> {
+            AppSettings.setHeadingOffset(mockContext, -361f)
+        }
     }
 
     @Test

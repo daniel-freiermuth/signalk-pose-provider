@@ -12,10 +12,10 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import org.junit.After
-import org.junit.Assert.*
-import org.junit.Before
-import org.junit.Test
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -30,7 +30,7 @@ class SettingsViewModelTest {
     
     private val testDispatcher = UnconfinedTestDispatcher()
 
-    @Before
+    @BeforeEach
     fun setup() {
         Dispatchers.setMain(testDispatcher)
         
@@ -60,7 +60,7 @@ class SettingsViewModelTest {
         viewModel = SettingsViewModel(authenticationService)
     }
 
-    @After
+    @AfterEach
     fun tearDown() {
         Dispatchers.resetMain()
     }
@@ -77,9 +77,10 @@ class SettingsViewModelTest {
         advanceUntilIdle()
         
         val errorAfterSave = viewModel.uiState.value.error
-        assertNotNull("Should have error after save failure", errorAfterSave)
-        assertTrue("Error should mention save failure", 
-            errorAfterSave!!.contains("Failed to save settings"))
+        assertNotNull(errorAfterSave, "Should have error after save failure")
+        assertTrue(
+            errorAfterSave!!.contains("Failed to save settings"),
+            "Error should mention save failure")
         
         // Now emit an auth state update with null error (simulating isLoading change)
         authStateFlow.value = AuthState(isLoading = true, error = null)
@@ -88,10 +89,11 @@ class SettingsViewModelTest {
         // BUG: The local error gets overwritten by null
         // EXPECTED: Local error should be preserved
         val errorAfterAuthUpdate = viewModel.uiState.value.error
-        assertNotNull("Local error should not be cleared by auth state update with null error", 
-            errorAfterAuthUpdate)
-        assertTrue("Error should still mention save failure", 
-            errorAfterAuthUpdate!!.contains("Failed to save settings"))
+        assertNotNull(errorAfterAuthUpdate,
+            "Local error should not be cleared by auth state update with null error")
+        assertTrue(
+            errorAfterAuthUpdate!!.contains("Failed to save settings"),
+            "Error should still mention save failure")
     }
 
     @Test
@@ -101,7 +103,7 @@ class SettingsViewModelTest {
         authStateFlow.value = AuthState(error = authError)
         advanceUntilIdle()
         
-        assertEquals("Auth error should be shown", authError, viewModel.uiState.value.error)
+        assertEquals(authError, viewModel.uiState.value.error, "Auth error should be shown")
     }
 
     @Test
@@ -111,7 +113,7 @@ class SettingsViewModelTest {
         authStateFlow.value = AuthState(error = authError)
         advanceUntilIdle()
         
-        assertEquals("Should have auth error", authError, viewModel.uiState.value.error)
+        assertEquals(authError, viewModel.uiState.value.error, "Should have auth error")
         
         // Clear error
         viewModel.clearError()
@@ -125,7 +127,7 @@ class SettingsViewModelTest {
         authStateFlow.value = AuthState(isLoading = false, error = null)
         advanceUntilIdle()
         
-        assertNull("Error should remain null after clearing", viewModel.uiState.value.error)
+        assertNull(viewModel.uiState.value.error, "Error should remain null after clearing")
     }
 
     @Test
@@ -135,8 +137,8 @@ class SettingsViewModelTest {
         viewModel.testConnection(context)
         advanceUntilIdle()
         
-        assertEquals("Should have validation error", 
-            "Server URL is required", viewModel.uiState.value.error)
+        assertEquals("Server URL is required", viewModel.uiState.value.error,
+            "Should have validation error")
         
         // Auth state update with null error
         authStateFlow.value = AuthState(isLoading = false, error = null)
@@ -144,7 +146,7 @@ class SettingsViewModelTest {
         
         // BUG: Validation error gets cleared
         // EXPECTED: Validation error should persist
-        assertNotNull("Validation error should not be cleared", viewModel.uiState.value.error)
+        assertNotNull(viewModel.uiState.value.error, "Validation error should not be cleared")
     }
 
     @Test
@@ -154,8 +156,8 @@ class SettingsViewModelTest {
         viewModel.testConnection(context)
         advanceUntilIdle()
         
-        assertEquals("Should have validation error", 
-            "Server URL is required", viewModel.uiState.value.error)
+        assertEquals("Server URL is required", viewModel.uiState.value.error,
+            "Should have validation error")
         
         // Emit an auth error
         val authError = "Connection timeout"
@@ -163,28 +165,28 @@ class SettingsViewModelTest {
         advanceUntilIdle()
         
         // Auth error should replace local error
-        assertEquals("Auth error should replace local error", 
-            authError, viewModel.uiState.value.error)
+        assertEquals(authError, viewModel.uiState.value.error,
+            "Auth error should replace local error")
     }
 
     @Test
     fun `isAuthenticated and isLoggingIn should update from auth state`() = runTest {
-        assertFalse("Should not be authenticated initially", 
-            viewModel.uiState.value.isAuthenticated)
-        assertFalse("Should not be logging in initially", 
-            viewModel.uiState.value.isLoggingIn)
+        assertFalse(viewModel.uiState.value.isAuthenticated,
+            "Should not be authenticated initially")
+        assertFalse(viewModel.uiState.value.isLoggingIn,
+            "Should not be logging in initially")
         
         // Update to logging in
         authStateFlow.value = AuthState(isLoading = true)
         advanceUntilIdle()
         
-        assertTrue("Should be logging in", viewModel.uiState.value.isLoggingIn)
+        assertTrue(viewModel.uiState.value.isLoggingIn, "Should be logging in")
         
         // Update to authenticated
         authStateFlow.value = AuthState(isAuthenticated = true, isLoading = false, token = "test-token")
         advanceUntilIdle()
         
-        assertTrue("Should be authenticated", viewModel.uiState.value.isAuthenticated)
-        assertFalse("Should not be logging in", viewModel.uiState.value.isLoggingIn)
+        assertTrue(viewModel.uiState.value.isAuthenticated, "Should be authenticated")
+        assertFalse(viewModel.uiState.value.isLoggingIn, "Should not be logging in")
     }
 }

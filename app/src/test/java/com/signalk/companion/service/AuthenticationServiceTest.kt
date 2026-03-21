@@ -2,15 +2,15 @@ package com.signalk.companion.service
 
 import com.signalk.companion.data.model.AuthState
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.*
-import org.junit.Before
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 
 class AuthenticationServiceTest {
 
     private lateinit var service: AuthenticationService
 
-    @Before
+    @BeforeEach
     fun setUp() {
         service = AuthenticationService()
     }
@@ -39,10 +39,10 @@ class AuthenticationServiceTest {
 
         val state = service.authState.value
         // Connection must have been attempted and failed
-        assertFalse("Should not be authenticated after network failure", state.isAuthenticated)
-        assertNull("Token must be null after failure", state.token)
+        assertFalse(state.isAuthenticated, "Should not be authenticated after network failure")
+        assertNull(state.token, "Token must be null after failure")
         // Credentials must be stored for later retry
-        assertNotNull("serverUrl must be stored for retry", state.serverUrl)
+        assertNotNull(state.serverUrl, "serverUrl must be stored for retry")
         assertEquals("bob", state.username)
         assertEquals("pass123", state.password)
     }
@@ -64,8 +64,8 @@ class AuthenticationServiceTest {
     fun `tryRefreshToken returns null when no credentials are stored`() = runTest {
         // Fresh service, no prior login
         val result = service.tryRefreshToken()
-        assertTrue("Should succeed (no exception)", result.isSuccess)
-        assertNull("Should return null when no credentials stored", result.getOrNull())
+        assertTrue(result.isSuccess, "Should succeed (no exception)")
+        assertNull(result.getOrNull(), "Should return null when no credentials stored")
     }
 
     @Test
@@ -74,13 +74,13 @@ class AuthenticationServiceTest {
         service.login("http://127.0.0.1:1", "alice", "secret")
         val stateAfterFailedLogin = service.authState.value
         assertFalse(stateAfterFailedLogin.isAuthenticated)
-        assertNotNull("Credentials should be stored even after failure", stateAfterFailedLogin.username)
+        assertNotNull(stateAfterFailedLogin.username, "Credentials should be stored even after failure")
 
         // tryRefreshToken should attempt re-login (it will fail again, but that's OK —
         // we verify it *tries* by checking it returns Result.success(null) rather than
         // skipping with null due to the old isAuthenticated guard)
         val result = service.tryRefreshToken()
-        assertTrue("tryRefreshToken should not throw", result.isSuccess)
+        assertTrue(result.isSuccess, "tryRefreshToken should not throw")
         // Result is null because re-login to 127.0.0.1:1 also fails, but it *tried*
         assertNull(result.getOrNull())
         // authState should still have credentials for the next attempt

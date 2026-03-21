@@ -1,3 +1,10 @@
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -6,6 +13,17 @@ plugins {
     id("dagger.hilt.android.plugin")
     id("kotlin-parcelize")
     id("kotlinx-serialization")
+}
+
+// Exclude profileinstaller for reproducible builds (transitively pulled by lifecycle/activity)
+configurations.configureEach {
+    exclude(group = "androidx.profileinstaller", module = "profileinstaller")
+}
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
 
 android {
@@ -19,9 +37,62 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        val isFDroidBuild = System.getenv("SOURCE_DATE_EPOCH") != null
+        val isRepoDirty = if (isFDroidBuild) {
+            false
+        } else {
+            providers.exec {
+                commandLine("git", "status", "--porcelain")
+            }.standardOutput.asText.get().trim().isNotEmpty()
+        }
+
+        versionName = versionName + if (isRepoDirty) "-DIRTY" else ""
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+
+        val gitHash = providers.exec {
+            commandLine("git", "rev-parse", "--short", "HEAD")
+        }.standardOutput.asText.get().trim()
+
+        val buildDate = when {
+            System.getenv("SOURCE_DATE_EPOCH") != null -> {
+                val epoch = System.getenv("SOURCE_DATE_EPOCH").toLongOrNull()
+                epoch?.let {
+                    Instant.ofEpochSecond(it)
+                        .atZone(ZoneOffset.UTC)
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+                }
+            }
+            isRepoDirty -> {
+                LocalDateTime.now()
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+            }
+            else -> {
+                providers.exec {
+                    commandLine("git", "log", "-1", "--format=%cI")
+                }.standardOutput.asText.get().trim().let { gitDate ->
+                    OffsetDateTime.parse(gitDate)
+                        .atZoneSameInstant(ZoneOffset.UTC)
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+                }
+            }
+        } ?: "unknown"
+
+        buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
+        buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
+    }
+
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
         }
     }
 
@@ -33,8 +104,18 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
+
+    dependenciesInfo {
+        // Disable dependency metadata for reproducible builds
+        includeInApk = false
+        includeInBundle = false
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -44,12 +125,25 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/**.prof"
+            excludes += "META-INF/**baseline-prof.txt"
         }
     }
+
+    testOptions {
+        unitTests.all {
+            it.useJUnitPlatform()
+        }
+    }
+}
+
+composeCompiler {
+    includeSourceInformation = false
 }
 
 dependencies {
@@ -87,9 +181,11 @@ dependencies {
     implementation("com.google.accompanist:accompanist-permissions:0.37.0")
     
     // Testing
-    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.3")
+    testImplementation("org.junit.jupiter:junit-jupiter-engine:5.10.3")
     testImplementation("org.mockito:mockito-core:5.8.0")
     testImplementation("org.mockito:mockito-inline:5.2.0")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.8.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")

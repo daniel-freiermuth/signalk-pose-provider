@@ -1,8 +1,8 @@
 package com.signalk.companion.service
 
 import com.signalk.companion.data.model.SensorData
-import org.junit.Assert.*
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
 
 class SensorServiceTest {
 
@@ -25,7 +25,7 @@ class SensorServiceTest {
         assertEquals(1.57f, sensorData.magneticHeading!!, 0.01f)
         assertEquals(101325.0f, sensorData.pressure!!, 0.1f)
         assertEquals(0.6f, sensorData.relativeHumidity!!, 0.01f)
-        assertTrue("Timestamp should be set", sensorData.timestamp > 0)
+        assertTrue(sensorData.timestamp > 0, "Timestamp should be set")
     }
 
     @Test
@@ -35,7 +35,7 @@ class SensorServiceTest {
         assertNull(sensorData.magneticHeading)
         assertNull(sensorData.pressure)
         assertNull(sensorData.temperature)
-        assertTrue("Timestamp should be set even with null values", sensorData.timestamp > 0)
+        assertTrue(sensorData.timestamp > 0, "Timestamp should be set even with null values")
     }
 
     @Test
@@ -44,9 +44,10 @@ class SensorServiceTest {
         val currentTime = System.currentTimeMillis()
         
         // Timestamp should be within reasonable range (last 1 second)
-        assertTrue("Timestamp should be recent", 
+        assertTrue(
             sensorData.timestamp > currentTime - 1000 && 
-            sensorData.timestamp <= currentTime)
+            sensorData.timestamp <= currentTime,
+            "Timestamp should be recent")
     }
 
     @Test
@@ -75,8 +76,8 @@ class SensorServiceTest {
         assertNotEquals(slowUpdate, verySlowUpdate)
         
         // Verify they're in ascending order
-        assertTrue("Fast should be less than normal", fastUpdate < normalUpdate)
-        assertTrue("Normal should be less than slow", normalUpdate < slowUpdate)
-        assertTrue("Slow should be less than very slow", slowUpdate < verySlowUpdate)
+        assertTrue(fastUpdate < normalUpdate, "Fast should be less than normal")
+        assertTrue(normalUpdate < slowUpdate, "Normal should be less than slow")
+        assertTrue(slowUpdate < verySlowUpdate, "Slow should be less than very slow")
     }
 }

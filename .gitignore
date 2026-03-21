@@ -17,6 +17,7 @@ gradle-wrapper.jar
 
 # Local configuration file (contains signing keys, API keys, etc.)
 local.properties
+keystore.properties
 
 # Android Studio / IntelliJ IDEA
 .idea/

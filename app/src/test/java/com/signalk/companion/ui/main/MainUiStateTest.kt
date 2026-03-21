@@ -1,10 +1,10 @@
 package com.signalk.companion.ui.main
 
 import com.signalk.companion.util.UrlParser
-import org.junit.Test
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 
 class MainUiStateTest {
 
@@ -13,8 +13,8 @@ class MainUiStateTest {
         val url = "http://192.168.1.1/signalk"
         val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
-        assertEquals("Hostname should be extracted correctly from URL with path", 
-            "192.168.1.1", uiState.parsedUrl?.hostname)
+        assertEquals("192.168.1.1", uiState.parsedUrl?.hostname,
+            "Hostname should be extracted correctly from URL with path")
         assertEquals(80, uiState.parsedUrl?.port)
         assertEquals(false, uiState.parsedUrl?.isHttps)
         assertEquals("http://192.168.1.1/signalk", uiState.serverUrl)
@@ -25,8 +25,8 @@ class MainUiStateTest {
         val url = "192.168.1.1/signalk"
         val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
-        assertEquals("Hostname should be extracted correctly from URL without protocol but with path", 
-            "192.168.1.1", uiState.parsedUrl?.hostname)
+        assertEquals("192.168.1.1", uiState.parsedUrl?.hostname,
+            "Hostname should be extracted correctly from URL without protocol but with path")
         assertEquals(80, uiState.parsedUrl?.port)
         assertEquals("192.168.1.1/signalk", uiState.serverUrl)
     }
@@ -80,7 +80,7 @@ class MainUiStateTest {
         val url = "ftp://invalid.server"
         val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
-        assertNull("ParsedUrl should be null for invalid URL", uiState.parsedUrl)
+        assertNull(uiState.parsedUrl, "ParsedUrl should be null for invalid URL")
         assertEquals("ftp://invalid.server", uiState.serverUrl)
     }
     
@@ -98,7 +98,7 @@ class MainUiStateTest {
         val url = "http://192.168.1.1:3000"
         val uiState = MainUiState(serverUrl = url, parsedUrl = UrlParser.parseUrl(url))
         
-        assertTrue("Should have valid parsed URL", uiState.parsedUrl != null)
+        assertTrue(uiState.parsedUrl != null, "Should have valid parsed URL")
         assertEquals("http://192.168.1.1:3000", uiState.serverUrl)
     }
 }

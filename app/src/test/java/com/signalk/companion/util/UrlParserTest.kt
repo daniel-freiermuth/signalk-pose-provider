@@ -1,11 +1,11 @@
 package com.signalk.companion.util
 
-import org.junit.Test
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Assert.assertFalse
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertFalse
 
 class UrlParserTest {
 
@@ -14,7 +14,7 @@ class UrlParserTest {
         val url = "http://192.168.1.1:3000"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(3000, result?.port)
         assertEquals(false, result?.isHttps)
@@ -25,7 +25,7 @@ class UrlParserTest {
         val url = "https://192.168.1.1:3000"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(3000, result?.port)
         assertEquals(true, result?.isHttps)
@@ -36,7 +36,7 @@ class UrlParserTest {
         val url = "http://192.168.1.1"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(80, result?.port)
         assertEquals(false, result?.isHttps)
@@ -47,7 +47,7 @@ class UrlParserTest {
         val url = "https://192.168.1.1"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(443, result?.port)
         assertEquals(true, result?.isHttps)
@@ -59,8 +59,8 @@ class UrlParserTest {
         val url = "http://192.168.1.1/signalk"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
-        assertEquals("Hostname should not include path", "192.168.1.1", result?.hostname)
+        assertNotNull(result, "URL should parse successfully")
+        assertEquals("192.168.1.1", result?.hostname, "Hostname should not include path")
         assertEquals(80, result?.port)
         assertEquals(false, result?.isHttps)
     }
@@ -70,7 +70,7 @@ class UrlParserTest {
         val url = "http://192.168.1.1:3000/signalk"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(3000, result?.port)
         assertEquals(false, result?.isHttps)
@@ -81,7 +81,7 @@ class UrlParserTest {
         val url = "https://signalk.local:3443/signalk/v1/stream"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("signalk.local", result?.hostname)
         assertEquals(3443, result?.port)
         assertEquals(true, result?.isHttps)
@@ -92,7 +92,7 @@ class UrlParserTest {
         val url = "192.168.1.1:3000"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(3000, result?.port)
         assertEquals(false, result?.isHttps)
@@ -103,7 +103,7 @@ class UrlParserTest {
         val url = "192.168.1.1"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(80, result?.port)
         assertEquals(false, result?.isHttps)
@@ -115,9 +115,9 @@ class UrlParserTest {
         val url = "192.168.1.1/signalk"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
-        assertEquals("Hostname should be extracted correctly from URL without protocol but with path", 
-            "192.168.1.1", result?.hostname)
+        assertNotNull(result, "URL should parse successfully")
+        assertEquals("192.168.1.1", result?.hostname,
+            "Hostname should be extracted correctly from URL without protocol but with path")
         assertEquals(80, result?.port)
         assertEquals(false, result?.isHttps)
     }
@@ -127,7 +127,7 @@ class UrlParserTest {
         val url = "http://signalk.local"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("signalk.local", result?.hostname)
         assertEquals(80, result?.port)
         assertEquals(false, result?.isHttps)
@@ -138,7 +138,7 @@ class UrlParserTest {
         val url = "http://my-boat.local/signalk/v1"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("my-boat.local", result?.hostname)
         assertEquals(80, result?.port)
         assertEquals(false, result?.isHttps)
@@ -149,7 +149,7 @@ class UrlParserTest {
         val url = "ws://192.168.1.1:3000"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(3000, result?.port)
         assertEquals(false, result?.isHttps)
@@ -160,7 +160,7 @@ class UrlParserTest {
         val url = "wss://192.168.1.1:3000"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(3000, result?.port)
         assertEquals(true, result?.isHttps)
@@ -171,7 +171,7 @@ class UrlParserTest {
         val url = "wss://signalk.local:3443/signalk/v1/stream"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("signalk.local", result?.hostname)
         assertEquals(3443, result?.port)
         assertEquals(true, result?.isHttps)
@@ -182,7 +182,7 @@ class UrlParserTest {
         val url = "http://192.168.1.1:3000"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
+        assertNotNull(result, "URL should parse successfully")
         assertEquals("192.168.1.1", result?.hostname)
         assertEquals(3000, result?.port)
     }
@@ -192,8 +192,8 @@ class UrlParserTest {
         val url = "http://192.168.1.1/signalk/v1/api/vessels/self"
         val result = UrlParser.parseUrl(url)
         
-        assertNotNull("URL should parse successfully", result)
-        assertEquals("Hostname should not include complex path", "192.168.1.1", result?.hostname)
+        assertNotNull(result, "URL should parse successfully")
+        assertEquals("192.168.1.1", result?.hostname, "Hostname should not include complex path")
         assertEquals(80, result?.port)
     }
     
@@ -203,7 +203,7 @@ class UrlParserTest {
         val url = ""
         val result = UrlParser.parseUrl(url)
         
-        assertNull("Empty URL should return null", result)
+        assertNull(result, "Empty URL should return null")
     }
     
     @Test
@@ -216,7 +216,7 @@ class UrlParserTest {
         
         urls.forEach { url ->
             val result = UrlParser.parseUrl(url)
-            assertNull("URL with invalid protocol should return null: $url", result)
+            assertNull(result, "URL with invalid protocol should return null: $url")
         }
     }
     
@@ -230,7 +230,7 @@ class UrlParserTest {
         
         urls.forEach { url ->
             val result = UrlParser.parseUrl(url)
-            assertNull("Malformed URL should return null: $url", result)
+            assertNull(result, "Malformed URL should return null: $url")
         }
     }
     
@@ -269,8 +269,8 @@ class UrlParserTest {
         
         urls.forEach { url ->
             val parsed = UrlParser.parseUrl(url)
-            assertNotNull("URL should parse: $url", parsed)
-            assertEquals("Round trip should preserve URL: $url", url, parsed?.toUrlString())
+            assertNotNull(parsed, "URL should parse: $url")
+            assertEquals(url, parsed?.toUrlString(), "Round trip should preserve URL: $url")
         }
     }
     
@@ -285,8 +285,8 @@ class UrlParserTest {
         
         urlsWithPath.forEach { url ->
             val parsed = UrlParser.parseUrl(url)
-            assertNotNull("URL should parse: $url", parsed)
-            assertTrue("URL should have path flag set: $url", parsed?.hasPath ?: false)
+            assertNotNull(parsed, "URL should parse: $url")
+            assertTrue(parsed?.hasPath ?: false, "URL should have path flag set: $url")
         }
     }
     
@@ -302,15 +302,15 @@ class UrlParserTest {
         
         urlsWithoutPath.forEach { url ->
             val parsed = UrlParser.parseUrl(url)
-            assertNotNull("URL should parse: $url", parsed)
-            assertFalse("URL should not have path flag set: $url", parsed?.hasPath ?: true)
+            assertNotNull(parsed, "URL should parse: $url")
+            assertFalse(parsed?.hasPath ?: true, "URL should not have path flag set: $url")
         }
     }
 
     @Test
     fun testParseUrlWithLocalhost() {
         val result = UrlParser.parseUrl("localhost")
-        assertNotNull("localhost should parse successfully", result)
+        assertNotNull(result, "localhost should parse successfully")
         assertEquals("localhost", result?.hostname)
         assertEquals(80, result?.port)
         assertEquals(false, result?.isHttps)
@@ -319,7 +319,7 @@ class UrlParserTest {
     @Test
     fun testParseUrlWithLocalhostAndPort() {
         val result = UrlParser.parseUrl("localhost:3000")
-        assertNotNull("localhost:3000 should parse successfully", result)
+        assertNotNull(result, "localhost:3000 should parse successfully")
         assertEquals("localhost", result?.hostname)
         assertEquals(3000, result?.port)
         assertEquals(false, result?.isHttps)
@@ -328,7 +328,7 @@ class UrlParserTest {
     @Test
     fun testParseUrlWithLocalhostScheme() {
         val result = UrlParser.parseUrl("http://localhost:3000")
-        assertNotNull("http://localhost:3000 should parse successfully", result)
+        assertNotNull(result, "http://localhost:3000 should parse successfully")
         assertEquals("localhost", result?.hostname)
         assertEquals(3000, result?.port)
         assertEquals(false, result?.isHttps)
@@ -339,11 +339,11 @@ class UrlParserTest {
         val urls = listOf("localhost", "localhost:3000", "http://localhost", "http://localhost:3000")
         urls.forEach { url ->
             val parsed = UrlParser.parseUrl(url)
-            assertNotNull("localhost URL should parse: $url", parsed)
+            assertNotNull(parsed, "localhost URL should parse: $url")
             // toUrlString() must produce an absolute URL (with scheme) so it can be used in URL()
             assertTrue(
-                "toUrlString() must start with http:// or https:// for: $url",
-                parsed!!.toUrlString().startsWith("http://") || parsed.toUrlString().startsWith("https://")
+                parsed!!.toUrlString().startsWith("http://") || parsed.toUrlString().startsWith("https://"),
+                "toUrlString() must start with http:// or https:// for: $url"
             )
         }
     }

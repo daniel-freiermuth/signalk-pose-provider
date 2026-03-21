@@ -3,8 +3,8 @@ package com.signalk.companion.service
 import com.signalk.companion.data.model.LocationData
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import org.junit.Test
-import org.junit.Assert.*
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.*
 
 class SignalKDataTest {
     
@@ -39,6 +39,6 @@ class SignalKDataTest {
         """.trimIndent()
         
         // This test verifies our data model can be serialized
-        assertTrue("SignalK message structure should be valid", true)
+        assertTrue(true, "SignalK message structure should be valid")
     }
 }
