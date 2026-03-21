@@ -139,9 +139,17 @@ fun MainScreen(
             uiState.error?.let { error ->
                 ErrorCard(
                     error = error,
-                    onDismiss = { /* Could add a dismiss function to ViewModel */ }
+                    onDismiss = viewModel::clearError
                 )
             }
+            
+            // Connection & Authentication Status Card
+            ConnectionStatusCard(
+                isConnected = uiState.isConnected,
+                isStreaming = uiState.isStreaming,
+                isAuthenticated = uiState.isAuthenticated,
+                username = uiState.username
+            )
             
             // Sensor Availability Card
             SensorAvailabilityCard(viewModel = viewModel)
@@ -160,6 +168,62 @@ fun MainScreen(
                     lastTransmissionTime = uiState.lastTransmissionTime
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun ConnectionStatusCard(
+    isConnected: Boolean,
+    isStreaming: Boolean,
+    isAuthenticated: Boolean,
+    username: String?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Server connection status
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val connectionColor = when {
+                    isConnected -> MaterialTheme.colorScheme.primary
+                    isStreaming -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Text(
+                    text = "●",
+                    color = connectionColor,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = when {
+                        isConnected -> "Connected"
+                        isStreaming -> "Connecting…"
+                        else -> "Disconnected"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = connectionColor
+                )
+            }
+            // Auth status
+            Text(
+                text = if (isAuthenticated && username != null) "✓ $username" else "Not authenticated",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isAuthenticated)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -459,6 +523,9 @@ fun ErrorCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss", color = MaterialTheme.colorScheme.onErrorContainer)
+            }
         }
     }
 }
