@@ -47,6 +47,15 @@ class AuthenticationService @Inject constructor() {
                     setAuthError("Invalid server URL: $serverUrl")
                     return@withContext Result.failure(Exception("Invalid server URL: $serverUrl"))
                 }
+
+                // Store credentials immediately so tryRefreshToken() can retry
+                // even if the network call below fails (e.g. server down at startup).
+                _authState.update { it.copy(
+                    serverUrl = parsedUrl.toUrlString(),
+                    username = username,
+                    password = password
+                ) }
+
                 val loginUrl = "${parsedUrl.toUrlString()}/signalk/v1/auth/login"
                 val loginRequest = LoginRequest(username, password)
                 
@@ -167,14 +176,19 @@ class AuthenticationService @Inject constructor() {
         return _authState.value.token
     }
     
+    fun hasStoredCredentials(): Boolean {
+        val s = _authState.value
+        return s.serverUrl != null && s.username != null && s.password != null
+    }
+
     suspend fun tryRefreshToken(): Result<String?> {
         return try {
             val currentState = _authState.value
             
-            // Since this server doesn't support token refresh/validation,
-            // we'll attempt to re-authenticate with stored credentials to get a fresh token
-            if (currentState.isAuthenticated && 
-                currentState.serverUrl != null && 
+            // Re-authenticate with stored credentials to get a fresh token.
+            // We do NOT require isAuthenticated — credentials may exist from a prior
+            // login attempt that failed due to the server being temporarily unreachable.
+            if (currentState.serverUrl != null && 
                 currentState.username != null &&
                 currentState.password != null) {
                 

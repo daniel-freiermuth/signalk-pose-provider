@@ -173,11 +173,13 @@ class SignalKTransmitter @Inject constructor(
         // Cancel any existing refresh timer
         dnsRefreshJob?.cancel()
         
-        // Start new refresh timer
+        // Start new refresh timer.
+        // Use isActive (not `webSocket != null`) so the loop keeps running while
+        // streaming, including during temporary disconnects while reconnecting.
         dnsRefreshJob = scope.launch {
-            while (webSocket != null) {
+            while (isActive) {
                 delay(DNS_REFRESH_INTERVAL_MS)
-                if (webSocket != null) { // Check again after delay
+                if (isActive) {
                     try {
                         Log.d(TAG, "Performing periodic DNS refresh for $serverAddress...")
                         refreshDnsResolution()
@@ -613,9 +615,16 @@ class SignalKTransmitter @Inject constructor(
                                 Log.d(TAG, "Streaming stopped - skipping reconnection after token renewal")
                             }
                         } else {
-                            val failureMsg = "Automatic token renewal failed - manual re-authentication required"
+                            val failureMsg = "Automatic token renewal failed - will retry"
                             Log.e(TAG, failureMsg)
                             _authenticationError.value = failureMsg
+                            // Keep retrying as long as we have credentials: the server may
+                            // still be coming up (auth endpoint and WebSocket together).
+                            if (authenticationService.hasStoredCredentials() &&
+                                transmitterScope?.isActive == true) {
+                                Log.d(TAG, "Credentials exist — scheduling reconnect retry in 30 s")
+                                scheduleReconnection(30_000)
+                            }
                         }
                     } catch (e: Exception) {
                         val renewalError = "Error during token renewal: ${e.message}"
