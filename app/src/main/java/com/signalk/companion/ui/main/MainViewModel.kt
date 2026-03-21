@@ -179,6 +179,13 @@ class MainViewModel @Inject constructor(
                 _uiState.update { it.copy(isConnected = isConnected) }
             }
         }
+
+        // Observe last sent message and transmission stats for UI
+        viewModelScope.launch {
+            signalKTransmitter.lastSentMessage.collect { msg ->
+                _uiState.update { it.copy(lastSentMessage = msg) }
+            }
+        }
         
         // Observe authentication errors from SignalK transmitter
         viewModelScope.launch {

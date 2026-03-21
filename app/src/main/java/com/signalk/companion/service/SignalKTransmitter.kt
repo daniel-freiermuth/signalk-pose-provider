@@ -14,8 +14,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import okhttp3.*
 import java.net.InetAddress
-import java.text.SimpleDateFormat
-import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
@@ -84,9 +82,9 @@ class SignalKTransmitter @Inject constructor(
     private val _currentResolvedIp = MutableStateFlow<String?>(null)
     val currentResolvedIp: StateFlow<String?> = _currentResolvedIp
     
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }
+    private val dateFormat = java.time.format.DateTimeFormatter
+        .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+        .withZone(java.time.ZoneOffset.UTC)
     
     fun configure(parsedUrl: UrlParser.ParsedUrl) {
         serverAddress = parsedUrl.hostname
@@ -222,10 +220,19 @@ class SignalKTransmitter @Inject constructor(
         transmitterScope = null
         dnsRefreshJob = null
         reconnectionJob = null
-        
+
         // Close WebSocket connection
         webSocket?.close(1000, "Streaming stopped")
         webSocket = null
+
+        // Properly shut down OkHttpClient to release its thread pool and connection pool.
+        // Simply dropping the reference (okHttpClient = null) leaves the Dispatcher's
+        // CachedThreadPool alive for up to 60 s and leaks an OkIO Segment pool (~8 MB).
+        // After several reconnects this accumulates significantly.
+        okHttpClient?.let { client ->
+            client.dispatcher.executorService.shutdown()
+            client.connectionPool.evictAll()
+        }
         okHttpClient = null
         webSocketState.set(WebSocketState.DISCONNECTED)
         
@@ -264,7 +271,7 @@ class SignalKTransmitter @Inject constructor(
     }
     
     private fun createLocationMessage(locationData: LocationData): SignalKMessage {
-        val timestamp = dateFormat.format(Date(locationData.timestamp))
+        val timestamp = dateFormat.format(java.time.Instant.ofEpochMilli(locationData.timestamp))
         val source = SignalKSource(
             label = "SignalK Pose Provider",
             src = "signalk-nav-provider"
@@ -381,7 +388,7 @@ class SignalKTransmitter @Inject constructor(
     }
     
     private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage {
-        val timestamp = dateFormat.format(Date(sensorData.timestamp))
+        val timestamp = dateFormat.format(java.time.Instant.ofEpochMilli(sensorData.timestamp))
         val source = SignalKSource(
             label = "SignalK Pose Provider - Sensors",
             src = "signalk-nav-provider-sensors"
