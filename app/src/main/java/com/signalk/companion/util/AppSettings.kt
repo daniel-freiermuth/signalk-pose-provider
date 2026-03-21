@@ -19,6 +19,7 @@ object AppSettings {
     private const val KEY_HEADING_OFFSET = "heading_offset"
     private const val KEY_LOCATION_INTERVAL_MS = "location_interval_ms"
     private const val KEY_SENSOR_INTERVAL_MS = "sensor_interval_ms"
+    private const val KEY_WAS_STREAMING = "was_streaming"
     
     // Default values
     private const val DEFAULT_VESSEL_ID = "self"
@@ -270,5 +271,16 @@ object AppSettings {
         getPreferences(context).edit()
             .putLong(KEY_SENSOR_INTERVAL_MS, intervalMs)
             .apply()
+    }
+
+    /** Persists whether the service was actively streaming. Used to resume after an OS kill. */
+    fun setWasStreaming(context: Context, streaming: Boolean) {
+        getPreferences(context).edit()
+            .putBoolean(KEY_WAS_STREAMING, streaming)
+            .apply()
+    }
+
+    fun getWasStreaming(context: Context): Boolean {
+        return getPreferences(context).getBoolean(KEY_WAS_STREAMING, false)
     }
 }

@@ -16,6 +16,7 @@ import com.signalk.companion.MainActivity
 import com.signalk.companion.R
 import com.signalk.companion.ui.main.DeviceOrientation
 import com.signalk.companion.util.BatteryOptimizationHelper
+import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.UrlParser
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -52,7 +53,11 @@ class SignalKStreamingService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val binder = LocalBinder()
-    
+
+    // Coroutine job for forwarding sensor/location data to the transmitter.
+    // Null when not streaming so no data is forwarded and no CPU is burned.
+    private var transmissionJob: kotlinx.coroutines.Job? = null
+
     // Configuration options
     private var sendLocation: Boolean = true
     private var sendHeading: Boolean = true
@@ -108,35 +113,10 @@ class SignalKStreamingService : Service() {
         super.onCreate()
         Log.d(TAG, "SignalK Streaming Service created")
         createNotificationChannel()
-        
-        // Observe data flows and forward to SignalK
-        serviceScope.launch {
-            locationService.locationUpdates.collect { locationData ->
-                locationData?.let {
-                    try {
-                        signalKTransmitter.sendLocationData(it, sendLocation)
-                        updateTransmissionStats()
-                        Log.d(TAG, "Sent location data: lat=${it.latitude}, lon=${it.longitude}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to send location data", e)
-                    }
-                }
-            }
-        }
-        
-        serviceScope.launch {
-            sensorService.sensorData.collect { sensorData ->
-                try {
-                    signalKTransmitter.sendSensorData(sensorData, sendHeading, sendPressure)
-                    updateTransmissionStats()
-                    Log.d(TAG, "Sent sensor data: timestamp=${sensorData.timestamp}")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to send sensor data", e)
-                }
-            }
-        }
-        
-        // Observe SignalK connection status
+
+        // Only observe connection status for notification updates — lightweight, always needed.
+        // Data forwarding coroutines are started in startStreaming() and cancelled in stopStreaming()
+        // so they run ONLY while actually streaming.
         serviceScope.launch {
             signalKTransmitter.connectionStatus.collect { isConnected ->
                 Log.d(TAG, "SignalK connection status: $isConnected")
@@ -149,8 +129,67 @@ class SignalKStreamingService : Service() {
         }
     }
 
+    /** Starts coroutines that forward sensor/location data to the transmitter. */
+    private fun startTransmissionJob() {
+        transmissionJob?.cancel()
+        transmissionJob = serviceScope.launch {
+            launch {
+                locationService.locationUpdates.collect { locationData ->
+                    locationData?.let {
+                        try {
+                            signalKTransmitter.sendLocationData(it, sendLocation)
+                            updateTransmissionStats()
+                            Log.d(TAG, "Sent location data: lat=${it.latitude}, lon=${it.longitude}")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to send location data", e)
+                        }
+                    }
+                }
+            }
+            launch {
+                sensorService.sensorData.collect { sensorData ->
+                    try {
+                        signalKTransmitter.sendSensorData(sensorData, sendHeading, sendPressure)
+                        updateTransmissionStats()
+                        Log.d(TAG, "Sent sensor data: timestamp=${sensorData.timestamp}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to send sensor data", e)
+                    }
+                }
+            }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        if (intent == null) {
+            // OS killed and restarted the service (START_STICKY). Resume streaming only if
+            // we were actively streaming when killed; otherwise just stop cleanly.
+            if (AppSettings.getWasStreaming(this)) {
+                Log.w(TAG, "Service restarted by OS after kill — resuming streaming from saved config")
+                val serverUrl = AppSettings.getServerUrl(this)
+                val parsedUrl = UrlParser.parseUrl(serverUrl)
+                if (parsedUrl != null) {
+                    startStreaming(
+                        parsedUrl = parsedUrl,
+                        locationRate = AppSettings.getLocationIntervalMs(this),
+                        sensorRate = AppSettings.getSensorIntervalMs(this).toInt(),
+                        sendLocation = AppSettings.getSendLocation(this),
+                        sendHeading = AppSettings.getSendHeading(this),
+                        sendPressure = AppSettings.getSendPressure(this)
+                    )
+                } else {
+                    Log.e(TAG, "Cannot resume: saved server URL '$serverUrl' is invalid — stopping")
+                    AppSettings.setWasStreaming(this, false)
+                    stopSelf()
+                }
+            } else {
+                Log.d(TAG, "Service restarted by OS but was not streaming — stopping")
+                stopSelf()
+            }
+            return START_STICKY
+        }
+
+        when (intent.action) {
             ACTION_START_STREAMING -> {
                 @Suppress("DEPRECATION")
                 val parsedUrl = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -184,7 +223,10 @@ class SignalKStreamingService : Service() {
             }
         }
         
-        return START_STICKY // Restart if killed by system
+        // START_STICKY: the OS will restart this service after an unexpected kill.
+        // If it was actively streaming (tracked via AppSettings.wasStreaming), the null-intent
+        // branch above will resume it. If not streaming, it will call stopSelf() immediately.
+        return START_STICKY
     }
 
     private fun startStreaming(parsedUrl: UrlParser.ParsedUrl,
@@ -249,7 +291,13 @@ class SignalKStreamingService : Service() {
                 
                 // Mark as successfully streaming
                 _streamingState.value = StreamingState.STREAMING
-                
+
+                // Start forwarding data to the transmitter — only now that we are streaming
+                startTransmissionJob()
+
+                // Persist streaming state so the service can resume after an OS kill
+                AppSettings.setWasStreaming(this@SignalKStreamingService, true)
+
                 // Start foreground service with notification
                 val notification = createNotification("Streaming to SignalK server")
                 startForeground(NOTIFICATION_ID, notification)
@@ -273,10 +321,18 @@ class SignalKStreamingService : Service() {
 
     private fun stopStreaming() {
         Log.d(TAG, "Stopping SignalK streaming")
-        
+
+        // Clear the persistence flag before anything else so an unexpected death
+        // during the shutdown sequence doesn't cause a spurious resume.
+        AppSettings.setWasStreaming(this, false)
+
+        // Cancel data forwarding immediately — no more transmissions once stopping
+        transmissionJob?.cancel()
+        transmissionJob = null
+
         serviceScope.launch {
             locationService.stopLocationUpdates()
-            sensorService.stopSensorUpdates() 
+            sensorService.stopSensorUpdates()
             signalKTransmitter.stopStreaming()
             
             _streamingState.value = StreamingState.IDLE
