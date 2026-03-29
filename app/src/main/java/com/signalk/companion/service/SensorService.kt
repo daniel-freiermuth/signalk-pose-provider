@@ -56,7 +56,9 @@ class SensorService @Inject constructor(
     private var lastUpdateTime = 0L
     
     // Cached sensor data to prevent data loss during rate limiting
-    private var pendingData = SensorData()
+    // Initialize magnetometerAccuracy to UNRELIABLE so the UI shows something
+    // immediately; onAccuracyChanged will update it once Android reports the real value.
+    private var pendingData = SensorData(magnetometerAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE)
     
     // Accumulated sensor readings for rate limiting
     private var pendingSensorUpdate = false
@@ -198,6 +200,9 @@ class SensorService @Inject constructor(
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
         Log.d(TAG, "Sensor accuracy changed: ${sensor?.name} -> $accuracy")
+        if (sensor?.type == Sensor.TYPE_MAGNETIC_FIELD) {
+            updateSensorData { copy(magnetometerAccuracy = accuracy) }
+        }
     }
 
     private fun updateOrientation() {

@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import android.hardware.SensorManager
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.*
@@ -155,6 +156,39 @@ fun MainScreen(
                     error = error,
                     onDismiss = viewModel::clearError
                 )
+            }
+
+            // Compass accuracy warning banner
+            val accuracy = uiState.sensorData?.magnetometerAccuracy
+            if (accuracy != null && accuracy <= SensorManager.SENSOR_STATUS_ACCURACY_LOW) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "⚠",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            text = if (accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE)
+                                "Compass unreliable — wave your phone in a figure-8 to calibrate"
+                            else
+                                "Compass accuracy low — wave your phone in a figure-8 to calibrate",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
             }
             
             // Connection & Authentication Status Card
@@ -357,6 +391,32 @@ fun SensorDataCard(
                     }
                     sensor.trueHeading?.let { heading ->
                         SensorDataRow("True Heading", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")
+                    }
+                    sensor.magnetometerAccuracy?.let { acc ->
+                        val (label, color) = when (acc) {
+                            SensorManager.SENSOR_STATUS_ACCURACY_HIGH   -> "High" to MaterialTheme.colorScheme.primary
+                            SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM -> "Medium" to MaterialTheme.colorScheme.secondary
+                            SensorManager.SENSOR_STATUS_ACCURACY_LOW    -> "Low" to MaterialTheme.colorScheme.error
+                            else                                          -> "Unreliable" to MaterialTheme.colorScheme.error
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Compass Accuracy",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = color,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                     sensor.roll?.let { roll ->
                         SensorDataRow("Roll", "${String.format("%.1f", Math.toDegrees(roll.toDouble()))}°")

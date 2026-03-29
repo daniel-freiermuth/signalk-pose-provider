@@ -416,7 +416,19 @@ class SignalKTransmitter @Inject constructor(
                 )
             }
         } // End of sendHeading condition
-        
+
+        // Magnetometer accuracy (always sent when heading is enabled, independent of GPS)
+        if (sendHeading) {
+            sensorData.magnetometerAccuracy?.let { acc ->
+                values.add(
+                    SignalKValue(
+                        path = "sensors.magnetometer.accuracy",
+                        value = SignalKValues.number(acc.toDouble()) // 0=unreliable, 1=low, 2=medium, 3=high
+                    )
+                )
+            }
+        }
+
         // Device attitude (roll, pitch, yaw)
         if (sensorData.roll != null || sensorData.pitch != null || sensorData.yaw != null) {
             val attitude = buildJsonObject {
