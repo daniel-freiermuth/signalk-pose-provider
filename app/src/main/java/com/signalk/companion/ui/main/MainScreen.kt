@@ -139,9 +139,9 @@ fun MainScreen(
             
             // Marine Configuration Card
             MarineConfigCard(
-                calibrationRzDeg = uiState.calibrationRzDeg,
-                calibrationRyDeg = uiState.calibrationRyDeg,
-                calibrationRxDeg = uiState.calibrationRxDeg,
+                calibrationAlphaDeg = uiState.calibrationAlphaDeg,
+                calibrationBetaDeg = uiState.calibrationBetaDeg,
+                calibrationGammaDeg = uiState.calibrationGammaDeg,
                 onCalibrationAnglesChange = viewModel::updateCalibrationAngles,
                 onCalibrateAll = viewModel::calibrateAll,
                 onCalibrateAzimuth = viewModel::calibrateAzimuth,
@@ -772,9 +772,9 @@ fun SensorAvailabilityRow(sensorName: String, isAvailable: Boolean) {
 
 @Composable
 fun MarineConfigCard(
-    calibrationRzDeg: Float,
-    calibrationRyDeg: Float,
-    calibrationRxDeg: Float,
+    calibrationAlphaDeg: Float,
+    calibrationBetaDeg: Float,
+    calibrationGammaDeg: Float,
     onCalibrationAnglesChange: (Float, Float, Float) -> Unit,
     onCalibrateAll: () -> Unit,
     onCalibrateAzimuth: () -> Unit,
@@ -806,27 +806,27 @@ fun MarineConfigCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 CalibrationDial(
-                    label = "Rotation Z (horizontal)",
-                    value = calibrationRzDeg,
-                    onValueChange = { v -> onCalibrationAnglesChange(v, calibrationRyDeg, calibrationRxDeg) },
+                    label = "Screen Twist (α)",
+                    value = calibrationAlphaDeg,
+                    onValueChange = { v -> onCalibrationAnglesChange(v, calibrationBetaDeg, calibrationGammaDeg) },
                     min = -180f,
                     max = 180f,
                     modifier = Modifier.weight(1f)
                 )
 
                 CalibrationDial(
-                    label = "Rotation Y (twist)",
-                    value = calibrationRyDeg,
-                    onValueChange = { v -> onCalibrationAnglesChange(calibrationRzDeg, v, calibrationRxDeg) },
-                    min = -90f,
-                    max = 90f,
+                    label = "Tilt (β)",
+                    value = calibrationBetaDeg,
+                    onValueChange = { v -> onCalibrationAnglesChange(calibrationAlphaDeg, v, calibrationGammaDeg) },
+                    min = 0f,
+                    max = 180f,
                     modifier = Modifier.weight(1f)
                 )
 
                 CalibrationDial(
-                    label = "Rotation X (tilt fore/aft)",
-                    value = calibrationRxDeg,
-                    onValueChange = { v -> onCalibrationAnglesChange(calibrationRzDeg, calibrationRyDeg, v) },
+                    label = "Heading Offset (γ)",
+                    value = calibrationGammaDeg,
+                    onValueChange = { v -> onCalibrationAnglesChange(calibrationAlphaDeg, calibrationBetaDeg, v) },
                     min = -180f,
                     max = 180f,
                     modifier = Modifier.weight(1f)

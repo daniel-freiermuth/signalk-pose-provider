@@ -395,9 +395,9 @@ class SignalKStreamingService : Service() {
         }
     }
 
-    fun updateCalibrationAngles(rzDeg: Float, ryDeg: Float, rxDeg: Float) {
-        sensorService.setCalibrationAngles(rzDeg, ryDeg, rxDeg)
-        Log.d(TAG, "Updated calibration angles: RZ=${rzDeg}°, RY=${ryDeg}°, RX=${rxDeg}°")
+    fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
+        sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
+        Log.d(TAG, "Updated calibration angles: α=${alphaDeg}°, β=${betaDeg}°, γ=${gammaDeg}°")
     }
 
     private fun updateTransmissionStats() {

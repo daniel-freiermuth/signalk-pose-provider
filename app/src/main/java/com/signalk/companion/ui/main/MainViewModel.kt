@@ -35,9 +35,9 @@ data class MainUiState(
     val serverUrl: String = "", // Raw user input for the URL field
     val parsedUrl: UrlParser.ParsedUrl? = null,
     val vesselId: String = "self",
-    val calibrationRzDeg: Float = 0f,  // Rotation around Z-axis (device horizontal orientation)
-    val calibrationRyDeg: Float = 0f,  // Rotation around Y-axis (mounting twist)
-    val calibrationRxDeg: Float = 0f,  // Rotation around X-axis (mounting tilt fore/aft)
+    val calibrationAlphaDeg: Float = 0f,  // ZXZ α: screen twist (charging port direction)
+    val calibrationBetaDeg: Float = 0f,   // ZXZ β: tilt from horizontal [0°, 180°]
+    val calibrationGammaDeg: Float = 0f,  // ZXZ γ: heading offset
     // Data transmission options
     val sendLocation: Boolean = true,
     val sendHeading: Boolean = true,
@@ -221,12 +221,12 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun updateCalibrationAngles(rzDeg: Float, ryDeg: Float, rxDeg: Float) {
-        Log.d(TAG, "updateCalibrationAngles: RZ=$rzDeg, RY=$ryDeg, RX=$rxDeg")
-        _uiState.update { it.copy(calibrationRzDeg = rzDeg, calibrationRyDeg = ryDeg, calibrationRxDeg = rxDeg) }
-        AppSettings.setCalibrationAngles(applicationContext, rzDeg, ryDeg, rxDeg)
-        sensorService.setCalibrationAngles(rzDeg, ryDeg, rxDeg)
-        streamingService?.updateCalibrationAngles(rzDeg, ryDeg, rxDeg)
+    fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
+        Log.d(TAG, "updateCalibrationAngles: α=$alphaDeg, β=$betaDeg, γ=$gammaDeg")
+        _uiState.update { it.copy(calibrationAlphaDeg = alphaDeg, calibrationBetaDeg = betaDeg, calibrationGammaDeg = gammaDeg) }
+        AppSettings.setCalibrationAngles(applicationContext, alphaDeg, betaDeg, gammaDeg)
+        sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
+        streamingService?.updateCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
     }
 
     // --- App foreground lifecycle ---
@@ -296,9 +296,9 @@ class MainViewModel @Inject constructor(
             if (bearing != null && speed != null && speed > 0.5f) {
                 val R_W_V = DeviceCalibration.buildFlatHeadingMatrix(bearing)
                 val R_D_V = DeviceCalibration.computeCalibration(R_W_D, R_W_V)
-                val (rz, ry, rx) = DeviceCalibration.decomposeZYX(R_D_V)
-                Log.d(TAG, "calibrateAll: GPS path → RZ=$rz, RY=$ry, RX=$rx")
-                updateCalibrationAngles(rz, ry, rx)
+                val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+                Log.d(TAG, "calibrateAll: GPS path → α=$alpha, β=$beta, γ=$gamma")
+                updateCalibrationAngles(alpha, beta, gamma)
             } else {
                 Log.d(TAG, "calibrateAll: no GPS heading, falling back to pitch/roll only")
                 calibratePitchRollInternal()
@@ -327,45 +327,42 @@ class MainViewModel @Inject constructor(
                 return@launch
             }
 
-            val existingCalibration = DeviceCalibration.composeZYX(
-                _uiState.value.calibrationRzDeg,
-                _uiState.value.calibrationRyDeg,
-                _uiState.value.calibrationRxDeg
+            val existingCalibration = DeviceCalibration.composeZXZ(
+                _uiState.value.calibrationAlphaDeg,
+                _uiState.value.calibrationBetaDeg,
+                _uiState.value.calibrationGammaDeg
             )
-            val R_D_V = DeviceCalibration.calibrateAzimuth(R_W_D, existingCalibration, bearing)
-            val (rz, ry, rx) = DeviceCalibration.decomposeZYX(R_D_V)
-            Log.d(TAG, "calibrateAzimuth: RZ=$rz, RY=$ry, RX=$rx (was RZ=${_uiState.value.calibrationRzDeg})")
-            updateCalibrationAngles(rz, ry, rx)
+            val (newGamma, R_D_V) = DeviceCalibration.calibrateAzimuth(
+                R_W_D, existingCalibration, _uiState.value.calibrationGammaDeg, bearing
+            )
+            val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+            Log.d(TAG, "calibrateAzimuth: α=$alpha, β=$beta, γ=$gamma (was γ=${_uiState.value.calibrationGammaDeg})")
+            updateCalibrationAngles(alpha, beta, gamma)
         }
     }
 
     /**
-     * Calibrate pitch and roll only. Assumes the vehicle is currently flat.
-     * Keeps existing azimuth (Z rotation).
+     * Calibrate twist and tilt only. Assumes the vehicle is currently flat.
+     * Keeps existing heading offset (γ) unchanged.
      */
-    fun calibratePitchRoll() {
+    fun calibrateTilt() {
         viewModelScope.launch {
             if (!ensureSensorData()) {
-                Log.w(TAG, "calibratePitchRoll: sensor data not available within timeout")
+                Log.w(TAG, "calibrateTilt: sensor data not available within timeout")
                 _uiState.update { it.copy(error = "Calibration failed: no sensor data available") }
                 return@launch
             }
-            calibratePitchRollInternal()
+            calibrateTiltInternal()
         }
     }
 
-    private fun calibratePitchRollInternal() {
+    private fun calibrateTiltInternal() {
         val R_W_D = sensorService.getCurrentRotationMatrix()
-        Log.d(TAG, "calibratePitchRollInternal: R_W_D=[${R_W_D.joinToString()}]")
-        val existingCalibration = DeviceCalibration.composeZYX(
-            _uiState.value.calibrationRzDeg,
-            _uiState.value.calibrationRyDeg,
-            _uiState.value.calibrationRxDeg
-        )
-        val R_D_V = DeviceCalibration.calibratePitchRoll(R_W_D, existingCalibration)
-        val (rz, ry, rx) = DeviceCalibration.decomposeZYX(R_D_V)
-        Log.d(TAG, "calibratePitchRollInternal: RZ=$rz, RY=$ry, RX=$rx")
-        updateCalibrationAngles(rz, ry, rx)
+        Log.d(TAG, "calibrateTiltInternal: R_W_D=[${R_W_D.joinToString()}]")
+        val R_D_V = DeviceCalibration.calibrateTilt(R_W_D, _uiState.value.calibrationGammaDeg)
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+        Log.d(TAG, "calibrateTiltInternal: α=$alpha, β=$beta, γ=$gamma")
+        updateCalibrationAngles(alpha, beta, gamma)
     }
 
     /**
@@ -457,12 +454,12 @@ class MainViewModel @Inject constructor(
         val savedUsername = AppSettings.getUsername(applicationContext)
         
         // Load calibration angles
-        val savedRz = AppSettings.getCalibrationRzDeg(applicationContext)
-        val savedRy = AppSettings.getCalibrationRyDeg(applicationContext)
-        val savedRx = AppSettings.getCalibrationRxDeg(applicationContext)
+        val savedAlpha = AppSettings.getCalibrationAlphaDeg(applicationContext)
+        val savedBeta = AppSettings.getCalibrationBetaDeg(applicationContext)
+        val savedGamma = AppSettings.getCalibrationGammaDeg(applicationContext)
         
         // Apply calibration to sensor service
-        sensorService.setCalibrationAngles(savedRz, savedRy, savedRx)
+        sensorService.setCalibrationAngles(savedAlpha, savedBeta, savedGamma)
         
         _uiState.update { 
             it.copy(
@@ -475,9 +472,9 @@ class MainViewModel @Inject constructor(
                 locationIntervalMs = savedLocationIntervalMs,
                 sensorIntervalMs = savedSensorIntervalMs,
                 username = savedUsername.ifBlank { null },
-                calibrationRzDeg = savedRz,
-                calibrationRyDeg = savedRy,
-                calibrationRxDeg = savedRx
+                calibrationAlphaDeg = savedAlpha,
+                calibrationBetaDeg = savedBeta,
+                calibrationGammaDeg = savedGamma
             )
         }
         

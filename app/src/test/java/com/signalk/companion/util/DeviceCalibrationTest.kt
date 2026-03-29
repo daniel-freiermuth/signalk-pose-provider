@@ -20,6 +20,14 @@ class DeviceCalibrationTest {
         assertEquals(expectedDeg, actualDeg, tolerance, "Angle mismatch")
     }
 
+    /** Compare angles modulo 360° (handles ±180° boundary). */
+    private fun assertAngleWrappedEquals(expectedDeg: Float, actualDeg: Float, tolerance: Float = 0.5f) {
+        var diff = (expectedDeg - actualDeg) % 360f
+        if (diff > 180f) diff -= 360f
+        if (diff < -180f) diff += 360f
+        assertEquals(0f, abs(diff), tolerance, "Wrapped angle mismatch: expected $expectedDeg° but was $actualDeg°")
+    }
+
     /** Normalize angle to [0, 360) for heading comparisons. */
     private fun normalizeHeading(deg: Float): Float {
         var d = deg % 360f
@@ -47,6 +55,23 @@ class DeviceCalibrationTest {
     @Test
     fun `zero angles compose to identity matrix`() {
         val result = DeviceCalibration.composeZYX(0f, 0f, 0f)
+        assertMatrixEquals(DeviceCalibration.IDENTITY_3X3, result)
+    }
+
+    // --- ZXZ identity / zero-angle tests ---
+
+    @Test
+    fun `ZXZ identity matrix decomposes to zero angles`() {
+        val identity = DeviceCalibration.IDENTITY_3X3.copyOf()
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(identity)
+        assertAngleEquals(0f, alpha)
+        assertAngleEquals(0f, beta)
+        assertAngleEquals(0f, gamma)
+    }
+
+    @Test
+    fun `ZXZ zero angles compose to identity matrix`() {
+        val result = DeviceCalibration.composeZXZ(0f, 0f, 0f)
         assertMatrixEquals(DeviceCalibration.IDENTITY_3X3, result)
     }
 
@@ -137,6 +162,73 @@ class DeviceCalibrationTest {
         assertAngleEquals(rzIn, rzOut)
         assertAngleEquals(ryIn, ryOut)
         assertAngleEquals(rxIn, rxOut)
+    }
+
+    // --- ZXZ roundtrip tests ---
+
+    @Test
+    fun `ZXZ roundtrip with 90 degree tilt`() {
+        val alphaIn = 45f
+        val betaIn = 90f
+        val gammaIn = -30f
+        val matrix = DeviceCalibration.composeZXZ(alphaIn, betaIn, gammaIn)
+        val (alphaOut, betaOut, gammaOut) = DeviceCalibration.decomposeZXZ(matrix)
+        assertAngleEquals(alphaIn, alphaOut)
+        assertAngleEquals(betaIn, betaOut)
+        assertAngleEquals(gammaIn, gammaOut)
+    }
+
+    @Test
+    fun `ZXZ roundtrip with all angles nonzero`() {
+        val alphaIn = -60f
+        val betaIn = 120f
+        val gammaIn = 45f
+        val matrix = DeviceCalibration.composeZXZ(alphaIn, betaIn, gammaIn)
+        val (alphaOut, betaOut, gammaOut) = DeviceCalibration.decomposeZXZ(matrix)
+        assertAngleEquals(alphaIn, alphaOut)
+        assertAngleEquals(betaIn, betaOut)
+        assertAngleEquals(gammaIn, gammaOut)
+    }
+
+    @Test
+    fun `ZXZ roundtrip with small tilt`() {
+        val alphaIn = 10f
+        val betaIn = 5f
+        val gammaIn = 20f
+        val matrix = DeviceCalibration.composeZXZ(alphaIn, betaIn, gammaIn)
+        val (alphaOut, betaOut, gammaOut) = DeviceCalibration.decomposeZXZ(matrix)
+        assertAngleEquals(alphaIn, alphaOut)
+        assertAngleEquals(betaIn, betaOut)
+        assertAngleEquals(gammaIn, gammaOut)
+    }
+
+    @Test
+    fun `ZXZ decompose at gimbal lock beta 0 returns valid angles`() {
+        // β=0 means flat mounting (gimbal lock)
+        val matrix = DeviceCalibration.composeZXZ(alphaDeg = 30f, betaDeg = 0f, gammaDeg = 45f)
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(matrix)
+        assertAngleEquals(0f, beta)
+        // At gimbal lock, only α+γ is determined. Recompose should match.
+        val recomposed = DeviceCalibration.composeZXZ(alpha, beta, gamma)
+        assertMatrixEquals(matrix, recomposed, tolerance = 1e-3f)
+    }
+
+    @Test
+    fun `ZXZ decompose at gimbal lock beta 180 returns valid angles`() {
+        val matrix = DeviceCalibration.composeZXZ(alphaDeg = 60f, betaDeg = 180f, gammaDeg = -20f)
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(matrix)
+        assertAngleEquals(180f, beta)
+        val recomposed = DeviceCalibration.composeZXZ(alpha, beta, gamma)
+        assertMatrixEquals(matrix, recomposed, tolerance = 1e-3f)
+    }
+
+    @Test
+    fun `ZXZ and ZYX produce same matrix for pure Z rotation`() {
+        // A pure Z rotation should be representable in both conventions
+        val zyx = DeviceCalibration.composeZYX(90f, 0f, 0f)
+        val zxz = DeviceCalibration.composeZXZ(90f, 0f, 0f)
+        // Both should be Rz(90) since middle/last angles are 0
+        assertMatrixEquals(zyx, zxz, tolerance = 1e-5f)
     }
 
     // --- Matrix multiply tests ---
@@ -519,12 +611,24 @@ class DeviceCalibrationTest {
     fun `mounting - flat portrait charging port aft`() {
         // Device X=starboard, Y=forward, Z=up → identity
         verifyMounting(0f, 0f, 0f)
+        // ZXZ: gimbal lock (flat), α=0, β=0, γ=0
+        val R_D_V = DeviceCalibration.composeZYX(0f, 0f, 0f)
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+        assertAngleEquals(0f, alpha)
+        assertAngleEquals(0f, beta)
+        assertAngleEquals(0f, gamma)
     }
 
     @Test
     fun `mounting - flat landscape charging port port`() {
         // Phone rotated 90° CW from above: top→starboard, right→aft
         verifyMounting(90f, 0f, 0f)
+        // ZXZ: gimbal lock (flat), α=90°, β=0, γ=0
+        val R_D_V = DeviceCalibration.composeZYX(90f, 0f, 0f)
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+        assertAngleEquals(90f, alpha)
+        assertAngleEquals(0f, beta)
+        assertAngleEquals(0f, gamma)
     }
 
     @Test
@@ -537,33 +641,74 @@ class DeviceCalibrationTest {
         assertEquals(0f, R_D_V[4], 1e-5f)
         assertEquals(-1f, R_D_V[7], 1e-5f)
         verifyMounting(0f, 0f, -90f)
+        // ZXZ: α=180°, β=90°, γ=±180°
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+        assertAngleWrappedEquals(180f, alpha)
+        assertAngleEquals(90f, beta)
+        assertAngleWrappedEquals(180f, gamma)
     }
 
     @Test
     fun `mounting - vertical HUD charging port up`() {
         // Upside-down HUD: screen faces helm, top faces down
         verifyMounting(180f, 0f, -90f)
+        // ZXZ: α=0°, β=90°, γ=±180°
+        val R_D_V = DeviceCalibration.composeZYX(180f, 0f, -90f)
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+        assertAngleEquals(0f, alpha)
+        assertAngleEquals(90f, beta)
+        assertAngleWrappedEquals(180f, gamma)
     }
 
     @Test
     fun `mounting - vertical starboard screen to port charging port down`() {
         // Phone on starboard wall, screen facing inward (port), top up
-        // Hits gimbal lock at RY=90°
+        // Hits gimbal lock at RY=90° in ZYX
         verifyMounting(90f, 90f, 0f)
+        // ZXZ: α=180°, β=90°, γ=-90°
+        val R_D_V = DeviceCalibration.composeZYX(90f, 90f, 0f)
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+        assertAngleEquals(180f, alpha)
+        assertAngleEquals(90f, beta)
+        assertAngleEquals(-90f, gamma)
     }
 
     @Test
     fun `mounting - vertical starboard screen to port charging port forward`() {
         // Same wall mount but phone rotated: charging port faces bow
-        // Hits gimbal lock at RY=90°
+        // Hits gimbal lock at RY=90° in ZYX
         verifyMounting(180f, 90f, 0f)
+        // ZXZ: α=-90°, β=90°, γ=-90°
+        val R_D_V = DeviceCalibration.composeZYX(180f, 90f, 0f)
+        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
+        assertAngleEquals(-90f, alpha)
+        assertAngleEquals(90f, beta)
+        assertAngleEquals(-90f, gamma)
     }
 
-    // --- Euler angle non-independence at large tilt ---
+    // --- Euler angle non-independence at large tilt (ZYX) ---
     // Scenarios 3 and 5 are the same physical tilt (vertical, charging port down)
-    // with different horizontal orientation. Despite having completely different
-    // Euler angles, the calibration workflow (pitch/roll then azimuth) works
-    // identically for both because it operates on full matrices, not Euler components.
+    // with different horizontal orientation. In ZYX, they have completely different
+    // Euler angles (gimbal lock issue). In ZXZ, they share β=90° and differ only in γ.
+
+    // --- ZXZ advantage: scenarios 3 and 5 differ only in γ ---
+
+    @Test
+    fun `ZXZ scenarios 3 and 5 share alpha and beta, differ only in gamma`() {
+        val R_D_V_3 = DeviceCalibration.composeZYX(0f, 0f, -90f)
+        val R_D_V_5 = DeviceCalibration.composeZYX(90f, 90f, 0f)
+        val (alpha3, beta3, gamma3) = DeviceCalibration.decomposeZXZ(R_D_V_3)
+        val (alpha5, beta5, gamma5) = DeviceCalibration.decomposeZXZ(R_D_V_5)
+
+        // Same tilt from horizontal
+        assertAngleEquals(beta3, beta5, tolerance = 0.1f)
+        // Same screen twist
+        assertAngleEquals(alpha3, alpha5, tolerance = 0.1f)
+        // Different heading offset (90° apart)
+        val gammaDiff = abs(normalizeHeading(gamma3) - normalizeHeading(gamma5))
+        val wrappedDiff = if (gammaDiff > 180f) 360f - gammaDiff else gammaDiff
+        assertAngleEquals(90f, wrappedDiff, tolerance = 0.5f)
+    }
 
     /**
      * Helper: simulate the full calibration workflow for any mounting.
@@ -632,14 +777,7 @@ class DeviceCalibrationTest {
         val R_D_V_3 = DeviceCalibration.composeZYX(0f, 0f, -90f)
         val R_D_V_5 = DeviceCalibration.composeZYX(90f, 90f, 0f)
 
-        // Rz(90°) * R_D_V_3 should map the same physical tilt, rotated horizontally.
-        // In vehicle-to-device convention: rotating device horizontally means
-        // the device sees vehicle axes rotated by -90° around Z.
-        // So R_D_V_5 = R_D_V_3 * Rz_vehicle(-90°)^T = R_D_V_3 * Rz_vehicle(90°)
-        //
-        // Wait: if we rotate the device 90° CW (from above) relative to vehicle,
-        // vehicle axes in the new device frame = old_device_rotation * Rz(-90°) in vehicle frame
-        // R_D_V_new = R_D_V_old * Rz_vehicle(-90°)
+        // R_D_V_5 = R_D_V_3 * Rz_vehicle(-90°)
         val Rz_neg90 = DeviceCalibration.buildFlatHeadingMatrix(-90f)
         val expected = DeviceCalibration.multiply3x3(R_D_V_3, Rz_neg90)
 
@@ -647,8 +785,52 @@ class DeviceCalibrationTest {
     }
 
     @Test
-    fun `azimuth correction can change non-RZ Euler angles for tilted mounting`() {
-        // Vertical HUD mounting (0°, 0°, -90°) with distorted magnetometer at dock
+    fun `ZXZ azimuth correction changes only gamma for flat vehicle`() {
+        // Vertical HUD mounting (0°, 0°, -90° in ZYX)
+        val mounting = DeviceCalibration.composeZYX(0f, 0f, -90f)
+
+        // At dock: vehicle heading north, flat
+        val R_W_D_true = DeviceCalibration.transpose3x3(mounting)
+
+        // Magnetometer adds 30° error
+        val magError = DeviceCalibration.buildFlatHeadingMatrix(30f)
+        val R_W_D_distorted = DeviceCalibration.multiply3x3(magError, R_W_D_true)
+
+        // Pitch/roll calibration at dock — correct tilt, wrong heading (30° off)
+        val afterPitchRoll = DeviceCalibration.calibratePitchRoll(
+            R_W_D_distorted, DeviceCalibration.IDENTITY_3X3.copyOf()
+        )
+        val (alpha1, beta1, gamma1) = DeviceCalibration.decomposeZXZ(afterPitchRoll)
+
+        // GPS says heading = 0° (north)
+        val afterAzimuth = DeviceCalibration.calibrateAzimuth(
+            R_W_D_distorted, afterPitchRoll, 0f
+        )
+        val (alpha2, beta2, gamma2) = DeviceCalibration.decomposeZXZ(afterAzimuth)
+
+        // In ZXZ: α (screen twist) and β (tilt) should be preserved
+        assertAngleWrappedEquals(alpha1, alpha2, tolerance = 0.5f)
+        assertAngleEquals(beta1, beta2, tolerance = 0.5f)
+        // Only γ (heading offset) should change — by approximately 30°
+        var gammaDelta = (gamma2 - gamma1) % 360f
+        if (gammaDelta > 180f) gammaDelta -= 360f
+        if (gammaDelta < -180f) gammaDelta += 360f
+        assertAngleEquals(30f, abs(gammaDelta), tolerance = 1f)
+
+        // Vehicle attitude is correct regardless
+        val R_W_V = DeviceCalibration.multiply3x3(R_W_D_distorted, afterAzimuth)
+        val heading = Math.toDegrees(
+            atan2(R_W_V[1].toDouble(), R_W_V[4].toDouble())
+        ).toFloat()
+        assertHeadingEquals(0f, heading)
+        assertEquals(0f, R_W_V[6], 1e-3f)
+        assertEquals(0f, R_W_V[7], 1e-3f)
+    }
+
+    @Test
+    fun `ZYX azimuth correction can change non-RZ Euler angles for tilted mounting`() {
+        // Demonstrates ZYX limitation: for tilted mountings, heading correction
+        // appears in RY rather than RZ. This motivates the switch to ZXZ.
         val mounting = DeviceCalibration.composeZYX(0f, 0f, -90f)
 
         // At dock: vehicle heading north, flat

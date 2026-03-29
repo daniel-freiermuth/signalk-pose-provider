@@ -14,9 +14,9 @@ object AppSettings {
     private const val KEY_SERVER_URL = "server_url"
     private const val KEY_USERNAME = "username"
     private const val KEY_PASSWORD = "password"
-    private const val KEY_CALIBRATION_RZ = "calibration_rz_deg"
-    private const val KEY_CALIBRATION_RY = "calibration_ry_deg"
-    private const val KEY_CALIBRATION_RX = "calibration_rx_deg"
+    private const val KEY_CALIBRATION_ALPHA = "calibration_alpha_deg"
+    private const val KEY_CALIBRATION_BETA = "calibration_beta_deg"
+    private const val KEY_CALIBRATION_GAMMA = "calibration_gamma_deg"
     private const val KEY_LOCATION_INTERVAL_MS = "location_interval_ms"
     private const val KEY_SENSOR_INTERVAL_MS = "sensor_interval_ms"
     private const val KEY_WAS_STREAMING = "was_streaming"
@@ -193,28 +193,28 @@ object AppSettings {
         return username.isNotBlank() && password.isNotBlank()
     }
     
-    // Device-to-vehicle calibration angles (ZYX Euler decomposition)
+    // Device-to-vehicle calibration angles (ZXZ proper Euler decomposition)
 
-    fun getCalibrationRzDeg(context: Context): Float {
-        return getPreferences(context).getFloat(KEY_CALIBRATION_RZ, DEFAULT_CALIBRATION_ANGLE)
+    fun getCalibrationAlphaDeg(context: Context): Float {
+        return getPreferences(context).getFloat(KEY_CALIBRATION_ALPHA, DEFAULT_CALIBRATION_ANGLE)
     }
 
-    fun getCalibrationRyDeg(context: Context): Float {
-        return getPreferences(context).getFloat(KEY_CALIBRATION_RY, DEFAULT_CALIBRATION_ANGLE)
+    fun getCalibrationBetaDeg(context: Context): Float {
+        return getPreferences(context).getFloat(KEY_CALIBRATION_BETA, DEFAULT_CALIBRATION_ANGLE)
     }
 
-    fun getCalibrationRxDeg(context: Context): Float {
-        return getPreferences(context).getFloat(KEY_CALIBRATION_RX, DEFAULT_CALIBRATION_ANGLE)
+    fun getCalibrationGammaDeg(context: Context): Float {
+        return getPreferences(context).getFloat(KEY_CALIBRATION_GAMMA, DEFAULT_CALIBRATION_ANGLE)
     }
 
-    fun setCalibrationAngles(context: Context, rzDeg: Float, ryDeg: Float, rxDeg: Float) {
-        require(rzDeg in -180f..180f) { "RZ must be between -180 and 180 degrees" }
-        require(ryDeg in -90f..90f) { "RY must be between -90 and 90 degrees" }
-        require(rxDeg in -180f..180f) { "RX must be between -180 and 180 degrees" }
+    fun setCalibrationAngles(context: Context, alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
+        require(alphaDeg in -180f..180f) { "Alpha must be between -180 and 180 degrees" }
+        require(betaDeg in 0f..180f) { "Beta must be between 0 and 180 degrees" }
+        require(gammaDeg in -180f..180f) { "Gamma must be between -180 and 180 degrees" }
         getPreferences(context).edit()
-            .putFloat(KEY_CALIBRATION_RZ, rzDeg)
-            .putFloat(KEY_CALIBRATION_RY, ryDeg)
-            .putFloat(KEY_CALIBRATION_RX, rxDeg)
+            .putFloat(KEY_CALIBRATION_ALPHA, alphaDeg)
+            .putFloat(KEY_CALIBRATION_BETA, betaDeg)
+            .putFloat(KEY_CALIBRATION_GAMMA, gammaDeg)
             .apply()
     }
 

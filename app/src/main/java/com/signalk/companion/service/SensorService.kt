@@ -130,9 +130,9 @@ class SensorService @Inject constructor(
         startSensorUpdates(updateIntervalMs)
     }
 
-    fun setCalibrationAngles(rzDeg: Float, ryDeg: Float, rxDeg: Float) {
-        Log.d(TAG, "Setting calibration angles: RZ=${rzDeg}°, RY=${ryDeg}°, RX=${rxDeg}°")
-        calibrationMatrix = DeviceCalibration.composeZYX(rzDeg, ryDeg, rxDeg)
+    fun setCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
+        Log.d(TAG, "Setting calibration angles: α=${alphaDeg}°, β=${betaDeg}°, γ=${gammaDeg}°")
+        calibrationMatrix = DeviceCalibration.composeZXZ(alphaDeg, betaDeg, gammaDeg)
     }
 
     fun getCurrentRotationMatrix(): FloatArray = rotationMatrix.copyOf()
