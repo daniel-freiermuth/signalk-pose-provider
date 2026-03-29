@@ -145,7 +145,7 @@ fun MainScreen(
                 onCalibrationAnglesChange = viewModel::updateCalibrationAngles,
                 onCalibrateAll = viewModel::calibrateAll,
                 onCalibrateAzimuth = viewModel::calibrateAzimuth,
-                onCalibratePitchRoll = viewModel::calibratePitchRoll,
+                onCalibrateTilt = viewModel::calibrateTilt,
                 hasGps = uiState.locationData?.bearing != null && (uiState.locationData?.speed ?: 0f) > 0.5f
             )
             
@@ -778,7 +778,7 @@ fun MarineConfigCard(
     onCalibrationAnglesChange: (Float, Float, Float) -> Unit,
     onCalibrateAll: () -> Unit,
     onCalibrateAzimuth: () -> Unit,
-    onCalibratePitchRoll: () -> Unit,
+    onCalibrateTilt: () -> Unit,
     hasGps: Boolean
 ) {
     Card(
@@ -860,10 +860,10 @@ fun MarineConfigCard(
                 }
 
                 Button(
-                    onClick = onCalibratePitchRoll,
+                    onClick = onCalibrateTilt,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Pitch/Roll Only")
+                    Text("Twist/Tilt Only")
                 }
             }
 

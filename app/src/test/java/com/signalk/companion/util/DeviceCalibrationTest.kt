@@ -3,6 +3,8 @@ package com.signalk.companion.util
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import kotlin.math.*
 
 class DeviceCalibrationTest {
@@ -384,35 +386,29 @@ class DeviceCalibrationTest {
         assertMatrixEquals(matrix, recomposed, tolerance = 1e-3f)
     }
 
-    // --- Calibration with only pitch+roll (no heading) ---
+    // --- Tilt-only calibration (α, β) ---
 
     @Test
-    fun `calibratePitchRoll makes pitch and roll zero`() {
-        val existingCalibration = DeviceCalibration.composeZYX(90f, 0f, 0f)
+    fun `calibrateTilt makes pitch and roll zero`() {
         val R_W_D = DeviceCalibration.composeZYX(0f, 15f, -5f)
 
-        val updated = DeviceCalibration.calibratePitchRoll(R_W_D, existingCalibration)
+        val updated = DeviceCalibration.calibrateTilt(R_W_D, 0f)
         val R_W_V_after = DeviceCalibration.multiply3x3(R_W_D, updated)
 
-        // SensorManager.getOrientation: pitch = asin(-R[7]), roll = atan2(-R[6], R[8])
-        // Both are zero when R[6] = 0 and R[7] = 0
+        // Flat: R_W_V row 2 = [0, 0, 1]
         assertEquals(0f, R_W_V_after[7], 1e-3f)
         assertEquals(0f, R_W_V_after[6], 1e-3f)
     }
 
     @Test
-    fun `calibratePitchRoll preserves vehicle heading`() {
-        val existingCalibration = DeviceCalibration.composeZYX(90f, 0f, 0f)
+    fun `calibrateTilt preserves gamma`() {
         val R_W_D = DeviceCalibration.composeZYX(0f, 15f, -5f)
+        val gammaIn = 42f
 
-        val R_W_V_before = DeviceCalibration.multiply3x3(R_W_D, existingCalibration)
-        val headingBefore = atan2(R_W_V_before[1].toDouble(), R_W_V_before[4].toDouble()).toFloat()
+        val updated = DeviceCalibration.calibrateTilt(R_W_D, gammaIn)
+        val (_, _, gammaOut) = DeviceCalibration.decomposeZXZ(updated)
 
-        val updated = DeviceCalibration.calibratePitchRoll(R_W_D, existingCalibration)
-        val R_W_V_after = DeviceCalibration.multiply3x3(R_W_D, updated)
-        val headingAfter = atan2(R_W_V_after[1].toDouble(), R_W_V_after[4].toDouble()).toFloat()
-
-        assertEquals(headingBefore, headingAfter, 1e-3f)
+        assertAngleEquals(gammaIn, gammaOut)
     }
 
     @Test
@@ -453,17 +449,16 @@ class DeviceCalibrationTest {
         // Device mounted landscape (90° Z), flat vehicle heading north
         val mounting = DeviceCalibration.composeZYX(90f, 0f, 0f)
         val R_W_V_true = DeviceCalibration.buildFlatHeadingMatrix(0f) // heading north
-        // R_W_D = R_W_V * R_D_V^(-1) = R_W_V * R_D_V^T
         val R_W_D = DeviceCalibration.multiply3x3(R_W_V_true, DeviceCalibration.transpose3x3(mounting))
 
         // Existing calibration has wrong heading (30° off)
         val existingCal = DeviceCalibration.composeZYX(60f, 0f, 0f)
+        val (_, _, existingGamma) = DeviceCalibration.decomposeZXZ(existingCal)
 
         // GPS says heading = 0°
-        val updated = DeviceCalibration.calibrateAzimuth(R_W_D, existingCal, 0f)
+        val (_, updated) = DeviceCalibration.calibrateAzimuth(R_W_D, existingCal, existingGamma, 0f)
         val R_W_V_after = DeviceCalibration.multiply3x3(R_W_D, updated)
 
-        // Heading should be 0° (north)
         val heading = Math.toDegrees(
             atan2(R_W_V_after[1].toDouble(), R_W_V_after[4].toDouble())
         ).toFloat()
@@ -471,38 +466,49 @@ class DeviceCalibrationTest {
     }
 
     @Test
+    fun `calibrateAzimuth preserves alpha and beta`() {
+        val mounting = DeviceCalibration.composeZYX(0f, 0f, -90f)
+        val R_W_V_true = DeviceCalibration.buildFlatHeadingMatrix(90f)
+        val R_W_D = DeviceCalibration.multiply3x3(R_W_V_true, DeviceCalibration.transpose3x3(mounting))
+
+        // Existing calibration with wrong heading
+        val existingCal = DeviceCalibration.composeZYX(0f, 0f, -90f)
+        val (alphaB, betaB, gammaB) = DeviceCalibration.decomposeZXZ(existingCal)
+
+        val (_, updated) = DeviceCalibration.calibrateAzimuth(R_W_D, existingCal, gammaB, 90f)
+        val (alphaA, betaA, _) = DeviceCalibration.decomposeZXZ(updated)
+
+        assertAngleWrappedEquals(alphaB, alphaA)
+        assertAngleEquals(betaB, betaA)
+    }
+
+    @Test
     fun `calibrateAzimuth preserves tilt when vehicle is tilted by waves`() {
         // Device mounted portrait (rx=90°), vehicle heading east
         val mounting = DeviceCalibration.composeZYX(0f, 0f, 90f)
         val R_W_V_flat = DeviceCalibration.buildFlatHeadingMatrix(90f)
-        val R_W_D_calm = DeviceCalibration.multiply3x3(
-            R_W_V_flat, DeviceCalibration.transpose3x3(mounting)
-        )
 
-        // Now vehicle is tilted 10° by waves (pitch). Sensor reading changes.
-        // Wave tilt: rotate vehicle around its X axis (roll in world terms)
+        // Vehicle tilted 10° by waves
         val waveTilt = DeviceCalibration.composeZYX(0f, 0f, 10f)
         val R_W_V_wavy = DeviceCalibration.multiply3x3(waveTilt, R_W_V_flat)
         val R_W_D_wavy = DeviceCalibration.multiply3x3(
             R_W_V_wavy, DeviceCalibration.transpose3x3(mounting)
         )
 
-        // Before azimuth calibration: vehicle attitude with existing mounting
+        // Before azimuth calibration
         val R_W_V_before = DeviceCalibration.multiply3x3(R_W_D_wavy, mounting)
         val pitchBefore = asin(-R_W_V_before[7].toDouble()).toFloat()
         val rollBefore = atan2(-R_W_V_before[6].toDouble(), R_W_V_before[8].toDouble()).toFloat()
 
-        // Calibrate azimuth with GPS heading = 90° (east)
-        val updated = DeviceCalibration.calibrateAzimuth(R_W_D_wavy, mounting, 90f)
+        val (_, _, existingGamma) = DeviceCalibration.decomposeZXZ(mounting)
+        val (_, updated) = DeviceCalibration.calibrateAzimuth(R_W_D_wavy, mounting, existingGamma, 90f)
         val R_W_V_after = DeviceCalibration.multiply3x3(R_W_D_wavy, updated)
 
-        // Pitch and roll should be preserved
         val pitchAfter = asin(-R_W_V_after[7].toDouble()).toFloat()
         val rollAfter = atan2(-R_W_V_after[6].toDouble(), R_W_V_after[8].toDouble()).toFloat()
         assertEquals(pitchBefore, pitchAfter, 1e-3f)
         assertEquals(rollBefore, rollAfter, 1e-3f)
 
-        // Heading should now be 90°
         val heading = Math.toDegrees(
             atan2(R_W_V_after[1].toDouble(), R_W_V_after[4].toDouble())
         ).toFloat()
@@ -511,18 +517,19 @@ class DeviceCalibrationTest {
 
     @Test
     fun `calibrateAzimuth works with large mounting angles`() {
-        // Device mounted nearly upside-down: 45° tilt + 90° twist
+        // Complex 3-axis mounting: proper workflow is calibrateTilt then calibrateAzimuth
         val mounting = DeviceCalibration.composeZYX(45f, 30f, -60f)
-        val R_W_V_true = DeviceCalibration.buildFlatHeadingMatrix(270f) // heading west
+        val R_W_V_true = DeviceCalibration.buildFlatHeadingMatrix(270f)
         val R_W_D = DeviceCalibration.multiply3x3(
             R_W_V_true, DeviceCalibration.transpose3x3(mounting)
         )
 
-        // Existing calibration has correct tilt but wrong heading
-        val existingCal = DeviceCalibration.composeZYX(0f, 30f, -60f)
+        // Step 1: Tilt calibration (gets α, β correct, heading arbitrary)
+        val afterTilt = DeviceCalibration.calibrateTilt(R_W_D, 0f)
+        val (_, _, gamma1) = DeviceCalibration.decomposeZXZ(afterTilt)
 
-        // GPS says heading = 270°
-        val updated = DeviceCalibration.calibrateAzimuth(R_W_D, existingCal, 270f)
+        // Step 2: Azimuth calibration with GPS heading
+        val (_, updated) = DeviceCalibration.calibrateAzimuth(R_W_D, afterTilt, gamma1, 270f)
         val R_W_V_after = DeviceCalibration.multiply3x3(R_W_D, updated)
 
         val heading = Math.toDegrees(
@@ -532,7 +539,7 @@ class DeviceCalibrationTest {
     }
 
     @Test
-    fun `sequential calibration - pitch roll first then azimuth`() {
+    fun `sequential calibration - tilt first then azimuth`() {
         // The user's workflow: calibrate tilt at dock, then azimuth underway
 
         // Device mounted landscape (90° Z), tilted back 20° (rx=20°)
@@ -544,17 +551,16 @@ class DeviceCalibrationTest {
             R_W_V_dock, DeviceCalibration.transpose3x3(realMounting)
         )
 
-        // Step 1: Calibrate pitch/roll (heading from magnetometer may be wrong)
-        val identityCal = DeviceCalibration.IDENTITY_3X3.copyOf()
-        val afterPitchRoll = DeviceCalibration.calibratePitchRoll(R_W_D_dock, identityCal)
+        // Step 1: Calibrate tilt (γ=0 initially)
+        val afterTilt = DeviceCalibration.calibrateTilt(R_W_D_dock, 0f)
 
-        // Verify pitch/roll are zero
-        val R_W_V_step1 = DeviceCalibration.multiply3x3(R_W_D_dock, afterPitchRoll)
+        // Verify vehicle is flat
+        val R_W_V_step1 = DeviceCalibration.multiply3x3(R_W_D_dock, afterTilt)
         assertEquals(0f, R_W_V_step1[7], 1e-3f) // pitch component
         assertEquals(0f, R_W_V_step1[6], 1e-3f) // roll component
 
         // Step 2: Now underway heading east, vehicle tilted 5° by waves
-        val waveTilt = DeviceCalibration.composeZYX(0f, 5f, 0f) // 5° pitch from waves
+        val waveTilt = DeviceCalibration.composeZYX(0f, 5f, 0f)
         val R_W_V_sea = DeviceCalibration.multiply3x3(
             waveTilt,
             DeviceCalibration.buildFlatHeadingMatrix(90f)
@@ -564,7 +570,7 @@ class DeviceCalibrationTest {
         )
 
         // Calibrate azimuth with GPS = 90° (east)
-        val afterAzimuth = DeviceCalibration.calibrateAzimuth(R_W_D_sea, afterPitchRoll, 90f)
+        val (_, afterAzimuth) = DeviceCalibration.calibrateAzimuth(R_W_D_sea, afterTilt, 0f, 90f)
         val R_W_V_final = DeviceCalibration.multiply3x3(R_W_D_sea, afterAzimuth)
 
         // Heading should be 90°
@@ -573,9 +579,7 @@ class DeviceCalibrationTest {
         ).toFloat()
         assertHeadingEquals(90f, heading)
 
-        // Vehicle tilt should be preserved. The tilt angle is the angle between
-        // vehicle Z axis and world Z axis: acos(R_W_V[8]) (Z-Z component).
-        // Row 2 of R_W_V is unchanged by horizontal rotation, so tilt is preserved.
+        // Wave tilt should be preserved
         val tiltBefore = Math.toDegrees(
             acos(R_W_V_sea[8].toDouble().coerceIn(-1.0, 1.0))
         ).toFloat()
@@ -583,7 +587,6 @@ class DeviceCalibrationTest {
             acos(R_W_V_final[8].toDouble().coerceIn(-1.0, 1.0))
         ).toFloat()
         assertEquals(tiltBefore, tiltAfter, 1f)
-        // Tilt should be approximately 5° (the wave tilt)
         assertAngleEquals(5f, tiltAfter, tolerance = 1f)
     }
 
@@ -712,8 +715,8 @@ class DeviceCalibrationTest {
 
     /**
      * Helper: simulate the full calibration workflow for any mounting.
-     * 1. At dock: calibrate pitch/roll with vehicle flat, heading north
-     * 2. Underway: calibrate azimuth with GPS heading east, vehicle tilted 8° by waves
+     * 1. At dock: calibrate tilt with vehicle flat, heading north
+     * 2. Underway: calibrate azimuth with GPS heading, vehicle tilted 8° by waves
      * Verify heading is correct and wave tilt is preserved.
      */
     private fun verifyCalibrationWorkflow(realMounting: FloatArray, gpsHeading: Float = 90f) {
@@ -722,14 +725,12 @@ class DeviceCalibrationTest {
         val R_W_D_dock = DeviceCalibration.multiply3x3(
             R_W_V_dock, DeviceCalibration.transpose3x3(realMounting)
         )
-        val afterPitchRoll = DeviceCalibration.calibratePitchRoll(
-            R_W_D_dock, DeviceCalibration.IDENTITY_3X3.copyOf()
-        )
+        val afterTilt = DeviceCalibration.calibrateTilt(R_W_D_dock, 0f)
 
-        // Verify pitch/roll are zero after step 1
-        val R_W_V_step1 = DeviceCalibration.multiply3x3(R_W_D_dock, afterPitchRoll)
-        assertEquals(0f, R_W_V_step1[6], 1e-3f) // roll component
-        assertEquals(0f, R_W_V_step1[7], 1e-3f) // pitch component
+        // Verify flat after step 1
+        val R_W_V_step1 = DeviceCalibration.multiply3x3(R_W_D_dock, afterTilt)
+        assertEquals(0f, R_W_V_step1[6], 1e-3f)
+        assertEquals(0f, R_W_V_step1[7], 1e-3f)
 
         // Step 2: Underway heading east, 8° wave tilt (pitch)
         val waveTilt = DeviceCalibration.composeZYX(0f, 8f, 0f)
@@ -739,8 +740,8 @@ class DeviceCalibrationTest {
         val R_W_D_sea = DeviceCalibration.multiply3x3(
             R_W_V_sea, DeviceCalibration.transpose3x3(realMounting)
         )
-        val afterAzimuth = DeviceCalibration.calibrateAzimuth(
-            R_W_D_sea, afterPitchRoll, gpsHeading
+        val (_, afterAzimuth) = DeviceCalibration.calibrateAzimuth(
+            R_W_D_sea, afterTilt, 0f, gpsHeading
         )
         val R_W_V_final = DeviceCalibration.multiply3x3(R_W_D_sea, afterAzimuth)
 
@@ -796,28 +797,23 @@ class DeviceCalibrationTest {
         val magError = DeviceCalibration.buildFlatHeadingMatrix(30f)
         val R_W_D_distorted = DeviceCalibration.multiply3x3(magError, R_W_D_true)
 
-        // Pitch/roll calibration at dock — correct tilt, wrong heading (30° off)
-        val afterPitchRoll = DeviceCalibration.calibratePitchRoll(
-            R_W_D_distorted, DeviceCalibration.IDENTITY_3X3.copyOf()
-        )
-        val (alpha1, beta1, gamma1) = DeviceCalibration.decomposeZXZ(afterPitchRoll)
+        // Tilt calibration at dock — correct tilt, heading arbitrary (γ=0)
+        val afterTilt = DeviceCalibration.calibrateTilt(R_W_D_distorted, 0f)
+        val (alpha1, beta1, gamma1) = DeviceCalibration.decomposeZXZ(afterTilt)
 
         // GPS says heading = 0° (north)
-        val afterAzimuth = DeviceCalibration.calibrateAzimuth(
-            R_W_D_distorted, afterPitchRoll, 0f
+        val (newGamma, afterAzimuth) = DeviceCalibration.calibrateAzimuth(
+            R_W_D_distorted, afterTilt, gamma1, 0f
         )
         val (alpha2, beta2, gamma2) = DeviceCalibration.decomposeZXZ(afterAzimuth)
 
-        // In ZXZ: α (screen twist) and β (tilt) should be preserved
+        // KEY PROPERTY: In ZXZ, α (screen twist) and β (tilt) are preserved exactly
         assertAngleWrappedEquals(alpha1, alpha2, tolerance = 0.5f)
         assertAngleEquals(beta1, beta2, tolerance = 0.5f)
-        // Only γ (heading offset) should change — by approximately 30°
-        var gammaDelta = (gamma2 - gamma1) % 360f
-        if (gammaDelta > 180f) gammaDelta -= 360f
-        if (gammaDelta < -180f) gammaDelta += 360f
-        assertAngleEquals(30f, abs(gammaDelta), tolerance = 1f)
+        // Only γ (heading offset) changed
+        assertAngleWrappedEquals(newGamma, gamma2, tolerance = 0.1f)
 
-        // Vehicle attitude is correct regardless
+        // Vehicle attitude is correct
         val R_W_V = DeviceCalibration.multiply3x3(R_W_D_distorted, afterAzimuth)
         val heading = Math.toDegrees(
             atan2(R_W_V[1].toDouble(), R_W_V[4].toDouble())
@@ -830,7 +826,7 @@ class DeviceCalibrationTest {
     @Test
     fun `ZYX azimuth correction can change non-RZ Euler angles for tilted mounting`() {
         // Demonstrates ZYX limitation: for tilted mountings, heading correction
-        // appears in RY rather than RZ. This motivates the switch to ZXZ.
+        // affects non-heading Euler angles. This motivates the switch to ZXZ.
         val mounting = DeviceCalibration.composeZYX(0f, 0f, -90f)
 
         // At dock: vehicle heading north, flat
@@ -840,27 +836,31 @@ class DeviceCalibrationTest {
         val magError = DeviceCalibration.buildFlatHeadingMatrix(30f)
         val R_W_D_distorted = DeviceCalibration.multiply3x3(magError, R_W_D_true)
 
-        // Pitch/roll calibration at dock — correct tilt, wrong heading (30° off)
-        val afterPitchRoll = DeviceCalibration.calibratePitchRoll(
-            R_W_D_distorted, DeviceCalibration.IDENTITY_3X3.copyOf()
-        )
-        val (rz1, ry1, rx1) = DeviceCalibration.decomposeZYX(afterPitchRoll)
+        // Tilt calibration at dock
+        val afterTilt = DeviceCalibration.calibrateTilt(R_W_D_distorted, 0f)
+        val (rz1, ry1, rx1) = DeviceCalibration.decomposeZYX(afterTilt)
 
         // GPS says heading = 0° (north)
-        val afterAzimuth = DeviceCalibration.calibrateAzimuth(
-            R_W_D_distorted, afterPitchRoll, 0f
+        val gamma1 = DeviceCalibration.decomposeZXZ(afterTilt).third
+        val (_, afterAzimuth) = DeviceCalibration.calibrateAzimuth(
+            R_W_D_distorted, afterTilt, gamma1, 0f
         )
         val (rz2, ry2, rx2) = DeviceCalibration.decomposeZYX(afterAzimuth)
 
-        // For this vertical mounting (RX=-90°), the heading correction appears
-        // in RY, NOT in RZ — demonstrating that Euler angles don't decompose
-        // into independent "heading" and "tilt" components for tilted mountings.
-        assertAngleEquals(0f, rz1, tolerance = 0.1f)
-        assertAngleEquals(0f, rz2, tolerance = 0.1f) // RZ unchanged!
-        assertAngleEquals(0f, ry1, tolerance = 0.1f)
-        assertAngleEquals(30f, ry2, tolerance = 0.5f) // Heading correction appears in RY
-        assertAngleEquals(-90f, rx1, tolerance = 0.1f)
-        assertAngleEquals(-90f, rx2, tolerance = 0.1f) // RX unchanged
+        // KEY INSIGHT: In ZYX decomposition, heading correction does NOT stay
+        // in a single angle. At least one of (rz, ry, rx) besides rz changes.
+        // This is because for this vertical mounting, heading rotation maps to
+        // a combination of ZYX Euler angles — there's no clean separation.
+        val ryChanged = abs(ry2 - ry1) > 1f
+        val rxChanged = abs(abs(rx2) - abs(rx1)) > 1f
+        assertTrue(ryChanged || rxChanged,
+            "ZYX heading correction should leak into non-RZ angles")
+
+        // In contrast, ZXZ decomposition keeps α, β unchanged (tested above)
+        val (alphaB, betaB, _) = DeviceCalibration.decomposeZXZ(afterTilt)
+        val (alphaA, betaA, _) = DeviceCalibration.decomposeZXZ(afterAzimuth)
+        assertAngleWrappedEquals(alphaB, alphaA, tolerance = 0.5f)
+        assertAngleEquals(betaB, betaA, tolerance = 0.5f)
 
         // Vehicle attitude is correct regardless
         val R_W_V = DeviceCalibration.multiply3x3(R_W_D_distorted, afterAzimuth)

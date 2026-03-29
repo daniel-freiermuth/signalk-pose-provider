@@ -300,8 +300,8 @@ class MainViewModel @Inject constructor(
                 Log.d(TAG, "calibrateAll: GPS path → α=$alpha, β=$beta, γ=$gamma")
                 updateCalibrationAngles(alpha, beta, gamma)
             } else {
-                Log.d(TAG, "calibrateAll: no GPS heading, falling back to pitch/roll only")
-                calibratePitchRollInternal()
+                Log.d(TAG, "calibrateAll: no GPS heading, falling back to twist/tilt only")
+                calibrateTiltInternal()
             }
         }
     }

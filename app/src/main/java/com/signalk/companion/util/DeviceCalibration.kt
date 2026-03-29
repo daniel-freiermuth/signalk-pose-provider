@@ -288,8 +288,9 @@ object DeviceCalibration {
         )
         val currentHeadingDeg = Math.toDegrees(currentHeadingRad).toFloat()
 
-        // Heading correction δ
-        var delta = gpsHeadingDeg - currentHeadingDeg
+        // Heading correction δ: post-multiplying by Rz(δ) changes heading by −δ,
+        // so δ = currentHeading − gpsHeading makes heading_new = gpsHeading.
+        var delta = currentHeadingDeg - gpsHeadingDeg
         // Normalize to [-180, 180]
         while (delta > 180f) delta -= 360f
         while (delta < -180f) delta += 360f
@@ -305,6 +306,5 @@ object DeviceCalibration {
         val newCalibration = composeZXZ(alpha, beta, newGamma)
 
         return Pair(newGamma, newCalibration)
-    }
     }
 }
