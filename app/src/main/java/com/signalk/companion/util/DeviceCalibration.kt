@@ -239,9 +239,11 @@ object DeviceCalibration {
      *
      * @param R_W_D Current device rotation matrix from sensors
      * @param gammaDeg Existing heading offset γ to preserve
-     * @return New calibration matrix R_D_V = Rz(α_new)·Rx(β_new)·Rz(γ_old)
+     * @return Triple(alphaDeg, betaDeg, R_D_V) — computed angles and calibration matrix.
+     *   Returns angles directly so the caller never needs to decompose the result matrix
+     *   (which would lose information at gimbal lock β≈0).
      */
-    fun calibrateTilt(R_W_D: FloatArray, gammaDeg: Float): FloatArray {
+    fun calibrateTilt(R_W_D: FloatArray, gammaDeg: Float): Triple<Float, Float, FloatArray> {
         val dz2 = R_W_D[8].coerceIn(-1f, 1f)  // cos(β)
         val betaRad = acos(dz2)
         val alphaRad = if (abs(sin(betaRad)) > 1e-5f) {
@@ -254,7 +256,7 @@ object DeviceCalibration {
         val alphaDeg = Math.toDegrees(alphaRad.toDouble()).toFloat()
         val betaDeg = Math.toDegrees(betaRad.toDouble()).toFloat()
 
-        return composeZXZ(alphaDeg, betaDeg, gammaDeg)
+        return Triple(alphaDeg, betaDeg, composeZXZ(alphaDeg, betaDeg, gammaDeg))
     }
 
     /**
@@ -267,17 +269,22 @@ object DeviceCalibration {
      * R_D_V_new = Rz(α)·Rx(β)·Rz(γ + δ)
      *
      * @param R_W_D Current device rotation matrix from sensors
-     * @param existingCalibration Current R_D_V calibration matrix
-     * @param existingGammaDeg Current γ value (heading offset)
+     * @param existingAlphaDeg Current α (screen twist) to preserve
+     * @param existingBetaDeg Current β (tilt) to preserve
+     * @param existingGammaDeg Current γ (heading offset) to adjust
      * @param gpsHeadingDeg GPS bearing in degrees, 0 = North, clockwise
-     * @return Pair(newGammaDeg, newCalibrationMatrix)
+     * @return Pair(newGammaDeg, newCalibrationMatrix) — new γ and recomposed matrix.
+     *   Takes angles explicitly so no decomposeZXZ roundtrip is needed internally
+     *   (which would lose information at gimbal lock β≈0).
      */
     fun calibrateAzimuth(
         R_W_D: FloatArray,
-        existingCalibration: FloatArray,
+        existingAlphaDeg: Float,
+        existingBetaDeg: Float,
         existingGammaDeg: Float,
         gpsHeadingDeg: Float
     ): Pair<Float, FloatArray> {
+        val existingCalibration = composeZXZ(existingAlphaDeg, existingBetaDeg, existingGammaDeg)
         val R_W_V_current = multiply3x3(R_W_D, existingCalibration)
 
         // Current heading from vehicle forward direction projected horizontally.
@@ -300,11 +307,6 @@ object DeviceCalibration {
         while (newGamma > 180f) newGamma -= 360f
         while (newGamma < -180f) newGamma += 360f
 
-        // Reconstruct calibration: the caller knows α, β, so they can also
-        // recompose, but we return the matrix for convenience.
-        val (alpha, beta, _) = decomposeZXZ(existingCalibration)
-        val newCalibration = composeZXZ(alpha, beta, newGamma)
-
-        return Pair(newGamma, newCalibration)
+        return Pair(newGamma, composeZXZ(existingAlphaDeg, existingBetaDeg, newGamma))
     }
 }

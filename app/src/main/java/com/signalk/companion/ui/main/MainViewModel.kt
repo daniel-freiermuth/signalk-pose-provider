@@ -327,17 +327,15 @@ class MainViewModel @Inject constructor(
                 return@launch
             }
 
-            val existingCalibration = DeviceCalibration.composeZXZ(
+            val (newGamma, _) = DeviceCalibration.calibrateAzimuth(
+                R_W_D,
                 _uiState.value.calibrationAlphaDeg,
                 _uiState.value.calibrationBetaDeg,
-                _uiState.value.calibrationGammaDeg
+                _uiState.value.calibrationGammaDeg,
+                bearing
             )
-            val (newGamma, R_D_V) = DeviceCalibration.calibrateAzimuth(
-                R_W_D, existingCalibration, _uiState.value.calibrationGammaDeg, bearing
-            )
-            val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
-            Log.d(TAG, "calibrateAzimuth: α=$alpha, β=$beta, γ=$gamma (was γ=${_uiState.value.calibrationGammaDeg})")
-            updateCalibrationAngles(alpha, beta, gamma)
+            Log.d(TAG, "calibrateAzimuth: γ=$newGamma (was γ=${_uiState.value.calibrationGammaDeg})")
+            updateCalibrationAngles(_uiState.value.calibrationAlphaDeg, _uiState.value.calibrationBetaDeg, newGamma)
         }
     }
 
@@ -358,11 +356,11 @@ class MainViewModel @Inject constructor(
 
     private fun calibrateTiltInternal() {
         val R_W_D = sensorService.getCurrentRotationMatrix()
+        val existingGamma = _uiState.value.calibrationGammaDeg
         Log.d(TAG, "calibrateTiltInternal: R_W_D=[${R_W_D.joinToString()}]")
-        val R_D_V = DeviceCalibration.calibrateTilt(R_W_D, _uiState.value.calibrationGammaDeg)
-        val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
-        Log.d(TAG, "calibrateTiltInternal: α=$alpha, β=$beta, γ=$gamma")
-        updateCalibrationAngles(alpha, beta, gamma)
+        val (newAlpha, newBeta, _) = DeviceCalibration.calibrateTilt(R_W_D, existingGamma)
+        Log.d(TAG, "calibrateTiltInternal: α=$newAlpha, β=$newBeta, γ=$existingGamma")
+        updateCalibrationAngles(newAlpha, newBeta, existingGamma)
     }
 
     /**
