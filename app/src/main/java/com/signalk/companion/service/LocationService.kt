@@ -31,6 +31,13 @@ class LocationService @Inject constructor() {
     @Throws(SecurityException::class)
     suspend fun startLocationUpdates(context: Context, updateIntervalMs: Long = 500L) {  // Faster default
         Log.d(TAG, "Starting location updates with interval: ${updateIntervalMs}ms")
+        
+        // Clean up any existing callback to prevent double-registration.
+        // Don't null out _locationUpdates to preserve data during reconfiguration.
+        locationCallback?.let { callback ->
+            fusedLocationClient?.removeLocationUpdates(callback)
+        }
+        
         lastLocationTime = 0L // Reset for accurate interval logging
         
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)

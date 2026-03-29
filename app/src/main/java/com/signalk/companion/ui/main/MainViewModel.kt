@@ -14,31 +14,20 @@ import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SensorService
 import com.signalk.companion.service.SignalKStreamingService
 import com.signalk.companion.util.AppSettings
+import com.signalk.companion.util.DeviceCalibration
 import com.signalk.companion.util.UrlParser
 import com.signalk.companion.service.SignalKTransmitter
 import com.signalk.companion.service.AuthenticationService
+import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
-
-enum class DeviceOrientation(val displayName: String, val description: String) {
-    // Device lying flat face-up on a table
-    FLAT_TOP_TO_BOW("Flat — top to bow", "Lying flat, top edge toward bow"),
-    FLAT_LEFT_TO_BOW("Flat — left to bow", "Lying flat, left edge toward bow"),
-    FLAT_RIGHT_TO_BOW("Flat — right to bow", "Lying flat, right edge toward bow"),
-    // Device mounted vertically, back face toward bow, screen facing the sailor
-    VERTICAL_TOP_UP("Vertical — top up", "Upright portrait, back toward bow, top toward sky"),
-    VERTICAL_LEFT_UP("Vertical — left up", "Upright landscape, back toward bow, left edge toward sky"),
-    VERTICAL_RIGHT_UP("Vertical — right up", "Upright landscape, back toward bow, right edge toward sky");
-
-    companion object {
-        val DEFAULT = FLAT_TOP_TO_BOW
-    }
-}
 
 data class MainUiState(
     val isConnected: Boolean = false,
@@ -46,8 +35,9 @@ data class MainUiState(
     val serverUrl: String = "", // Raw user input for the URL field
     val parsedUrl: UrlParser.ParsedUrl? = null,
     val vesselId: String = "self",
-    val deviceOrientation: DeviceOrientation = DeviceOrientation.DEFAULT,
-    val headingOffset: Float = 0.0f, // Heading correction in degrees (+/- for device mounting angle)
+    val calibrationRzDeg: Float = 0f,  // Rotation around Z-axis (device horizontal orientation)
+    val calibrationRyDeg: Float = 0f,  // Rotation around Y-axis (mounting twist)
+    val calibrationRxDeg: Float = 0f,  // Rotation around X-axis (mounting tilt fore/aft)
     // Data transmission options
     val sendLocation: Boolean = true,
     val sendHeading: Boolean = true,
@@ -78,6 +68,11 @@ class MainViewModel @Inject constructor(
     private var bound = false
     private var serviceCollectorJob: Job? = null
     private var authJob: Job? = null
+    private var isAppInForeground = false
+
+    companion object {
+        private const val TAG = "MainViewModel"
+    }
     
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
@@ -154,9 +149,8 @@ class MainViewModel @Inject constructor(
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
     
     init {
-        // Configure sensor service for boat mounting (landscape left by default)
-        sensorService.setDeviceOrientation(DeviceOrientation.DEFAULT)
-        sensorService.setHeadingOffset(0.0f) // No offset by default
+        // Configure sensor service with default (identity) calibration
+        sensorService.setCalibrationAngles(0f, 0f, 0f)
         
         // Still observe location and sensor data for UI display (but not for transmission)
         viewModelScope.launch {
@@ -227,24 +221,164 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun updateDeviceOrientation(orientation: DeviceOrientation) {
-        _uiState.update { it.copy(deviceOrientation = orientation) }
-        // Save to shared preferences
-        AppSettings.setDeviceOrientation(applicationContext, orientation.name)
-        // Update sensor service with new orientation
-        sensorService.setDeviceOrientation(orientation)
-        // If streaming service is bound, update it too
-        streamingService?.updateDeviceOrientation(orientation)
+    fun updateCalibrationAngles(rzDeg: Float, ryDeg: Float, rxDeg: Float) {
+        Log.d(TAG, "updateCalibrationAngles: RZ=$rzDeg, RY=$ryDeg, RX=$rxDeg")
+        _uiState.update { it.copy(calibrationRzDeg = rzDeg, calibrationRyDeg = ryDeg, calibrationRxDeg = rxDeg) }
+        AppSettings.setCalibrationAngles(applicationContext, rzDeg, ryDeg, rxDeg)
+        sensorService.setCalibrationAngles(rzDeg, ryDeg, rxDeg)
+        streamingService?.updateCalibrationAngles(rzDeg, ryDeg, rxDeg)
     }
 
-    fun updateHeadingOffset(offsetDegrees: Float) {
-        _uiState.update { it.copy(headingOffset = offsetDegrees) }
-        // Save to shared preferences
-        AppSettings.setHeadingOffset(applicationContext, offsetDegrees)
-        // Update sensor service with heading offset
-        sensorService.setHeadingOffset(offsetDegrees)
-        // If streaming service is bound, update it too
-        streamingService?.updateHeadingOffset(offsetDegrees)
+    // --- App foreground lifecycle ---
+
+    /**
+     * Called from MainScreen ON_RESUME. Starts sensors and GPS for UI display
+     * and calibration access.
+     */
+    fun onAppForeground() {
+        isAppInForeground = true
+        startForegroundSensors()
+    }
+
+    /**
+     * Called from MainScreen ON_PAUSE. Stops sensors and GPS to save battery,
+     * unless streaming is active (the service needs them).
+     */
+    fun onAppBackground() {
+        isAppInForeground = false
+        if (!_uiState.value.isStreaming) {
+            stopForegroundSensors()
+        }
+    }
+
+    private fun startForegroundSensors() {
+        Log.d(TAG, "Starting foreground sensors")
+        val state = _uiState.value
+        sensorService.startSensorUpdates(
+            updateIntervalMs = state.sensorIntervalMs.toInt(),
+            needsHeading = true,
+            needsPressure = true
+        )
+        viewModelScope.launch {
+            try {
+                locationService.startLocationUpdates(applicationContext, state.locationIntervalMs)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Location permission not granted for foreground display", e)
+            }
+        }
+    }
+
+    private fun stopForegroundSensors() {
+        Log.d(TAG, "Stopping foreground sensors")
+        sensorService.stopSensorUpdates()
+        locationService.stopLocationUpdates()
+    }
+
+    /**
+     * Full calibration: use current sensor reading + GPS heading to compute all three angles.
+     * If no GPS heading is available, only calibrates pitch and roll.
+     */
+    fun calibrateAll() {
+        viewModelScope.launch {
+            Log.d(TAG, "calibrateAll: starting, sensorsActive=${sensorService.isSensorUpdatesActive()}, hasRotation=${sensorService.hasValidRotationMatrix()}")
+            if (!ensureSensorData()) {
+                Log.w(TAG, "calibrateAll: sensor data not available within timeout")
+                _uiState.update { it.copy(error = "Calibration failed: no sensor data available") }
+                return@launch
+            }
+            val R_W_D = sensorService.getCurrentRotationMatrix()
+            Log.d(TAG, "calibrateAll: R_W_D=[${R_W_D.joinToString()}]")
+            val location = locationService.locationUpdates.value
+            val bearing = location?.bearing
+            val speed = location?.speed
+            Log.d(TAG, "calibrateAll: bearing=$bearing, speed=$speed")
+
+            if (bearing != null && speed != null && speed > 0.5f) {
+                val R_W_V = DeviceCalibration.buildFlatHeadingMatrix(bearing)
+                val R_D_V = DeviceCalibration.computeCalibration(R_W_D, R_W_V)
+                val (rz, ry, rx) = DeviceCalibration.decomposeZYX(R_D_V)
+                Log.d(TAG, "calibrateAll: GPS path → RZ=$rz, RY=$ry, RX=$rx")
+                updateCalibrationAngles(rz, ry, rx)
+            } else {
+                Log.d(TAG, "calibrateAll: no GPS heading, falling back to pitch/roll only")
+                calibratePitchRollInternal()
+            }
+        }
+    }
+
+    /**
+     * Calibrate only the azimuth (horizontal heading) using GPS heading.
+     * Preserves existing tilt calibration, even if the vehicle is tilted by waves/wind.
+     */
+    fun calibrateAzimuth() {
+        viewModelScope.launch {
+            if (!ensureSensorData()) {
+                Log.w(TAG, "calibrateAzimuth: sensor data not available within timeout")
+                _uiState.update { it.copy(error = "Calibration failed: no sensor data available") }
+                return@launch
+            }
+            val R_W_D = sensorService.getCurrentRotationMatrix()
+            val location = locationService.locationUpdates.value
+            val bearing = location?.bearing
+            val speed = location?.speed
+            Log.d(TAG, "calibrateAzimuth: bearing=$bearing, speed=$speed")
+            if (bearing == null || speed == null || speed <= 0.5f) {
+                Log.w(TAG, "calibrateAzimuth: GPS heading not available")
+                return@launch
+            }
+
+            val existingCalibration = DeviceCalibration.composeZYX(
+                _uiState.value.calibrationRzDeg,
+                _uiState.value.calibrationRyDeg,
+                _uiState.value.calibrationRxDeg
+            )
+            val R_D_V = DeviceCalibration.calibrateAzimuth(R_W_D, existingCalibration, bearing)
+            val (rz, ry, rx) = DeviceCalibration.decomposeZYX(R_D_V)
+            Log.d(TAG, "calibrateAzimuth: RZ=$rz, RY=$ry, RX=$rx (was RZ=${_uiState.value.calibrationRzDeg})")
+            updateCalibrationAngles(rz, ry, rx)
+        }
+    }
+
+    /**
+     * Calibrate pitch and roll only. Assumes the vehicle is currently flat.
+     * Keeps existing azimuth (Z rotation).
+     */
+    fun calibratePitchRoll() {
+        viewModelScope.launch {
+            if (!ensureSensorData()) {
+                Log.w(TAG, "calibratePitchRoll: sensor data not available within timeout")
+                _uiState.update { it.copy(error = "Calibration failed: no sensor data available") }
+                return@launch
+            }
+            calibratePitchRollInternal()
+        }
+    }
+
+    private fun calibratePitchRollInternal() {
+        val R_W_D = sensorService.getCurrentRotationMatrix()
+        Log.d(TAG, "calibratePitchRollInternal: R_W_D=[${R_W_D.joinToString()}]")
+        val existingCalibration = DeviceCalibration.composeZYX(
+            _uiState.value.calibrationRzDeg,
+            _uiState.value.calibrationRyDeg,
+            _uiState.value.calibrationRxDeg
+        )
+        val R_D_V = DeviceCalibration.calibratePitchRoll(R_W_D, existingCalibration)
+        val (rz, ry, rx) = DeviceCalibration.decomposeZYX(R_D_V)
+        Log.d(TAG, "calibratePitchRollInternal: RZ=$rz, RY=$ry, RX=$rx")
+        updateCalibrationAngles(rz, ry, rx)
+    }
+
+    /**
+     * Waits for sensors to produce a valid rotation matrix.
+     * Sensors should already be running (started in onAppForeground).
+     */
+    private suspend fun ensureSensorData(): Boolean {
+        return withTimeoutOrNull(2000L) {
+            while (!sensorService.hasValidRotationMatrix()) {
+                delay(50)
+            }
+            true
+        } != null
     }
     
     fun updateVesselId(vesselId: String) {
@@ -322,16 +456,13 @@ class MainViewModel @Inject constructor(
         val savedSensorIntervalMs = AppSettings.getSensorIntervalMs(applicationContext)
         val savedUsername = AppSettings.getUsername(applicationContext)
         
-        // Load device orientation and compass settings
-        val savedOrientationName = AppSettings.getDeviceOrientation(applicationContext)
-        val savedOrientation = DeviceOrientation.values()
-            .find { it.name == savedOrientationName } 
-            ?: DeviceOrientation.DEFAULT
-        val savedHeadingOffset = AppSettings.getHeadingOffset(applicationContext)
+        // Load calibration angles
+        val savedRz = AppSettings.getCalibrationRzDeg(applicationContext)
+        val savedRy = AppSettings.getCalibrationRyDeg(applicationContext)
+        val savedRx = AppSettings.getCalibrationRxDeg(applicationContext)
         
-        // Apply orientation and compass settings to sensor service
-        sensorService.setDeviceOrientation(savedOrientation)
-        sensorService.setHeadingOffset(savedHeadingOffset)
+        // Apply calibration to sensor service
+        sensorService.setCalibrationAngles(savedRz, savedRy, savedRx)
         
         _uiState.update { 
             it.copy(
@@ -344,8 +475,9 @@ class MainViewModel @Inject constructor(
                 locationIntervalMs = savedLocationIntervalMs,
                 sensorIntervalMs = savedSensorIntervalMs,
                 username = savedUsername.ifBlank { null },
-                deviceOrientation = savedOrientation,
-                headingOffset = savedHeadingOffset
+                calibrationRzDeg = savedRz,
+                calibrationRyDeg = savedRy,
+                calibrationRxDeg = savedRx
             )
         }
         
@@ -409,6 +541,15 @@ class MainViewModel @Inject constructor(
         _uiState.update { it.copy(isStreaming = false) }
 
         cleanupServiceBinding(unbind = true)
+
+        // Service will asynchronously stop sensors in its stopStreaming().
+        // Restart for foreground display after the service finishes processing.
+        if (isAppInForeground) {
+            viewModelScope.launch {
+                delay(500)
+                startForegroundSensors()
+            }
+        }
     }
     
     fun login(username: String, password: String) {
@@ -436,5 +577,6 @@ class MainViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         cleanupServiceBinding(unbind = true)
+        stopForegroundSensors()
     }
 }

@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Close
@@ -12,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -27,6 +31,7 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.*
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -45,12 +50,19 @@ fun MainScreen(
         )
     )
     
-    // Reload settings when screen becomes visible (e.g., returning from Settings)
+    // Reload settings and manage sensor lifecycle based on app visibility
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.initializeSettings()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    viewModel.initializeSettings()
+                    viewModel.onAppForeground()
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    viewModel.onAppBackground()
+                }
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -127,10 +139,14 @@ fun MainScreen(
             
             // Marine Configuration Card
             MarineConfigCard(
-                deviceOrientation = uiState.deviceOrientation,
-                headingOffset = uiState.headingOffset,
-                onDeviceOrientationChange = viewModel::updateDeviceOrientation,
-                onHeadingOffsetChange = viewModel::updateHeadingOffset
+                calibrationRzDeg = uiState.calibrationRzDeg,
+                calibrationRyDeg = uiState.calibrationRyDeg,
+                calibrationRxDeg = uiState.calibrationRxDeg,
+                onCalibrationAnglesChange = viewModel::updateCalibrationAngles,
+                onCalibrateAll = viewModel::calibrateAll,
+                onCalibrateAzimuth = viewModel::calibrateAzimuth,
+                onCalibratePitchRoll = viewModel::calibratePitchRoll,
+                hasGps = uiState.locationData?.bearing != null && (uiState.locationData?.speed ?: 0f) > 0.5f
             )
             
             // Error Card
@@ -754,22 +770,17 @@ fun SensorAvailabilityRow(sensorName: String, isAvailable: Boolean) {
 }
 
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MarineConfigCard(
-    deviceOrientation: DeviceOrientation,
-    headingOffset: Float,
-    onDeviceOrientationChange: (DeviceOrientation) -> Unit,
-    onHeadingOffsetChange: (Float) -> Unit
+    calibrationRzDeg: Float,
+    calibrationRyDeg: Float,
+    calibrationRxDeg: Float,
+    onCalibrationAnglesChange: (Float, Float, Float) -> Unit,
+    onCalibrateAll: () -> Unit,
+    onCalibrateAzimuth: () -> Unit,
+    onCalibratePitchRoll: () -> Unit,
+    hasGps: Boolean
 ) {
-    var orientationDropdownExpanded by remember { mutableStateOf(false) }
-    var offsetText by remember { mutableStateOf(headingOffset.toString()) }
-    
-    // Update offset text when headingOffset changes externally
-    LaunchedEffect(headingOffset) {
-        offsetText = headingOffset.toString()
-    }
-    
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -782,188 +793,200 @@ fun MarineConfigCard(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
-            
+
             Text(
-                text = "Configure device orientation and compass settings for boat mounting",
+                text = "Device-to-vehicle calibration. Adjust mounting angles or use automatic calibration.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
-            // Device Orientation Selection
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+
+            // Calibration dials — side by side
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "Device Orientation",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
+                CalibrationDial(
+                    label = "Rotation Z (horizontal)",
+                    value = calibrationRzDeg,
+                    onValueChange = { v -> onCalibrationAnglesChange(v, calibrationRyDeg, calibrationRxDeg) },
+                    min = -180f,
+                    max = 180f,
+                    modifier = Modifier.weight(1f)
                 )
-                
-                ExposedDropdownMenuBox(
-                    expanded = orientationDropdownExpanded,
-                    onExpandedChange = { orientationDropdownExpanded = !orientationDropdownExpanded }
+
+                CalibrationDial(
+                    label = "Rotation Y (twist)",
+                    value = calibrationRyDeg,
+                    onValueChange = { v -> onCalibrationAnglesChange(calibrationRzDeg, v, calibrationRxDeg) },
+                    min = -90f,
+                    max = 90f,
+                    modifier = Modifier.weight(1f)
+                )
+
+                CalibrationDial(
+                    label = "Rotation X (tilt fore/aft)",
+                    value = calibrationRxDeg,
+                    onValueChange = { v -> onCalibrationAnglesChange(calibrationRzDeg, calibrationRyDeg, v) },
+                    min = -180f,
+                    max = 180f,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Calibration buttons
+            Text(
+                text = "Automatic Calibration",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onCalibrateAll,
+                    modifier = Modifier.weight(1f)
                 ) {
-                    OutlinedTextField(
-                        value = "${deviceOrientation.displayName} (${deviceOrientation.description})",
-                        onValueChange = { },
-                        readOnly = true,
-                        label = { Text("Mounting Orientation") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(
-                                expanded = orientationDropdownExpanded
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    )
-                    
-                    ExposedDropdownMenu(
-                        expanded = orientationDropdownExpanded,
-                        onDismissRequest = { orientationDropdownExpanded = false }
-                    ) {
-                        DeviceOrientation.values().forEach { orientation ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(
-                                            text = orientation.displayName,
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
-                                        Text(
-                                            text = orientation.description,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    onDeviceOrientationChange(orientation)
-                                    orientationDropdownExpanded = false
-                                }
-                            )
-                        }
-                    }
+                    Text("Calibrate All")
+                }
+
+                Button(
+                    onClick = onCalibrateAzimuth,
+                    enabled = hasGps,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Azimuth Only")
+                }
+
+                Button(
+                    onClick = onCalibratePitchRoll,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Pitch/Roll Only")
                 }
             }
-            
-            // Heading Offset Configuration
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+
+            if (!hasGps) {
                 Text(
-                    text = "Heading Offset Correction",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                
-                Text(
-                    text = "Correct for device mounting angle relative to boat centerline",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "Move to enable azimuth calibration (needs GPS heading)",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = offsetText,
-                        onValueChange = { 
-                            offsetText = it
-                            // Try to parse and update immediately
-                            it.toFloatOrNull()?.let { value ->
-                                if (value >= -180f && value <= 180f) {
-                                    onHeadingOffsetChange(value)
-                                }
-                            }
-                        },
-                        label = { Text("Offset (°)") },
-                        placeholder = { Text("0.0") },
-                        suffix = { Text("°") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    
-                    Text(
-                        text = "Range: -180° to +180°",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                
-                // Quick preset buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val presets = listOf(-15f, -10f, -5f, 0f, 5f, 10f, 15f)
-                    presets.forEach { preset ->
-                        OutlinedButton(
-                            onClick = { 
-                                onHeadingOffsetChange(preset)
-                                offsetText = preset.toString()
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = if (preset == 0f) "0°" else "${preset.toInt()}°",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
             }
-            
-            // Configuration Summary
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                )
+
+            // Reset button
+            OutlinedButton(
+                onClick = { onCalibrationAnglesChange(0f, 0f, 0f) },
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "🧭",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            text = "Current Configuration",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    
-                    Text(
-                        text = "• Orientation: ${deviceOrientation.displayName}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    
-                    Text(
-                        text = "• Heading offset: ${if (headingOffset == 0f) "None" else "${headingOffset}°"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    
-                    if (headingOffset != 0f) {
-                        Text(
-                            text = "Example: Device shows 015°, boat heading = 015° ${if (headingOffset > 0) "+" else ""}${headingOffset}° = ${String.format("%.0f", (15 + headingOffset + 360) % 360)}°",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
+                Text("Reset to Identity")
             }
         }
+    }
+}
+
+@Composable
+private fun CalibrationDial(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    min: Float,
+    max: Float,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        
+        // Value display  
+        Text(
+            text = "${formatAngle(value)}°",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        
+        // Extract colors outside Canvas lambda
+        val outlineColor = MaterialTheme.colorScheme.outline
+        val primaryColor = MaterialTheme.colorScheme.primary
+        
+        // Circular dial — clickable and draggable to adjust
+        Canvas(
+            modifier = Modifier
+                .size(100.dp)
+                .pointerInput(onValueChange, min, max) {
+                    detectDragGestures { change, _ ->
+                        val x = change.position.x - size.width / 2
+                        val y = change.position.y - size.height / 2
+                        val angleRad = atan2(y, x)
+                        // atan2 gives -π to π, convert to 0-360°
+                        var angleDeg = Math.toDegrees(angleRad.toDouble()).toFloat()
+                        if (angleDeg < 0) angleDeg += 360
+                        
+                        // Map 0-360° to the min-max range
+                        val normalized = angleDeg / 360f
+                        val newValue = min + normalized * (max - min)
+                        val finalValue = newValue.coerceIn(min, max)
+                        android.util.Log.d("CalibrationDial", "$label: angle=$angleDeg° → value=$finalValue")
+                        onValueChange(finalValue)
+                    }
+                }
+        ) {
+            val centerX = size.width / 2
+            val centerY = size.height / 2
+            val circleRadius = size.minDimension / 2 - 4.dp.toPx()
+            
+            // Draw outer circle
+            drawCircle(
+                color = outlineColor,
+                radius = circleRadius,
+                center = androidx.compose.ui.geometry.Offset(centerX, centerY),
+                style = Stroke(width = 2.dp.toPx())
+            )
+            
+            // Draw angle indicator
+            val normalizedValue = (value - min) / (max - min)
+            val angleRad = Math.toRadians(normalizedValue * 360.0)
+            val indicatorRadius = circleRadius - 10.dp.toPx()
+            val endX = centerX + (indicatorRadius * cos(angleRad)).toFloat()
+            val endY = centerY + (indicatorRadius * sin(angleRad)).toFloat()
+            
+            drawLine(
+                color = primaryColor,
+                start = androidx.compose.ui.geometry.Offset(centerX, centerY),
+                end = androidx.compose.ui.geometry.Offset(endX, endY),
+                strokeWidth = 3.dp.toPx()
+            )
+            
+            // Draw cardinal point markers
+            val markerRadius = circleRadius
+            listOf(0.0, 90.0, 180.0, 270.0).forEach { angle ->
+                val rad = Math.toRadians(angle)
+                val x = centerX + (markerRadius * cos(rad)).toFloat()
+                val y = centerY + (markerRadius * sin(rad)).toFloat()
+                drawCircle(
+                    color = outlineColor,
+                    radius = 2.5.dp.toPx(),
+                    center = androidx.compose.ui.geometry.Offset(x, y)
+                )
+            }
+        }
+    }
+}
+
+private fun formatAngle(degrees: Float): String {
+    return if (degrees == degrees.toLong().toFloat()) {
+        degrees.toLong().toString()
+    } else {
+        String.format("%.1f", degrees)
     }
 }
 

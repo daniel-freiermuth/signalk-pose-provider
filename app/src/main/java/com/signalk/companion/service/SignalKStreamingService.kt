@@ -14,7 +14,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.signalk.companion.MainActivity
 import com.signalk.companion.R
-import com.signalk.companion.ui.main.DeviceOrientation
 import com.signalk.companion.util.BatteryOptimizationHelper
 import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.UrlParser
@@ -396,14 +395,9 @@ class SignalKStreamingService : Service() {
         }
     }
 
-    fun updateDeviceOrientation(orientation: DeviceOrientation) {
-        sensorService.setDeviceOrientation(orientation)
-        Log.d(TAG, "Updated device orientation to: ${orientation.displayName}")
-    }
-
-    fun updateHeadingOffset(offsetDegrees: Float) {
-        sensorService.setHeadingOffset(offsetDegrees)
-        Log.d(TAG, "Updated heading offset to: ${offsetDegrees}°")
+    fun updateCalibrationAngles(rzDeg: Float, ryDeg: Float, rxDeg: Float) {
+        sensorService.setCalibrationAngles(rzDeg, ryDeg, rxDeg)
+        Log.d(TAG, "Updated calibration angles: RZ=${rzDeg}°, RY=${ryDeg}°, RX=${rxDeg}°")
     }
 
     private fun updateTransmissionStats() {
@@ -469,6 +463,11 @@ class SignalKStreamingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "SignalK Streaming Service destroyed")
+        // Safety-net: stop sensors if the service is destroyed without ViewModel cleanup
+        // (e.g., OS-restart path with no Activity). ViewModel will restart them for
+        // foreground display if the app is still visible.
+        sensorService.stopSensorUpdates()
+        locationService.stopLocationUpdates()
         serviceScope.cancel()
     }
 }

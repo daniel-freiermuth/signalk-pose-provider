@@ -8,7 +8,7 @@ import android.hardware.SensorManager
 import android.hardware.GeomagneticField
 import android.util.Log
 import com.signalk.companion.data.model.SensorData
-import com.signalk.companion.ui.main.DeviceOrientation
+import com.signalk.companion.util.DeviceCalibration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,9 +45,10 @@ class SensorService @Inject constructor(
     // Filtering for smooth data
     private val alpha = 0.8f  // Low-pass filter constant
     
-    // Marine navigation configuration
-    private var deviceOrientation = DeviceOrientation.DEFAULT
-    private var headingOffsetDegrees = 0.0f // Correction for device mounting angle
+    // Marine navigation configuration: device-to-vehicle calibration matrix (R_D_V)
+    // R_W_V = R_W_D * calibrationMatrix gives vehicle attitude in world frame.
+    private var calibrationMatrix = DeviceCalibration.IDENTITY_3X3.copyOf()
+    @Volatile private var hasRotationMatrix = false
     
     // Current sensor delay setting and rate limiting
     private var currentSensorDelay = SensorManager.SENSOR_DELAY_UI
@@ -75,6 +76,7 @@ class SensorService @Inject constructor(
         this.updateIntervalMs = updateIntervalMs
         currentSensorDelay = getSensorDelayFromInterval(updateIntervalMs)
         lastUpdateTime = 0L // Reset to force immediate first update
+        hasRotationMatrix = false // Force waiting for fresh sensor data
         Log.d(TAG, "Starting sensor updates with interval ${updateIntervalMs}ms (delay: $currentSensorDelay, heading=$needsHeading, pressure=$needsPressure)")
         
         // Register sensors based on what's needed
@@ -128,15 +130,14 @@ class SensorService @Inject constructor(
         startSensorUpdates(updateIntervalMs)
     }
 
-    fun setDeviceOrientation(orientation: DeviceOrientation) {
-        Log.d(TAG, "Setting device orientation to: ${orientation.displayName}")
-        this.deviceOrientation = orientation
+    fun setCalibrationAngles(rzDeg: Float, ryDeg: Float, rxDeg: Float) {
+        Log.d(TAG, "Setting calibration angles: RZ=${rzDeg}°, RY=${ryDeg}°, RX=${rxDeg}°")
+        calibrationMatrix = DeviceCalibration.composeZYX(rzDeg, ryDeg, rxDeg)
     }
 
-    fun setHeadingOffset(offsetDegrees: Float) {
-        Log.d(TAG, "Setting heading offset to: ${offsetDegrees}°")
-        this.headingOffsetDegrees = offsetDegrees
-    }
+    fun getCurrentRotationMatrix(): FloatArray = rotationMatrix.copyOf()
+
+    fun hasValidRotationMatrix(): Boolean = hasRotationMatrix
 
     fun stopSensorUpdates() {
         Log.d(TAG, "Stopping sensor updates")
@@ -201,83 +202,20 @@ class SensorService @Inject constructor(
 
     private fun updateOrientation() {
         if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, magneticField)) {
+            hasRotationMatrix = true
             
-            // Apply device orientation compensation for marine mounting
-            val orientationMatrix = FloatArray(9)
-            when (deviceOrientation) {
-                DeviceOrientation.FLAT_TOP_TO_BOW -> {
-                    // Device flat face-up, top edge toward bow.
-                    // X=+X(right)→starboard, Y=+Y(top)→bow, Z=+Z(screen)→sky. No remap needed.
-                    System.arraycopy(rotationMatrix, 0, orientationMatrix, 0, 9)
-                }
-                DeviceOrientation.FLAT_LEFT_TO_BOW -> {
-                    // Device flat face-up, left edge toward bow.
-                    // X=+Y(top)→starboard, Y=−X(left)→bow, Z=+Z(screen)→sky.
-                    SensorManager.remapCoordinateSystem(
-                        rotationMatrix,
-                        SensorManager.AXIS_MINUS_Y,
-                        SensorManager.AXIS_X,
-                        orientationMatrix
-                    )
-                }
-                DeviceOrientation.FLAT_RIGHT_TO_BOW -> {
-                    // Device flat face-up, right edge toward bow.
-                    // X=−Y(bottom)→starboard, Y=+X(right)→bow, Z=+Z(screen)→sky.
-                    SensorManager.remapCoordinateSystem(
-                        rotationMatrix,
-                        SensorManager.AXIS_Y,
-                        SensorManager.AXIS_MINUS_X,
-                        orientationMatrix
-                    )
-                }
-                DeviceOrientation.VERTICAL_TOP_UP -> {
-                    // Device upright portrait, back toward bow, top toward sky.
-                    // X=+X(right)→starboard, Y=−Z(back)→bow, Z=+Y(top)→sky.
-                    SensorManager.remapCoordinateSystem(
-                        rotationMatrix,
-                        SensorManager.AXIS_X,
-                        SensorManager.AXIS_Z,
-                        orientationMatrix
-                    )
-                }
-                DeviceOrientation.VERTICAL_LEFT_UP -> {
-                    // Device on its right side, back toward bow, left edge toward sky.
-                    // X=+Y(top)→starboard, Y=−Z(back)→bow, Z=−X(left)→sky.
-                    SensorManager.remapCoordinateSystem(
-                        rotationMatrix,
-                        SensorManager.AXIS_MINUS_Z,
-                        SensorManager.AXIS_X,
-                        orientationMatrix
-                    )
-                }
-                DeviceOrientation.VERTICAL_RIGHT_UP -> {
-                    // Device on its left side, back toward bow, right edge toward sky.
-                    // X=−Y(bottom)→starboard, Y=−Z(back)→bow, Z=+X(right)→sky.
-                    SensorManager.remapCoordinateSystem(
-                        rotationMatrix,
-                        SensorManager.AXIS_Z,
-                        SensorManager.AXIS_MINUS_X,
-                        orientationMatrix
-                    )
-                }
-            }
+            // Apply calibration: R_W_V = R_W_D * R_D_V
+            val vehicleMatrix = DeviceCalibration.multiply3x3(rotationMatrix, calibrationMatrix)
             
-            // Get orientation values from the corrected matrix
-            SensorManager.getOrientation(orientationMatrix, orientation)
+            // Extract orientation from vehicle attitude matrix
+            SensorManager.getOrientation(vehicleMatrix, orientation)
             
-            var magneticHeading = orientation[0]  // Azimuth in radians (already tilt-compensated by Android)
-            val rawPitch = orientation[1]        // Pitch relative to Earth horizontal
-            val roll = orientation[2]            // Roll relative to Earth horizontal
-            
-            // Note: magneticHeading is already tilt-compensated by SensorManager.getRotationMatrix()
-            // which uses gravity vector to define Earth's vertical axis and projects the magnetic
-            // field onto the horizontal plane via cross product. No additional compensation needed.
+            var magneticHeading = orientation[0]  // Azimuth in radians
+            val rawPitch = orientation[1]          // Pitch relative to Earth horizontal
+            val roll = orientation[2]              // Roll relative to Earth horizontal
             
             // Negate pitch: Android positive = bow down; nautical positive = bow up
             val pitch = -rawPitch
-            
-            // Apply heading offset correction for device mounting angle
-            magneticHeading = applyHeadingOffset(magneticHeading)
             
             // Normalize heading to 0-2π range
             magneticHeading = normalizeHeading(magneticHeading)
@@ -308,12 +246,6 @@ class SensorService @Inject constructor(
         return normalized
     }
 
-    private fun applyHeadingOffset(heading: Float): Float {
-        // Convert offset from degrees to radians and apply correction
-        val offsetRadians = Math.toRadians(headingOffsetDegrees.toDouble()).toFloat()
-        return heading + offsetRadians
-    }
-    
     private fun calculateTrueHeading(magneticHeading: Float): Float {
         // Get current location from LocationService
         val locationData = locationService.locationUpdates.value

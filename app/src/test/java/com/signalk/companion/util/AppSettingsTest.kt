@@ -27,52 +27,40 @@ class AppSettingsTest {
     }
 
     @Test
-    fun testSetDeviceOrientation_rejectsBlankString() {
+    fun testSetCalibrationAngles_rejectsRzOutOfRange() {
         assertThrows<IllegalArgumentException> {
-            AppSettings.setDeviceOrientation(mockContext, "")
+            AppSettings.setCalibrationAngles(mockContext, 181f, 0f, 0f)
         }
     }
 
     @Test
-    fun testSetDeviceOrientation_rejectsWhitespaceString() {
+    fun testSetCalibrationAngles_rejectsRyOutOfRange() {
         assertThrows<IllegalArgumentException> {
-            AppSettings.setDeviceOrientation(mockContext, "   ")
+            AppSettings.setCalibrationAngles(mockContext, 0f, 91f, 0f)
         }
     }
 
     @Test
-    fun testSetHeadingOffset_rejectsTooLargePositiveValue() {
+    fun testSetCalibrationAngles_rejectsRxOutOfRange() {
         assertThrows<IllegalArgumentException> {
-            AppSettings.setHeadingOffset(mockContext, 361f)
+            AppSettings.setCalibrationAngles(mockContext, 0f, 0f, -181f)
         }
     }
 
     @Test
-    fun testSetHeadingOffset_rejectsTooLargeNegativeValue() {
-        assertThrows<IllegalArgumentException> {
-            AppSettings.setHeadingOffset(mockContext, -361f)
-        }
+    fun testSetCalibrationAngles_acceptsValidValues() {
+        AppSettings.setCalibrationAngles(mockContext, 90f, 45f, -30f)
+        verify(mockEditor).putFloat(eq("calibration_rz_deg"), eq(90f))
+        verify(mockEditor).putFloat(eq("calibration_ry_deg"), eq(45f))
+        verify(mockEditor).putFloat(eq("calibration_rx_deg"), eq(-30f))
     }
 
     @Test
-    fun testSetHeadingOffset_acceptsValidPositiveValue() {
-        AppSettings.setHeadingOffset(mockContext, 180f)
-        verify(mockEditor).putFloat(anyString(), eq(180f))
-    }
-
-    @Test
-    fun testSetHeadingOffset_acceptsValidNegativeValue() {
-        AppSettings.setHeadingOffset(mockContext, -180f)
-        verify(mockEditor).putFloat(anyString(), eq(-180f))
-    }
-
-    @Test
-    fun testSetHeadingOffset_acceptsBoundaryValues() {
-        AppSettings.setHeadingOffset(mockContext, 360f)
-        verify(mockEditor).putFloat(anyString(), eq(360f))
-        
-        AppSettings.setHeadingOffset(mockContext, -360f)
-        verify(mockEditor).putFloat(anyString(), eq(-360f))
+    fun testSetCalibrationAngles_acceptsBoundaryValues() {
+        AppSettings.setCalibrationAngles(mockContext, 180f, 90f, 180f)
+        verify(mockEditor).putFloat(eq("calibration_rz_deg"), eq(180f))
+        verify(mockEditor).putFloat(eq("calibration_ry_deg"), eq(90f))
+        verify(mockEditor).putFloat(eq("calibration_rx_deg"), eq(180f))
     }
 
     @Test

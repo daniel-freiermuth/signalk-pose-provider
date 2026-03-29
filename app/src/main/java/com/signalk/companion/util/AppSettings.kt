@@ -14,8 +14,9 @@ object AppSettings {
     private const val KEY_SERVER_URL = "server_url"
     private const val KEY_USERNAME = "username"
     private const val KEY_PASSWORD = "password"
-    private const val KEY_DEVICE_ORIENTATION = "device_orientation"
-    private const val KEY_HEADING_OFFSET = "heading_offset"
+    private const val KEY_CALIBRATION_RZ = "calibration_rz_deg"
+    private const val KEY_CALIBRATION_RY = "calibration_ry_deg"
+    private const val KEY_CALIBRATION_RX = "calibration_rx_deg"
     private const val KEY_LOCATION_INTERVAL_MS = "location_interval_ms"
     private const val KEY_SENSOR_INTERVAL_MS = "sensor_interval_ms"
     private const val KEY_WAS_STREAMING = "was_streaming"
@@ -26,8 +27,7 @@ object AppSettings {
     private const val DEFAULT_SEND_HEADING = true
     private const val DEFAULT_SEND_PRESSURE = true
     private const val DEFAULT_SERVER_URL = ""
-    private const val DEFAULT_DEVICE_ORIENTATION = "LANDSCAPE_LEFT"
-    private const val DEFAULT_HEADING_OFFSET = 0.0f
+    private const val DEFAULT_CALIBRATION_ANGLE = 0.0f
     private const val DEFAULT_LOCATION_INTERVAL_MS = 1000L
     private const val DEFAULT_SENSOR_INTERVAL_MS = 250L
     
@@ -193,43 +193,28 @@ object AppSettings {
         return username.isNotBlank() && password.isNotBlank()
     }
     
-    // Device orientation and compass settings
-    
-    /**
-     * Get the device orientation setting
-     * @return device orientation name (e.g., "LANDSCAPE_LEFT", "PORTRAIT")
-     */
-    fun getDeviceOrientation(context: Context): String {
-        return getPreferences(context).getString(KEY_DEVICE_ORIENTATION, DEFAULT_DEVICE_ORIENTATION) 
-            ?: DEFAULT_DEVICE_ORIENTATION
+    // Device-to-vehicle calibration angles (ZYX Euler decomposition)
+
+    fun getCalibrationRzDeg(context: Context): Float {
+        return getPreferences(context).getFloat(KEY_CALIBRATION_RZ, DEFAULT_CALIBRATION_ANGLE)
     }
-    
-    /**
-     * Set the device orientation
-     * @param orientation the orientation name (e.g., "LANDSCAPE_LEFT", "PORTRAIT")
-     */
-    fun setDeviceOrientation(context: Context, orientation: String) {
-        require(orientation.isNotBlank()) { "Device orientation cannot be blank" }
+
+    fun getCalibrationRyDeg(context: Context): Float {
+        return getPreferences(context).getFloat(KEY_CALIBRATION_RY, DEFAULT_CALIBRATION_ANGLE)
+    }
+
+    fun getCalibrationRxDeg(context: Context): Float {
+        return getPreferences(context).getFloat(KEY_CALIBRATION_RX, DEFAULT_CALIBRATION_ANGLE)
+    }
+
+    fun setCalibrationAngles(context: Context, rzDeg: Float, ryDeg: Float, rxDeg: Float) {
+        require(rzDeg in -180f..180f) { "RZ must be between -180 and 180 degrees" }
+        require(ryDeg in -90f..90f) { "RY must be between -90 and 90 degrees" }
+        require(rxDeg in -180f..180f) { "RX must be between -180 and 180 degrees" }
         getPreferences(context).edit()
-            .putString(KEY_DEVICE_ORIENTATION, orientation)
-            .apply()
-    }
-    
-    /**
-     * Get the heading offset in degrees
-     */
-    fun getHeadingOffset(context: Context): Float {
-        return getPreferences(context).getFloat(KEY_HEADING_OFFSET, DEFAULT_HEADING_OFFSET)
-    }
-    
-    /**
-     * Set the heading offset in degrees
-     * @param offsetDegrees heading correction offset (+/- degrees)
-     */
-    fun setHeadingOffset(context: Context, offsetDegrees: Float) {
-        require(offsetDegrees in -360f..360f) { "Heading offset must be between -360 and 360 degrees" }
-        getPreferences(context).edit()
-            .putFloat(KEY_HEADING_OFFSET, offsetDegrees)
+            .putFloat(KEY_CALIBRATION_RZ, rzDeg)
+            .putFloat(KEY_CALIBRATION_RY, ryDeg)
+            .putFloat(KEY_CALIBRATION_RX, rxDeg)
             .apply()
     }
 
