@@ -874,14 +874,6 @@ fun MarineConfigCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            // Reset button
-            OutlinedButton(
-                onClick = { onCalibrationAnglesChange(0f, 0f, 0f) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Reset to Identity")
-            }
         }
     }
 }
