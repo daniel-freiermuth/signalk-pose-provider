@@ -40,7 +40,6 @@ class SensorService @Inject constructor(
     private var gravity = FloatArray(3)
     private var gyroscope_data = FloatArray(3)
     private var rotationMatrix = FloatArray(9)
-    private var orientation = FloatArray(3)
 
     // Filtering for smooth data
     private val alpha = 0.8f  // Low-pass filter constant
@@ -212,15 +211,29 @@ class SensorService @Inject constructor(
             // Apply calibration: R_W_V = R_W_D * R_D_V
             val vehicleMatrix = DeviceCalibration.multiply3x3(rotationMatrix, calibrationMatrix)
             
-            // Extract orientation from vehicle attitude matrix
-            SensorManager.getOrientation(vehicleMatrix, orientation)
-            
-            var magneticHeading = orientation[0]  // Azimuth in radians
-            val rawPitch = orientation[1]          // Pitch relative to Earth horizontal
-            val roll = orientation[2]              // Roll relative to Earth horizontal
-            
-            // Negate pitch: Android positive = bow down; nautical positive = bow up
-            val pitch = -rawPitch
+            // Extract orientation from vehicle attitude matrix.
+            //
+            // vehicleMatrix columns (row-major, ENU world frame):
+            //   col 0 = vehicle X = starboard direction in world → [R[0], R[3], R[6]]
+            //   col 1 = vehicle Y = bow direction in world      → [R[1], R[4], R[7]]
+            //   col 2 = vehicle Z = up direction in world       → [R[2], R[5], R[8]]
+            //
+            // We extract angles directly from the matrix instead of using
+            // SensorManager.getOrientation(), which assumes device portrait-frame
+            // semantics and gives wrong results when the vehicle axes don't align
+            // with the phone's natural portrait orientation.
+
+            // Heading: bearing of bow projected onto the horizontal plane.
+            // atan2(East_component_of_bow, North_component_of_bow)
+            var magneticHeading = atan2(vehicleMatrix[1].toDouble(), vehicleMatrix[4].toDouble()).toFloat()
+
+            // Pitch: elevation of bow above horizontal (bow-up positive, nautical convention).
+            // Up_component_of_bow = vehicleMatrix[7] (row 2, col 1); asin gives elevation angle.
+            val pitch = asin(vehicleMatrix[7].coerceIn(-1f, 1f).toDouble()).toFloat()
+
+            // Roll: starboard-down positive (nautical convention).
+            // atan2(−Up_component_of_stbd, Up_component_of_up) where Up_of_stbd = vehicleMatrix[6].
+            val roll = atan2(-vehicleMatrix[6].toDouble(), vehicleMatrix[8].toDouble()).toFloat()
             
             // Normalize heading to 0-2π range
             magneticHeading = normalizeHeading(magneticHeading)
