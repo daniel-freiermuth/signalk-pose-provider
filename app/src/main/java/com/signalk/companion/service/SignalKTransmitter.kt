@@ -532,6 +532,15 @@ class SignalKTransmitter @Inject constructor(
         }
         
         Log.d(TAG, "Starting WebSocket connection...")
+
+        // If we have no token but stored credentials exist, try to login now.
+        // This covers the case where the startup auto-login raced with a server restart
+        // and the server wasn't ready yet.  We attempt this before opening the WebSocket
+        // so the WS upgrade request can carry a valid Authorization header immediately.
+        if (authenticationService.getAuthToken() == null && authenticationService.hasStoredCredentials()) {
+            Log.d(TAG, "No token available — attempting login before WebSocket connection")
+            authenticationService.tryRefreshToken()
+        }
         
         withContext(Dispatchers.IO) {
             try {
