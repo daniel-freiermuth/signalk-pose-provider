@@ -251,7 +251,8 @@ class SensorService @Inject constructor(
                     magneticHeading = magneticHeading,
                     trueHeading = trueHeading,
                     pitch = pitch,
-                    roll = roll
+                    roll = roll,
+                    yaw = magneticHeading
                 ) 
             }
         }
@@ -301,15 +302,11 @@ class SensorService @Inject constructor(
     }
 
     private fun updateGyroscopeData() {
-        // Rate of turn is typically the z-axis rotation (yaw rate)
+        // Rate of turn is the z-axis rotation rate (yaw rate)
         val rateOfTurn = gyroscope_data[2]  // rad/s
-        val yaw = gyroscope_data[2]  // Could be integrated over time for absolute yaw
         
         updateSensorData { 
-            copy(
-                rateOfTurn = rateOfTurn,
-                yaw = yaw
-            ) 
+            copy(rateOfTurn = rateOfTurn) 
         }
     }
 
