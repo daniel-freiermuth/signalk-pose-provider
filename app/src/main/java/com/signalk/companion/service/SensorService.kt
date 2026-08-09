@@ -251,7 +251,8 @@ class SensorService @Inject constructor(
                     magneticHeading = magneticHeading,
                     trueHeading = trueHeading,
                     pitch = pitch,
-                    roll = roll
+                    roll = roll,
+                    yaw = magneticHeading
                 ) 
             }
         }
@@ -301,15 +302,18 @@ class SensorService @Inject constructor(
     }
 
     private fun updateGyroscopeData() {
-        // Rate of turn is typically the z-axis rotation (yaw rate)
-        val rateOfTurn = gyroscope_data[2]  // rad/s
-        val yaw = gyroscope_data[2]  // Could be integrated over time for absolute yaw
+        // Transform gyroscope data from device frame to vehicle frame using the
+        // calibration matrix.  R_D_V maps vehicle→device, so its transpose
+        // (= inverse) maps device→vehicle.
+        val vehicleGyro = DeviceCalibration.multiplyMatrixVector3(
+            DeviceCalibration.transpose3x3(calibrationMatrix),
+            gyroscope_data
+        )
+        // Rate of turn is the vehicle-frame Z-axis (yaw) rotation rate.
+        val rateOfTurn = vehicleGyro[2]  // rad/s
         
         updateSensorData { 
-            copy(
-                rateOfTurn = rateOfTurn,
-                yaw = yaw
-            ) 
+            copy(rateOfTurn = rateOfTurn) 
         }
     }
 

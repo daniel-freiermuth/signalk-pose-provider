@@ -171,6 +171,17 @@ object DeviceCalibration {
     }
 
     /**
+     * Multiply a 3x3 matrix (row-major) by a 3-element vector. Returns M * v.
+     */
+    fun multiplyMatrixVector3(M: FloatArray, v: FloatArray): FloatArray {
+        return floatArrayOf(
+            M[0] * v[0] + M[1] * v[1] + M[2] * v[2],
+            M[3] * v[0] + M[4] * v[1] + M[5] * v[2],
+            M[6] * v[0] + M[7] * v[1] + M[8] * v[2]
+        )
+    }
+
+    /**
      * Transpose a 3x3 matrix (row-major). For rotation matrices, transpose == inverse.
      */
     fun transpose3x3(R: FloatArray): FloatArray {

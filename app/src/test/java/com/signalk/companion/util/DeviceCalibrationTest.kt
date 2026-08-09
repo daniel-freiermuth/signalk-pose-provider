@@ -892,4 +892,74 @@ class DeviceCalibrationTest {
         assertEquals(0f, R_W_V[6], 1e-3f)
         assertEquals(0f, R_W_V[7], 1e-3f)
     }
+
+    // --- multiplyMatrixVector3 tests ---
+
+    @Test
+    fun `multiplyMatrixVector3 identity preserves vector`() {
+        val v = floatArrayOf(1f, 2f, 3f)
+        val result = DeviceCalibration.multiplyMatrixVector3(DeviceCalibration.IDENTITY_3X3, v)
+        assertEquals(1f, result[0], EPSILON)
+        assertEquals(2f, result[1], EPSILON)
+        assertEquals(3f, result[2], EPSILON)
+    }
+
+    @Test
+    fun `multiplyMatrixVector3 rotation permutes axes`() {
+        // Rx(90°): x→x, y→z, z→-y
+        val rx90 = DeviceCalibration.composeZYX(0f, 0f, 90f)
+        val v = floatArrayOf(0f, 0f, 1f)
+        val result = DeviceCalibration.multiplyMatrixVector3(rx90, v)
+        assertEquals(0f, result[0], EPSILON)
+        assertEquals(-1f, result[1], EPSILON)
+        assertEquals(0f, result[2], EPSILON)
+    }
+
+    // --- Gyroscope calibration regression tests ---
+
+    @Test
+    fun `gyroscope Z in vertical bulkhead mount maps to vehicle pitch not yaw`() {
+        // Phone mounted on a vertical bulkhead, screen forward (β=90°, α=γ=0).
+        // R_D_V maps vehicle→device; transpose maps device→vehicle.
+        val calibration = DeviceCalibration.composeZXZ(0f, 90f, 0f)
+        val calibInv = DeviceCalibration.transpose3x3(calibration)
+
+        // Gyroscope reads 1 rad/s around device Z (out of screen = toward bow).
+        val gyroDevice = floatArrayOf(0f, 0f, 1f)
+        val gyroVehicle = DeviceCalibration.multiplyMatrixVector3(calibInv, gyroDevice)
+
+        // Vehicle Z (yaw) rate must be 0 — the rotation is around the bow axis (pitch).
+        assertEquals(0f, gyroVehicle[2], EPSILON,
+            "Device Z rotation must NOT appear as vehicle yaw in vertical mount")
+        // Vehicle Y (pitch) rate = 1 rad/s.
+        assertEquals(1f, gyroVehicle[1], EPSILON,
+            "Device Z rotation should map to vehicle pitch (Y) in vertical mount")
+    }
+
+    @Test
+    fun `gyroscope Y in vertical bulkhead mount maps to vehicle yaw`() {
+        // Same vertical mount.  Device Y (toward top edge = upward = vehicle Z).
+        val calibration = DeviceCalibration.composeZXZ(0f, 90f, 0f)
+        val calibInv = DeviceCalibration.transpose3x3(calibration)
+
+        // Gyroscope reads 1 rad/s around device Y (top edge).
+        val gyroDevice = floatArrayOf(0f, 1f, 0f)
+        val gyroVehicle = DeviceCalibration.multiplyMatrixVector3(calibInv, gyroDevice)
+
+        // In this mount device Y points up → vehicle Z (yaw).
+        // R_D_V transpose maps device Y to vehicle -Z (sign from Rx(90°)).
+        assertEquals(-1f, gyroVehicle[2], EPSILON,
+            "Device Y rotation must appear as vehicle yaw in vertical mount")
+    }
+
+    @Test
+    fun `identity calibration leaves gyroscope unchanged`() {
+        val calibInv = DeviceCalibration.transpose3x3(DeviceCalibration.IDENTITY_3X3)
+        val gyroDevice = floatArrayOf(0.1f, 0.2f, 0.5f)
+        val gyroVehicle = DeviceCalibration.multiplyMatrixVector3(calibInv, gyroDevice)
+
+        // Portrait mount: device axes == vehicle axes, rateOfTurn = gyro Z = 0.5.
+        assertEquals(0.5f, gyroVehicle[2], EPSILON,
+            "In portrait mount (identity), device Z should equal vehicle Z")
+    }
 }
