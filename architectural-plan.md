@@ -172,6 +172,10 @@ fields and survive the switch.
 Items to fix/remove **before** new construction, so the repo doesn't carry two
 architectures:
 
+- [x] **Write the frame-conventions document** — frames, rotation notation, sign conventions, angle ranges, time base, unit/naming rules, and normative reference poses. Promoted from §7 into M0 on review: it gates M1 coding exactly the way the rest of this checklist does, and frame sign errors are where projects like this die. → [`frame-conventions.md`](frame-conventions.md) *(done)*
+- [ ] Fix `navigation.rateOfTurn` sign and frame (audit A1 in `frame-conventions.md` §9): it currently publishes the **raw device-frame** gyro Z rate — inverted against SignalK's +ve-to-starboard convention, and additionally wrong by the mount tilt whenever the phone isn't mounted flat. Needs the mount rotation (`ω_V = R_D_Vᵀ ω_D`) and the nautical sign flip (`rateOfTurn = −ω_z^V`).
+- [ ] Stop publishing `navigation.attitude.yaw` (audit A2): the field currently carries a gyro *rate* (rad/s) but is published as an *angle* (rad). Publish `roll`/`pitch` only until M1 supplies a real yaw.
+- [ ] Replace `normalizeHeading`'s `while` loops with the branch-free form (audit A5) — the current version is an unbounded loop, i.e. a hang, on a NaN input.
 - [ ] Mark `compass-calibration-design.md` as superseded (banner + link here); do not delete — it's the decision history.
 - [ ] Remove/park any C4-as-correction scaffolding if present (nothing shipped yet — cheap now, expensive later).
 - [x] Audit that **all** published COG/SOG originate from `Location.getSpeed()`/`getBearing()` (Doppler) with their accuracy fields — never from position differencing anywhere in the pipeline. *Verified in code review (Aug 2026): `SignalKTransmitter.kt` publishes Doppler speed/bearing + accuracies; no position differencing found.*
@@ -240,6 +244,12 @@ the single cheapest de-risking artifact in the plan and is built first for that 
   one engine-on/off comparison measurement.
 - Quality path naming on SignalK — standard `.accuracy`-style companions vs. custom
   paths; align with what common consumers (plotters, anchor alarms) actually read.
-- Frame conventions document (sign conventions, quaternion order, boat frame
-  definition) — write **before** M1 coding starts; frame sign errors are where projects
-  like this die.
+  Partially addressed: `frame-conventions.md` §11 records that `navigation.attitude`'s
+  `yaw` semantics are ambiguous in the spec text and that heading should ride on the
+  unambiguous `headingMagnetic`/`headingTrue` paths until a consuming plotter confirms
+  otherwise. The quality-metadata naming question is still open.
+- ~~Frame conventions document~~ — **resolved**: promoted into M0 and written, see
+  [`frame-conventions.md`](frame-conventions.md). It is normative: code that disagrees
+  with it is wrong. Its §9 audit found three defects in shipped code (rate-of-turn sign
+  and frame, attitude yaw carrying a rate, NaN-unbounded heading normalization), now M0
+  checklist items, and confirmed the Euler extraction and `R_W_V` chain are correct.
