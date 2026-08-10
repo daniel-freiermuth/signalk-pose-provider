@@ -210,6 +210,33 @@ prerequisites; unlisted milestones are mutually independent and stackable.
 | M7 | **Validation & diagnostics** | Fourier residual report post-calibration (the demoted C4): per-tack residuals ⇒ heeling-error estimate; calibration history trending (magnetic biography of the boat); maneuver-based current fix (every tack = free current estimate) as fallback where no STW | M2 (+M6 optional) | Turns residuals into boat knowledge |
 | M8 | **Nice-to-haves** | Heave from band-limited single integration (wave-periodicity anchored), fused with barometer heave-band signal (P9); geofenced suspicion near charted cable corridors; two-speed calibration sail to fit current as nuisance params where STW absent; raw `GnssMeasurement` layer only if meter-class proves insufficient (deferred per P8; also where P9's altitude-aided horizontal tightening actually lives) | M1–M4 | Polish |
 
+**M1 in progress.** Landed so far: `Quaternion` and `MahonyAhrs` — the PI filter with
+gyro-bias estimation, gateable acc/mag gains, TRIAD attitude seeding, and the §7 time
+guards. Pure JVM code with 24 behavioural tests against synthetic sensors derived from a
+known truth, so a sign error in the ENU re-derivation shows up as divergence rather than a
+plausible number.
+
+Two departures from the milestone text, both deliberate:
+- **The filter came before the logging/replay harness**, inverting the stated order. The
+  harness earns its keep when tuning against recorded sails; writing the filter needed only
+  synthetic data, and synthetic data is what can be executed in an environment without an
+  Android SDK. The harness is still the next piece, and nothing here is tuned yet.
+- **Attitude is seeded algebraically** (TRIAD from the first accelerometer/magnetometer
+  pair) rather than iterated up from identity. Testing found the iterative cold start sits
+  on the antipodal unstable point — still reading 0° after 90 s of simulated time when truth
+  was 180° — because the correction is a cross product of two nearly-opposed vectors.
+  Seeding is exact immediately, and is gated on the same plausibility checks as the
+  correction so a slam or a distrusted magnetometer cannot seed a confident wrong answer.
+
+**Open decision, needed before M1 lands on a boat.** M1 reads
+`TYPE_MAGNETIC_FIELD_UNCALIBRATED` but the ellipsoid fit that replaces Android's C1 does not
+arrive until M2, leaving a window with *no* hard-iron correction at all — worse heading than
+today, since we would have dropped Android's correction without having our own. Three ways
+out: accept it (M1's ship value is roll/pitch under heel, and heading already publishes as
+`headingCompass` with the caveat attached); subtract `values[3..5]`, the HAL's own bias
+estimate, as an M1-only stopgap; or pull the ellipsoid fit forward into M1. The filter takes
+already-corrected magnetometer input precisely so this stays a caller decision.
+
 **Stacking notes.** M1→M2→M3 is the attitude track; M4 is the position track and only
 needs M1 (attitude for gravity removal + frame rotation) — the two tracks can proceed
 in parallel after M1. M5 attaches to whichever track lands first. M6/M7/M8 are
