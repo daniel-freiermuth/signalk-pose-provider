@@ -1,11 +1,17 @@
 # signalk-pose-provider — Architecture Plan & Decision Record
 
-Status: draft for review · Supersedes: `compass-calibration-design.md` (kept as historical record)
+Status: reviewed & revised (Aug 2026) · Supersedes: `compass-calibration-design.md` (kept as historical record)
 
 This document captures the conclusions of the design review (Aug 2026), records which
 previous decisions are superseded and why, and lays out milestones with explicit
 dependencies. Style: decisions are recorded with their reasoning so the "why" survives
 in the repo, not only in a chat log.
+
+Revision note (Aug 2026 code-verified review): a pass over the actual code
+(`LocationService.kt`, `SensorService.kt`, `SignalKTransmitter.kt`) confirmed P2 and P8's
+premises, corrected the description of the shipped attitude baseline (§3, correction c),
+narrowed one over-claimed benefit in P9, and promoted a raw-logging + offline replay
+harness into M1 as its first deliverable. Changes are marked inline.
 
 ---
 
@@ -51,6 +57,21 @@ no gateable correction gain. A Mahony filter with adaptive gain is ~200 LoC; the
 ellipsoid calibration is a *linear* least-squares (~100 LoC, one eigendecomposition).
 The earlier estimate "12+ params, needs good numerical solver, marginal gain"
 (compass-calibration-design.md, Option B) overpriced the cost and underpriced the gain.
+Note the shipped code is not even Option A (see §3, correction c): it computes attitude
+from C1-calibrated `TYPE_MAGNETIC_FIELD` + `TYPE_ACCELEROMETER` with no gyro in the
+attitude loop at all — raw low-passed acceleration is the vertical reference, so heel
+and wave dynamics corrupt roll/pitch *more* than stock fusion would. This strengthens
+the case for M1; the C1-staleness critique applies unchanged since
+`TYPE_MAGNETIC_FIELD` is C1-calibrated.
+Implementation constraints that decide success at 100–200 Hz: integrate on
+`event.timestamp` (monotonic nanoseconds — never wall-clock; the current pipeline's
+`System.currentTimeMillis()` stamping is unusable for integration), register with an
+explicit `samplingPeriodUs` rather than `SENSOR_DELAY_*` buckets, and tolerate
+asynchronous sensor rates — many phones cap the magnetometer at 50–100 Hz while the
+gyro does 200+, so the filter propagates on gyro ticks and corrects on whatever
+mag/acc samples arrive. The Mahony filter must carry the integral (PI) term for
+explicit gyro-bias estimation: phone gyros drift 0.5–5°/min, and gate G1's usefulness
+depends on that bias being tracked.
 
 **P4 — Calibration is a measurement, not a background process.**
 Static calibration, performed on demand under controlled conditions, stored with
@@ -72,7 +93,6 @@ correction, coast on the gyro, and publish degraded quality.
 | G1: Gyro innovation | gyro rate vs. mag Δheading, ~5 s window | fast disturbances (seconds) | slow onset, pre-existing offsets |
 | G2: WMM magnitude + inclination | GeomagneticField model vs. measured field | quasi-static disturbances at any onset speed; stale calibration | pure-rotation disturbances preserving |B| and dip (rare) |
 | G3: COG differential (at speed) | Doppler COG, differential form | anything magnetic (COG is immune) | low SOG; degenerate with current changes unless STW available |
-| | | | |
 
 All three feed the same lever: the Mahony magnetometer gain. Freeze on any gate firing;
 re-admit only after sustained agreement (hysteresis), never on a single clean sample —
@@ -104,8 +124,15 @@ antenna; revisit only if meter-class proves insufficient.
 GNSS altitude (5–15 m wander, the weakest GNSS output) is not navigation data for a
 boat. Height above the ellipsoid = geoid undulation (model) + tide (decimeters, known)
 + heave (periodic, zero-mean) — a sub-meter prior. Use it two ways: publish honest
-altitude, and altitude-aid the position filter (clamping the vertical channel tightens
-the horizontal solution via satellite geometry). The barometer (~10 cm relative
+altitude, and gate fix quality (a fix whose altitude sits far from geoid + tide is
+suspect — down-weight or reject it alongside the P7 dynamics gates).
+*Corrected on review:* the originally claimed third use — clamping the vertical channel
+to tighten the horizontal solution via satellite geometry — happens *inside* the
+position solution, where the geometry lives. With finished `GPS_PROVIDER` fixes the
+cross-axis covariance is already collapsed to per-axis accuracy scalars, so a
+loosely-coupled filter gains essentially nothing horizontally from an altitude
+constraint. That benefit is real but belongs to the deferred raw `GnssMeasurement`
+layer (P8 / M8). The barometer (~10 cm relative
 resolution) is useless for absolute altitude but is a heave-band sensor: fuse into the
 M8 heave estimate; its primary marine job (pressure trend for weather) is unaffected.
 
@@ -123,7 +150,22 @@ circle constrains the ellipsoid weakly in the vertical axis — heeled data from
 tacks must be folded into the fit, or vertical terms regularized toward a device-only
 calibration; stated limitation, not a surprise residual. (b) The D1–D7 distortion
 taxonomy and the P5 honesty principle from the old doc were better than anything in the
-chat and are retained.
+chat and are retained. (c) *Added on code review:* the old doc labeled Option A
+(`TYPE_ROTATION_VECTOR` + corrections) as "current approach" — the shipped code never
+actually used it. `SensorService.kt` computes attitude from C1-calibrated
+`TYPE_MAGNETIC_FIELD` + `TYPE_ACCELEROMETER` through an α = 0.8 IIR low-pass and
+`SensorManager.getRotationMatrix`, with the gyro published but unused in the attitude
+loop — i.e. a tilt-compensated compass, weaker under dynamics than stock fusion. The
+"before" reference for M1's comparison trace is this pipeline, not
+`TYPE_ROTATION_VECTOR`; keep both as comparison traces in dev builds so the improvement
+is measured against what actually shipped.
+
+Verified against code during the same review (claims that hold): all published SOG/COG
+originate from `Location.getSpeed()`/`getBearing()` with their accuracy fields
+(`SignalKTransmitter.kt` — the §4 audit item is confirmed done); the position source
+really is FLP today (`LocationService.kt`, `FusedLocationProviderClient`), so the P8
+switch is live, not hypothetical; Doppler speed/bearing/accuracies are `Location`
+fields and survive the switch.
 
 ## 4. Cleanup (current-version hygiene)
 
@@ -132,12 +174,12 @@ architectures:
 
 - [ ] Mark `compass-calibration-design.md` as superseded (banner + link here); do not delete — it's the decision history.
 - [ ] Remove/park any C4-as-correction scaffolding if present (nothing shipped yet — cheap now, expensive later).
-- [ ] Audit that **all** published COG/SOG originate from `Location.getSpeed()`/`getBearing()` (Doppler) with their accuracy fields — never from position differencing anywhere in the pipeline (README suggests this is already true; verify in code).
+- [x] Audit that **all** published COG/SOG originate from `Location.getSpeed()`/`getBearing()` (Doppler) with their accuracy fields — never from position differencing anywhere in the pipeline. *Verified in code review (Aug 2026): `SignalKTransmitter.kt` publishes Doppler speed/bearing + accuracies; no position differencing found.*
 - [ ] `test_signalk_json.kt` at repo root → move under proper test sourceset or remove.
 - [ ] README roadmap: rewrite "Planned" section against the milestones below; remove Option A/C language.
 - [ ] Decide fate of the current C3 azimuth implementation: keep functioning as the interim heading correction until M2 lands, then fold into mount-rotation constant.
 - [ ] Publish nothing on `navigation.headingMagnetic` yet that implies calibrated quality — until M2, mark heading data with explicit low-quality/uncalibrated flag rather than silence.
-- [ ] Replace Fused Location Provider with `LocationManager` + `GPS_PROVIDER` (P8). This is cleanup, not a milestone: it changes the *input*, needs no new filtering, and every day on FLP is a day of database-teleport jumps in the data. Verify Doppler speed/bearing + accuracy fields survive the switch (they do — they're `Location` fields, not FLP features). Note the removed Play Services dependency in the README (F-Droid path).
+- [ ] Replace Fused Location Provider with `LocationManager` + `GPS_PROVIDER` (P8). This is cleanup, not a milestone: it changes the *input*, needs no new filtering, and every day on FLP is a day of database-teleport jumps in the data. Verify Doppler speed/bearing + accuracy fields survive the switch (they do — they're `Location` fields, not FLP features). Note the removed Play Services dependency in the README (F-Droid path). Expectation to manage: `GPS_PROVIDER` delivers fixes at the GNSS chip's native ~1 Hz; FLP's chattier sub-second callbacks were mostly interpolation/repeats, but users may perceive a rate downgrade until M4 upsamples — one README sentence.
 
 ## 5. Milestones
 
@@ -147,20 +189,23 @@ prerequisites; unlisted milestones are mutually independent and stackable.
 | # | Milestone | Contents | Depends on | Ship value |
 |---|---|---|---|---|
 | M0 | **Cleanup** | Section 4 checklist | — | Repo tells one story |
-| M1 | **Raw sensor pipeline + Mahony AHRS** | Raw sensor ingestion at 100–200 Hz; Mahony with explicit, gateable acc/mag gains; adaptive gravity gating (wave logic); mount rotation (C2 tilt + yaw constant, replacing C3); declination (C5) on top; stock `TYPE_ROTATION_VECTOR` kept as parallel comparison trace (dev builds) | M0 | Correct roll/pitch under heel — the core instrument |
+| M1 | **Raw sensor pipeline + Mahony AHRS** | **First deliverable: raw logging + offline replay harness** — record uncalibrated mag/gyro/acc (at `event.timestamp`, monotonic ns) + GNSS fixes; replay recordings through the filter offline. Every sail becomes a regression dataset; filter tuning happens against recordings, not on the water. Then: raw sensor ingestion at 100–200 Hz (explicit `samplingPeriodUs`, asynchronous mag/gyro rates handled — see P3); Mahony **PI** (integral term = gyro-bias estimation) with explicit, gateable acc/mag gains; adaptive gravity gating (wave logic); mount rotation (C2 tilt + yaw constant, replacing C3); declination (C5) on top; stock `TYPE_ROTATION_VECTOR` **and** the current tilt-compensated-compass pipeline kept as parallel comparison traces (dev builds) | M0 | Correct roll/pitch under heel — the core instrument |
 | M2 | **Magnetometer calibration (ellipsoid)** | Calibration mode: log a slow circle (+ heeled segments both tacks), linear LSQ ellipsoid fit, before/after residual display, timestamped storage **with history**; explicit re-swing procedure documented in-app | M1 | Heading becomes trustworthy; current-immune by design |
 | M3 | **Heading integrity gates (G1–G3)** | Three gates per P6, hysteresis re-admission, single gain lever; quality state machine | M1 (G1, G2); M2 for meaningful absolute heading; G3 needs Doppler COG (already present) | Cable crossings, engine start, marina steel handled honestly |
-| M4 | **Position/velocity filter** | Loosely-coupled error-state KF (or gated complementary filter as v1): Doppler velocity + position as measurements, IMU propagation on 1 s leash (P1), innovation gating with boat-dynamics priors (P7), lever-arm band-limiting; sea-level altitude constraint per P9 (geoid + tide prior, altitude-aided horizontal solution) | M0 (P8 source switch), M1 | GPS jumps gone; smooth 10–50 Hz pose out; honest altitude |
+| M4 | **Position/velocity filter** | Loosely-coupled error-state KF (or gated complementary filter as v1): Doppler velocity + position as measurements, IMU propagation on 1 s leash (P1), innovation gating with boat-dynamics priors (P7), lever-arm band-limiting; sea-level altitude plausibility gate per P9 (geoid + tide prior) and honest altitude publishing — horizontal tightening from the altitude constraint is deferred with the raw-GNSS layer (P9 correction) | M0 (P8 source switch), M1 | GPS jumps gone; smooth 10–50 Hz pose out; honest altitude |
 | M5 | **Quality publishing** | Per-path quality/uncertainty on SignalK (heading gate state, position mode: anchored/coasting, calibration age); consumers inherit the honesty | M3 or M4 (publishes their states) | Whole-boat benefit; anchor alarm & plotter get trust levels |
 | M6 | **STW subscription** | SignalK WebSocket *consumer* for `navigation.speedThroughWater` → continuous current vector estimate (ground velocity − heading·STW); sharpens G3 into corrected-residual form; enables current display | M3, M4 | Closes the heading/COG/current triangle every second |
 | M7 | **Validation & diagnostics** | Fourier residual report post-calibration (the demoted C4): per-tack residuals ⇒ heeling-error estimate; calibration history trending (magnetic biography of the boat); maneuver-based current fix (every tack = free current estimate) as fallback where no STW | M2 (+M6 optional) | Turns residuals into boat knowledge |
-| M8 | **Nice-to-haves** | Heave from band-limited single integration (wave-periodicity anchored), fused with barometer heave-band signal (P9); geofenced suspicion near charted cable corridors; two-speed calibration sail to fit current as nuisance params where STW absent; raw `GnssMeasurement` layer only if meter-class proves insufficient (deferred per P8) | M1–M4 | Polish |
+| M8 | **Nice-to-haves** | Heave from band-limited single integration (wave-periodicity anchored), fused with barometer heave-band signal (P9); geofenced suspicion near charted cable corridors; two-speed calibration sail to fit current as nuisance params where STW absent; raw `GnssMeasurement` layer only if meter-class proves insufficient (deferred per P8; also where P9's altitude-aided horizontal tightening actually lives) | M1–M4 | Polish |
 
 **Stacking notes.** M1→M2→M3 is the attitude track; M4 is the position track and only
 needs M1 (attitude for gravity removal + frame rotation) — the two tracks can proceed
 in parallel after M1. M5 attaches to whichever track lands first. M6/M7/M8 are
 independent add-ons. The minimal "better than today" release is M0+M1; the minimal
-"instrument-grade" release is M0–M4.
+"instrument-grade" release is M0–M4. The M1 logging/replay harness is a standing
+dependency of everything after it: M2's fit quality, M3's gate thresholds, and M4's
+filter tuning are all developed and regression-tested against recorded sails — it is
+the single cheapest de-risking artifact in the plan and is built first for that reason.
 
 ## 6. Known Limitations (stated up front)
 
@@ -177,6 +222,11 @@ independent add-ons. The minimal "better than today" release is M0+M1; the minim
   hard to fool; no single gate is.
 - **Mount is fixed-ish**: plastic flexes, temperature moves things — cheap re-zero of
   tilt at the dock each season/sail.
+- **Power & thermal**: sustained 100–200 Hz sensor processing in a foreground service
+  is a real battery and thermal load on an always-on mounted phone (often in the sun).
+  Measure early in M1; expect to want a reduced-rate mode, and verify wakelock/Doze
+  behavior on target devices — a filter that silently stops sampling at 2 a.m. on
+  anchor watch is a designed-in failure, not a corner case.
 - **Not an indoor system**: gates firing everywhere + wrong motion priors = designed,
   honest failure. Degraded-GNSS *outdoor* scenarios (harbor approaches, bridges,
   steel neighbors) are the actual payoff zone.
