@@ -138,18 +138,13 @@ Sign conventions are verified verbatim against the SignalK specification schemas
 ### Prerequisites
 
 - **Java 17 or higher** (OpenJDK recommended)
-- **A Gradle distribution or Android Studio**, once — see the wrapper note below
-- **Android SDK** (Android Studio or `cmdline-tools`)
+- **Android SDK** — via Android Studio or `cmdline-tools`, with `ANDROID_HOME` set or
+  `sdk.dir` in `local.properties`
+- **No Gradle installation needed** — `gradle-wrapper.jar` is committed, so `./gradlew`
+  bootstraps the declared distribution on a fresh clone
 - **Linux/macOS/Windows** supported
 
 ### Quick Build (Command Line)
-
-> **Note**: `gradle-wrapper.jar` is deliberately not committed (see `.gitignore`), so a
-> fresh clone has `gradlew` but not the jar it needs. Generate it once with a system Gradle
-> installation — `gradle wrapper --gradle-version <version from
-> gradle/wrapper/gradle-wrapper.properties>` — or open the project in Android Studio, which
-> restores it during sync. You also need the Android SDK, via Android Studio or
-> `cmdline-tools`, with `ANDROID_HOME` set or `sdk.dir` in `local.properties`.
 
 ```bash
 # Clone the repository
