@@ -2,6 +2,9 @@
 
 Status: normative · Applies from: M1 onward · Referenced by: `architectural-plan.md` §4, §7
 
+SignalK mappings in §11 are verified verbatim against the specification schemas
+(`schemas/groups/*.json`, `master`, Aug 2026), not against memory or documentation prose.
+
 This document fixes the coordinate frames, rotation conventions, signs, units and time
 base used everywhere in this project. It exists because frame and sign errors are the
 dominant failure mode for projects of this shape: they do not crash, they do not show up
@@ -74,7 +77,7 @@ implemented, `r` is defined from the boat reference point *to* the phone.
 
 `R_A_B` maps a vector **from frame B into frame A**:
 
-```
+```text
 v_A = R_A_B · v_B
 ```
 
@@ -98,7 +101,7 @@ Storage is a 9-element `FloatArray` in **row-major** order, matching Android:
 coordinates** — this is the single most useful fact for reading the extraction formulas
 in §6:
 
-```
+```text
 column 0 = R[0], R[3], R[6]  = starboard direction, in ENU
 column 1 = R[1], R[4], R[7]  = bow direction,       in ENU
 column 2 = R[2], R[5], R[8]  = mast-up direction,   in ENU
@@ -113,9 +116,16 @@ The M1 filter state is a quaternion, not a matrix or Euler angles.
 - Unit norm; renormalize every update.
 - `q_W_V` rotates vehicle-frame vectors into the world frame — the same direction as
   `R_W_V`, so the subscript-cancellation rule of §3.1 applies unchanged.
-- Sign ambiguity: `q` and `−q` are the same rotation. Canonicalize to `w ≥ 0` before
-  storing, logging, or comparing two quaternions, or a continuity check will see a
-  spurious 360° jump.
+- Sign ambiguity: `q` and `−q` are the same rotation, and handling it wrongly is a
+  classic source of phantom attitude glitches. Three different rules, do not mix them:
+  - **Temporal continuity** (successive samples, logging, replay, any finite difference):
+    align each new sample to the previous one — if `dot(q_previous, q) < 0`, negate `q`.
+    **Do not** use `w ≥ 0` for this. A continuous rotation can carry `w` through zero, and
+    forcing `w ≥ 0` at that moment flips every component, injecting a discontinuity into a
+    trajectory that was smooth — precisely the artefact you were trying to avoid.
+  - **Comparing two rotations**: use `abs(dot(q1, q2))`, which is sign-agnostic.
+  - **Standalone canonical storage** (a single stored calibration, not a sequence): `w ≥ 0`
+    is fine, and gives one stable representation.
 
 **Android trap:** `SensorManager.getQuaternionFromVector()` outputs **scalar-first**
 `[w, x, y, z]`, but the raw `TYPE_ROTATION_VECTOR` event values are **scalar-last**
@@ -130,7 +140,7 @@ the **right-hand rule** about each axis (Android's convention, §4.2). Convertin
 measured device-frame rate into the vehicle frame uses the *transpose*, because `R_D_V`
 maps vehicle→device:
 
-```
+```text
 ω_V = R_D_Vᵀ · ω_D
 ```
 
@@ -162,14 +172,24 @@ activity.
 For the vertical axis this produces a sign inversion against nautical usage, which must be
 applied exactly once, at the publishing boundary:
 
-```
+```text
 ω_z^V  > 0   →   counterclockwise seen from above   →   turning to PORT
 rateOfTurn   =   −ω_z^V                                 (+ve to starboard)
 ```
 
-Note also that `ω_z^V` requires the mount rotation of §3.3 first. Taking the device's raw
-Z rate as rate of turn is correct only for a phone mounted perfectly flat and level, and
-wrong by `cos(mount tilt)` otherwise — see the audit in §9.
+Note also that `ω_z^V` requires the mount rotation of §3.3 first: it is the third component
+of `R_D_Vᵀ · ω_D`, a full vector transformation, **not** a scaled copy of the device's Z
+rate. Two distinct errors follow from skipping it, and only the first is an attenuation:
+
+- The boat's turn rate is under-read, because only part of it projects onto device Z.
+- Roll and pitch rates **leak in**, because device Z picks up components of the boat's
+  other two axes. This is cross-axis contamination, not a scale factor, and no single
+  correction coefficient can undo it.
+
+Taking the raw device Z rate is correct only for a phone mounted perfectly flat and level.
+The `cos(mount tilt)` intuition holds solely for the special case of a pure tilt with no
+roll or pitch rate present — do not rely on it in general. See the audit in §9, and the
+`rate of turn ignores pitch and roll rates` case in `FrameConventionsTest`.
 
 Use `TYPE_GYROSCOPE_UNCALIBRATED` (P3) and estimate bias ourselves via the Mahony integral
 term. Note what that sensor actually gives you: `values[0..2]` is the rate **without** drift
@@ -191,7 +211,7 @@ with the HAL's estimated hard-iron bias in `values[3..5]` (ignored, per P3).
 The geomagnetic field vector points toward magnetic north **and downward** in the northern
 hemisphere. In ENU world coordinates its vertical component is therefore **negative**:
 
-```
+```text
 B_W ≈ ( B·cos(I)·sin(δ),  B·cos(I)·cos(δ),  −B·sin(I) )
 ```
 
@@ -205,13 +225,23 @@ Heading is derived from the field component **projected into the horizontal plan
 the attitude estimate — never from the raw horizontal components of the device frame,
 which are only equivalent when the phone is level.
 
-### 4.4 Declination
+### 4.4 Declination (SignalK: magnetic *variation*)
 
 `GeomagneticField.getDeclination()` returns degrees, **positive east**.
 
-```
+```text
 headingTrue = headingMagnetic + declination      (both radians, then normalize per §5)
 ```
+
+SignalK calls this quantity **variation**, and its definition matches Android's sign
+exactly: `navigation.magneticVariation` is "the magnetic variation (declination) at the
+current position that must be added to the magnetic heading to derive the true heading.
+Easterly variations are positive". So the value converts to radians and publishes directly,
+with no sign flip.
+
+Note the equation above starts from `headingMagnetic` — a *deviation-corrected* heading,
+which we do not have until M2. We therefore publish the variation but not a true heading;
+see §11.2.
 
 ---
 
@@ -223,9 +253,38 @@ headingTrue = headingMagnetic + declination      (both radians, then normalize p
 | Course over ground | `[0, 2π)` | as heading |
 | Roll | `(−π, π]` | 0 = upright, **positive = starboard down** (list to starboard) |
 | Pitch | `[−π/2, π/2]` | 0 = level, **positive = bow up** |
+| Yaw | — | **not used**; see §11 |
 | Rate of turn | unbounded | **positive = turning to starboard** |
 | Declination | `(−π, π]` | positive = east |
 | Inclination (dip) | `[−π/2, π/2]` | positive = field points down (northern hemisphere) |
+
+### 5.1 What "roll" actually denotes — heel vs. roll
+
+The value we publish as roll is **instantaneous inclination**: steady heel with wave-driven
+roll oscillation superimposed. Those are two physically distinct signals sharing one number,
+and which one a consumer receives is decided by the filter time constant, not by the path
+name.
+
+The terminology is genuinely inconsistent across the fields this project borrows from:
+
+| Term | Marine (strict) | Aeronautics |
+|---|---|---|
+| **Heel** | steady lateral inclination, from wind pressure | not used |
+| **List** | steady lateral inclination, from weight or flooding | not used |
+| **Roll** | the *oscillatory motion* about the longitudinal axis | the *angle* about that axis (bank angle) |
+
+SignalK inherits the aeronautical sense: `navigation.attitude.roll` is an angle, which is
+what a sailor calls heel. The spec's own description — *"Vessel roll, +ve is list to
+starboard"* — manages to use three of these terms for one quantity. We follow SignalK
+(roll = the angle) and say heel when we mean the steady component.
+
+Consequence for M1: P6's long gravity-correction time constant is exactly a choice about
+where on the heel↔roll spectrum the published number sits. A long constant averages the
+wave band away and yields something close to heel; a short one tracks the oscillation.
+State the intended one when the filter lands — a stability display and a seakeeping
+analysis want opposite ends of it, and the difference is invisible in the path name.
+
+### 5.2 Normalization
 
 Normalization helpers must be **branch-free and loop-free**. The current
 `normalizeHeading` uses `while` loops (`SensorService.kt`), which is an unbounded loop on
@@ -250,14 +309,19 @@ failure.
 
 Using the column identities of §3.1, with `R = R_W_V` row-major:
 
-```
-heading = atan2( R[1], R[4] )          // atan2(East of bow, North of bow)
-pitch   = asin ( clamp(R[7], −1, 1) )  // Up component of bow → bow-up positive
-roll    = atan2( −R[6], R[8] )         // −Up of starboard, Up of mast → stbd-down positive
+```text
+heading = wrapTo2Pi( atan2( R[1], R[4] ) )  // atan2(East of bow, North of bow)
+pitch   = asin ( clamp(R[7], −1, 1) )       // Up component of bow → bow-up positive
+roll    = atan2( −R[6], R[8] )              // −Up of starboard, Up of mast → stbd-down positive
 ```
 
-These are the formulas currently in `SensorService.updateOrientation()`, and they are
-correct for this frame convention — verified against the reference poses in §10. The
+The `wrapTo2Pi` on heading is part of the formula, not an afterthought: bare `atan2`
+returns `(−π, π]`, so the level bow-West reference pose of §10 would come out as `−π/2`
+where §5 and the SignalK paths require `3π/2`. Pitch and roll keep `atan2`'s native range,
+which already matches §5.
+
+These are the formulas implemented in `DeviceCalibration.extractNauticalAngles()`, and they
+are correct for this frame convention — verified against the reference poses in §10. The
 `clamp` on the `asin` argument is required: floating-point error can push a legitimately
 vertical bow to `1.0000001` and produce `NaN`, which then propagates through every
 downstream path silently.
@@ -303,9 +367,10 @@ Rules:
 **SI internally, without exception:** radians, metres, m/s, m/s², rad/s, seconds (as
 nanoseconds where integer), Pascals, Kelvin, Tesla-derived µT for raw magnetics.
 
-Degrees appear in exactly two places: the UI, and the persisted mount-calibration angles
-(α, β, γ), which are stored in degrees because they are user-facing and hand-editable.
-Both boundaries convert explicitly.
+Degrees appear in exactly three places: the UI; the persisted mount-calibration angles
+(α, β, γ), stored in degrees because they are user-facing and hand-editable; and
+diagnostic log lines, where degrees are what a human reading logcat can actually judge.
+All three are output boundaries and convert explicitly — no computation consumes them.
 
 Naming rules, so a frame error is visible at the call site rather than three stack frames
 away:
@@ -331,11 +396,13 @@ either fixed in M0 or carried explicitly into M1.
 
 | # | Finding | Location | Disposition |
 |---|---|---|---|
-| A1 | `rateOfTurn` publishes the **raw device-frame** gyro Z rate: no mount rotation (§3.3) and no nautical sign flip (§4.2). It is therefore inverted — positive is published for a turn to port — and additionally wrong by the mount tilt whenever the phone is not flat. | `SensorService.updateGyroscopeData()`; `SignalKTransmitter.kt:447` | **Fix in M0** — added to `architectural-plan.md` §4 |
-| A2 | `SensorData.yaw` carries a *rate* (rad/s, a copy of gyro Z) but is published inside `navigation.attitude` as an *angle* (rad). Consumers reading attitude yaw receive a rate. | `SensorService.updateGyroscopeData()`; `SignalKTransmitter.kt:437` | **Fix in M0** — publish no yaw until M1 supplies a real one |
-| A3 | Euler extraction formulas are **correct** for this convention. | `SensorService.updateOrientation()` | Keep; §10 tests lock them in |
+| A1 | `rateOfTurn` published the **raw device-frame** gyro Z rate: no mount rotation (§3.3) and no nautical sign flip (§4.2). It was therefore inverted — positive published for a turn to port — and additionally wrong by the mount tilt whenever the phone is not flat. | `SensorService.updateGyroscopeData()` | **Fixed in M0** — `DeviceCalibration.rateOfTurnFromGyro`, sign and mount tests in `FrameConventionsTest` |
+| A2 | `SensorData.yaw` carried a *rate* (rad/s, a copy of gyro Z) but was published inside `navigation.attitude` as an *angle* (rad). Consumers reading attitude yaw received a rate. | `SensorService`; `SignalKTransmitter` | **Fixed in M0** — field removed outright so it cannot be repopulated by accident; no yaw published, permanently (§11.3) |
+| A3 | Euler extraction formulas are **correct** for this convention. | `SensorService.updateOrientation()` | **Kept**, extracted to the pure `DeviceCalibration.extractNauticalAngles` so §10 tests lock it in |
 | A4 | `R_W_V = R_W_D · R_D_V` chain is **correct** and matches §3.1. | `DeviceCalibration.kt` | Keep |
-| A5 | `normalizeHeading` uses `while` loops — unbounded on NaN. | `SensorService.normalizeHeading()` | Fix with the §5 branch-free form |
+| A5 | `normalizeHeading` used `while` loops — unbounded on NaN. | `SensorService.normalizeHeading()` | **Fixed in M0** — `DeviceCalibration.wrapTo2Pi`, with a non-finite-input test |
+| A8 | Non-finite values (NaN from a degenerate attitude) would reach the JSON encoder, which has no NaN literal — taking down the whole update, not just the bad path. | `SignalKTransmitter`; `SignalKValues` | **Fixed in M0** — `SignalKValues.finiteNumber` drops the path instead (P5: missing reads as "unknown") |
+| A9 | `updateLocationRate(Long)` only logged; a rate change from the running service silently did nothing. | `LocationService` | **Fixed in M0** — application context retained so it re-registers |
 | A6 | Attitude timestamps use `System.currentTimeMillis()`; sensor events are ingested without reference to `event.timestamp`. | `SensorService.updateSensorData()` | Carried into M1 (§7) |
 | A7 | α = 0.8 IIR low-pass is applied to accelerometer and magnetometer independently, at whatever rate each sensor happens to deliver. The resulting lag is device-dependent and differs between the two channels, so the fused attitude lags by an unknown, unequal amount per axis. | `SensorService.onSensorChanged()` | Replaced wholesale by the M1 filter |
 
@@ -373,17 +440,111 @@ language so they can be verified on a boat rather than only in a test:
 
 ---
 
-## 11. Open items
+## 11. SignalK mapping (verified against the spec schemas)
 
-- **SignalK output mapping must be verified against the spec version in use** before M5
-  publishes quality metadata. Our internal conventions (§5) are chosen to match what we
-  believe the SignalK spec states — `navigation.attitude.roll` positive to starboard,
-  `.pitch` positive bow up, `navigation.rateOfTurn` positive to starboard — but the
-  attitude object's `yaw` semantics are ambiguous in the spec text, and this has not been
-  confirmed against a consuming plotter. Until confirmed, publish `roll` and `pitch` only,
-  and carry heading on `navigation.headingMagnetic` / `headingTrue`, which are
-  unambiguous. Resolves the related item in `architectural-plan.md` §7.
+Checked against `schemas/groups/{navigation,steering,environment,performance}.json` on the
+specification's `master` branch, Aug 2026. Descriptions below are quoted verbatim.
+
+### 11.1 Sign conventions — all confirmed
+
+Our internal conventions (§5) match the spec exactly. No adaptation layer is needed:
+
+| Path | Spec description | Our §5 convention |
+|---|---|---|
+| `navigation.attitude.roll` | "Vessel roll, +ve is list to starboard" | positive starboard-down ✓ |
+| `navigation.attitude.pitch` | "Pitch, +ve is bow up" | positive bow-up ✓ |
+| `navigation.rateOfTurn` | "Rate of turn (+ve is change to starboard)" | positive to starboard ✓ |
+| `navigation.magneticVariation` | "…must be added to the magnetic heading to derive the true heading. Easterly variations are positive" | positive east, added ✓ |
+
+The `rateOfTurn` line is the one that makes audit A1 a defect rather than a preference:
+the spec fixes the sign, and we were publishing its opposite.
+
+Every angle in SignalK is radians; there is no degree variant anywhere in the schemas.
+
+### 11.2 The heading chain — why we publish `headingCompass`
+
+The spec defines three heading paths as a correction chain, each named for how much
+correction has been applied:
+
+| Path | Spec description |
+|---|---|
+| `navigation.headingCompass` | "Current magnetic heading received from the compass. **This is not adjusted for magneticDeviation** of the compass" |
+| `navigation.headingMagnetic` | "Current magnetic heading of the vessel, equals **'headingCompass adjusted for magneticDeviation'**" |
+| `navigation.headingTrue` | "The current true north heading of the vessel, equals **'headingMagnetic adjusted for magneticVariation'**" |
+
+Until M2 calibrates the boat's magnetics out, we have precisely `headingCompass` — the
+spec's description of it is a description of our situation. So:
+
+- **Now:** publish `navigation.headingCompass` and `navigation.magneticVariation`. Variation
+  is a property of position, honest regardless of our compass, so it is publishable today.
+  It does **not** let a consumer reconstruct true heading: `headingCompass + variation` is
+  missing the deviation term, and lands on exactly the approximation described below, not
+  on `headingTrue`. Deviation is the piece nobody has until M2.
+- **Not published:** `headingMagnetic` and `headingTrue`, because both assert a deviation
+  correction we have not made.
+- **On screen only:** `SensorData.approxTrueHeading` = compass heading + variation, shown
+  as "True Heading (approx)". It is named for what it is rather than what it resembles: the
+  deviation step is skipped, so it is wrong by the boat's deviation. Traditional navigation
+  has no term for a heading with variation applied but not deviation, because you would
+  never do that — needing an invented name is the signal that this is a stopgap. It exists
+  because the value is still useful to a human reading the screen, who can see the caveat;
+  it must never reach the bus, where a consumer cannot.
+- **At M2:** promote to `headingMagnetic`, and publish `navigation.magneticDeviation`
+  carrying the correction actually applied. `headingTrue` becomes available at the same
+  time, and `approxTrueHeading` disappears.
+
+This replaces the custom `navigation.headingMagnetic.quality` marker invented in M0: the
+spec's own vocabulary already distinguishes corrected from uncorrected, so the honest thing
+is to use it rather than to overclaim on one path and disclaim on another.
+
+### 11.3 `attitude.yaw` — declined, permanently
+
+We publish `roll` and `pitch` and omit `yaw`. This is a deliberate refusal, not a gap
+awaiting M1.
+
+Roll and pitch have a physical datum: gravity defines level, so their zeros need no
+convention. **Yaw has no physical datum** — a rotation about the vertical axis is defined
+only once a reference direction is chosen, and the spec chooses none. The schema's own
+description of the parent object is just "Vessel attitude: roll, pitch and yaw"; no datum,
+no rotation order. Two readings survive:
+
+1. **Datum = north.** Then yaw *is* heading — redundant with the heading paths, and newly
+   ambiguous about which of true or magnetic it duplicates.
+2. **Datum = mean or intended heading.** Then yaw is the vessel's yawing *oscillation* about
+   its course — the seakeeping sense, a genuinely different quantity.
+
+The spec's wording for the member, *"Yaw, +ve is heading change to starboard"*, leans toward
+(2) — "change" implies a delta. The parent description leans toward (1), since a classical
+attitude triple is relative to a fixed navigation frame. The spec never resolves it.
+
+Whatever value we published there, some consumer would read it as the other one: publish
+heading-as-yaw and a seakeeping consumer sees an absurd oscillation; publish oscillation and
+a plotter reads a heading a few degrees off north. Silence is the only unambiguous option.
+
+A related gap, worth knowing even though it does not affect us: because the schema states no
+rotation order, `navigation.attitude` is not reliably invertible into a rotation by a
+consumer. In practice consumers use it for what is unambiguous — displaying heel and trim.
+
+If M1 later wants to publish yawing motion, reading (2) is the informative one — it is a
+real signal about steering quality and autopilot performance — but it belongs on a custom
+path with a stated datum, not in the ambiguous standard slot.
+
+### 11.4 Angular rates in SignalK
+
+There is exactly one angular rate for vessel motion: `navigation.rateOfTurn` (rad/s). The
+only other in the whole spec is `steering.autopilot.maxDriveRate`. There are **no roll-rate
+or pitch-rate paths** — relevant to M8, where heave and roll-motion work would need custom
+paths or a `sensors.*` extension.
+
+## 12. Open items
+
+- **Quality metadata vocabulary** for M5 — how per-value uncertainty and gate state ride on
+  SignalK (`.`-suffixed companions vs. `meta`), and what plotters and anchor alarms actually
+  read. §11.2 settles the *heading* honesty question spec-natively, which removes the
+  urgency but not the question. Tracked in `architectural-plan.md` §7.
 - **Lever arm `r`** direction and origin definition (§2.1) are fixed here, but the value is
   unmeasured. Deferred to M8 per P7.
 - **Ported filter formulas** from NED-frame literature (§1) should each carry a comment
   naming the source convention. Worth a lint or review checklist entry once M1 lands.
+- **Filter time constant and the heel↔roll spectrum** (§5.1) — state the intended target
+  when M1's gravity correction lands.

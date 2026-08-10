@@ -168,9 +168,11 @@ dependencies {
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.8.5")
     
-    // Location Services
-    implementation("com.google.android.gms:play-services-location:21.3.0")
-    
+    // Location: platform LocationManager + GPS_PROVIDER only (architectural-plan.md P8).
+    // Deliberately no com.google.android.gms:play-services-location — the Fused Location
+    // Provider injects database-derived position jumps, and dropping it keeps the build
+    // free of proprietary dependencies for F-Droid.
+
     // JSON
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     
