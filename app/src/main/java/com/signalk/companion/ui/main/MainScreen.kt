@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import com.signalk.companion.util.DeviceCalibration
 import android.hardware.SensorManager
 import java.text.SimpleDateFormat
 import java.util.*
@@ -147,7 +148,8 @@ fun MainScreen(
                 onCalibrateAll = viewModel::calibrateAll,
                 onCalibrateAzimuth = viewModel::calibrateAzimuth,
                 onCalibrateTilt = viewModel::calibrateTilt,
-                hasGps = uiState.locationData?.bearing != null && (uiState.locationData?.speed ?: 0f) > 0.5f
+                hasGps = uiState.locationData?.bearing != null &&
+                    (uiState.locationData?.speed ?: 0f) >= DeviceCalibration.MIN_CALIBRATION_SPEED_MPS
             )
             
             // Error Card
@@ -376,8 +378,8 @@ fun SensorDataCard(
                 var hasDeviceData = false
                 
                 // Navigation/Orientation Data
-                if (sensor.magneticHeading != null || sensor.trueHeading != null || 
-                    sensor.roll != null || sensor.pitch != null || sensor.yaw != null || 
+                if (sensor.compassHeading != null || sensor.approxTrueHeading != null ||
+                    sensor.roll != null || sensor.pitch != null ||
                     sensor.rateOfTurn != null) {
                     hasOrientationData = true
                     Text(
@@ -386,11 +388,13 @@ fun SensorDataCard(
                         fontWeight = FontWeight.Medium
                     )
                     
-                    sensor.magneticHeading?.let { heading ->
-                        SensorDataRow("Magnetic Heading", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")
+                    sensor.compassHeading?.let { heading ->
+                        SensorDataRow("Compass Heading", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")
                     }
-                    sensor.trueHeading?.let { heading ->
-                        SensorDataRow("True Heading", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")
+                    // "approx" is load-bearing: deviation is not corrected out until M2, so
+                    // this can be tens of degrees off near the engine or a speaker.
+                    sensor.approxTrueHeading?.let { heading ->
+                        SensorDataRow("True Heading (approx)", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")
                     }
                     sensor.magnetometerAccuracy?.let { acc ->
                         val (label, color) = when (acc) {
@@ -419,16 +423,13 @@ fun SensorDataCard(
                         }
                     }
                     sensor.roll?.let { roll ->
-                        SensorDataRow("Roll", "${String.format("%.1f", Math.toDegrees(roll.toDouble()))}°")
+                        SensorDataRow("Heel / roll (+stbd down)", "${String.format("%.1f", Math.toDegrees(roll.toDouble()))}°")
                     }
                     sensor.pitch?.let { pitch ->
-                        SensorDataRow("Pitch", "${String.format("%.1f", Math.toDegrees(pitch.toDouble()))}°")
-                    }
-                    sensor.yaw?.let { yaw ->
-                        SensorDataRow("Yaw", "${String.format("%.1f", Math.toDegrees(yaw.toDouble()))}°")
+                        SensorDataRow("Pitch (+bow up)", "${String.format("%.1f", Math.toDegrees(pitch.toDouble()))}°")
                     }
                     sensor.rateOfTurn?.let { rate ->
-                        SensorDataRow("Rate of Turn", "${String.format("%.2f", Math.toDegrees(rate.toDouble()))}°/s")
+                        SensorDataRow("Rate of Turn (+stbd)", "${String.format("%.2f", Math.toDegrees(rate.toDouble()))}°/s")
                     }
                 }
                 
@@ -929,11 +930,23 @@ fun MarineConfigCard(
 
             if (!hasGps) {
                 Text(
-                    text = "Move to enable azimuth calibration (needs GPS heading)",
+                    text = "Needs GPS course and at least " +
+                        "${DeviceCalibration.MIN_CALIBRATION_SPEED_KN} kn of speed",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            // Procedure matters as much as the thresholds: heading comes from the compass,
+            // so a bad compass produces a bad mount constant, and a marina is the worst
+            // magnetic environment there is (steel piles, quay walls, wiring, other boats).
+            Text(
+                text = "Best results: swing the phone in a figure-of-eight BEFORE mounting " +
+                    "it, then calibrate motoring straight and level, clear of the marina " +
+                    "and in slack water.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

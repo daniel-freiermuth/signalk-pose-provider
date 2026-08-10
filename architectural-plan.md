@@ -142,7 +142,7 @@ M8 heave estimate; its primary marine job (pressure trend for weather) is unaffe
 |---|---|---|
 | Option A/C: stack corrections on `TYPE_ROTATION_VECTOR` + Android C1 | **Superseded** by P3 | Stale-C1 leakage, heeled-reach vertical error, no gateable gain. Option C's quality gating survives — generalized into P6 — but on top of our own pipeline. |
 | C4 Fourier deviation curve **as correction** | **Superseded** — demoted to validation report | Fatal degeneracy: with COG as reference at a single speed, a constant current produces a crab angle ≈ arcsin(v_c/v_b · sin(θ−θ_c)) — first-order identical to semicircular (B, C) deviation. A 0.5 kn current at 4 kn forges a clean, well-fitted, spurious ~7° deviation curve. Ellipsoid calibration needs no external heading reference (truth criterion is internal: constant field magnitude), so it is immune. Fourier machinery survives as a *diagnostic*: residual semicircular structure after calibration ⇒ heeling error or unmodeled current. |
-| C3 single-point azimuth as separate layer | **Absorbed** | Becomes the single yaw-alignment constant of the mount rotation (determined via reciprocal runs / slack-water leg / sighting). One correction pipeline, one provenance record — not two layers that can silently disagree. |
+| C3 single-point azimuth as separate layer | **Absorbed** | Becomes the single yaw-alignment constant of the mount rotation (determined via reciprocal runs / slack-water leg / sighting). One correction pipeline, one provenance record — not two layers that can silently disagree. **Absorbed into the mount rotation, not into C4** — the old doc's "special case of C4 (A-only)" holds for the heading offset only. C4 is a scalar δ(θ) and produces no tilt information, so it cannot replace mount calibration; and γ (mechanical, fixed until the bracket moves) is a different physical quantity from C4's A (magnetic, varies with the boat's state) even where their effects coincide. |
 | Gyro detector as standalone "warning UI" feature | **Repurposed** | Becomes gate G1 feeding the Mahony gain (P6). The UI warning is a side effect of the gate state, not the product. |
 
 Corrections to the *conversation* record too, for symmetry: (a) a flat calibration
@@ -173,17 +173,21 @@ Items to fix/remove **before** new construction, so the repo doesn't carry two
 architectures:
 
 - [x] **Write the frame-conventions document** — frames, rotation notation, sign conventions, angle ranges, time base, unit/naming rules, and normative reference poses. Promoted from §7 into M0 on review: it gates M1 coding exactly the way the rest of this checklist does, and frame sign errors are where projects like this die. → [`frame-conventions.md`](frame-conventions.md) *(done)*
-- [ ] Fix `navigation.rateOfTurn` sign and frame (audit A1 in `frame-conventions.md` §9): it currently publishes the **raw device-frame** gyro Z rate — inverted against SignalK's +ve-to-starboard convention, and additionally wrong by the mount tilt whenever the phone isn't mounted flat. Needs the mount rotation (`ω_V = R_D_Vᵀ ω_D`) and the nautical sign flip (`rateOfTurn = −ω_z^V`).
-- [ ] Stop publishing `navigation.attitude.yaw` (audit A2): the field currently carries a gyro *rate* (rad/s) but is published as an *angle* (rad). Publish `roll`/`pitch` only until M1 supplies a real yaw.
-- [ ] Replace `normalizeHeading`'s `while` loops with the branch-free form (audit A5) — the current version is an unbounded loop, i.e. a hang, on a NaN input.
-- [ ] Mark `compass-calibration-design.md` as superseded (banner + link here); do not delete — it's the decision history.
-- [ ] Remove/park any C4-as-correction scaffolding if present (nothing shipped yet — cheap now, expensive later).
+- [x] Fix `navigation.rateOfTurn` sign and frame (audit A1): it published the **raw device-frame** gyro Z rate — inverted against SignalK's +ve-to-starboard convention, and additionally wrong by the mount tilt whenever the phone isn't mounted flat. Now `DeviceCalibration.rateOfTurnFromGyro`, applying `ω_V = R_D_Vᵀ ω_D` then `−ω_z^V`, with sign tests.
+- [x] Stop publishing `navigation.attitude.yaw` (audit A2): the field carried a gyro *rate* (rad/s) in a slot consumers read as an *angle*. `SensorData.yaw` is removed outright so it cannot be repopulated by accident; `roll`/`pitch` only. Subsequently confirmed **permanent** rather than pending M1: SignalK defines no datum for `attitude.yaw`, so no value has an unambiguous meaning there (`frame-conventions.md` §11.3).
+- [x] Replace `normalizeHeading`'s `while` loops with the branch-free form (audit A5) — the old version was an unbounded loop, i.e. a hang, on NaN. Now `DeviceCalibration.wrapTo2Pi`, with a non-finite-input test.
+- [x] Mark `compass-calibration-design.md` as superseded (banner + link here); do not delete — it's the decision history.
+- [x] Remove/park any C4-as-correction scaffolding if present. *Verified absent (Aug 2026): no Fourier/deviation-curve code was ever written; the only calibration code is C2/C3 mount alignment. Nothing to remove.*
 - [x] Audit that **all** published COG/SOG originate from `Location.getSpeed()`/`getBearing()` (Doppler) with their accuracy fields — never from position differencing anywhere in the pipeline. *Verified in code review (Aug 2026): `SignalKTransmitter.kt` publishes Doppler speed/bearing + accuracies; no position differencing found.*
-- [ ] `test_signalk_json.kt` at repo root → move under proper test sourceset or remove.
-- [ ] README roadmap: rewrite "Planned" section against the milestones below; remove Option A/C language.
-- [ ] Decide fate of the current C3 azimuth implementation: keep functioning as the interim heading correction until M2 lands, then fold into mount-rotation constant.
-- [ ] Publish nothing on `navigation.headingMagnetic` yet that implies calibrated quality — until M2, mark heading data with explicit low-quality/uncalibrated flag rather than silence.
-- [ ] Replace Fused Location Provider with `LocationManager` + `GPS_PROVIDER` (P8). This is cleanup, not a milestone: it changes the *input*, needs no new filtering, and every day on FLP is a day of database-teleport jumps in the data. Verify Doppler speed/bearing + accuracy fields survive the switch (they do — they're `Location` fields, not FLP features). Note the removed Play Services dependency in the README (F-Droid path). Expectation to manage: `GPS_PROVIDER` delivers fixes at the GNSS chip's native ~1 Hz; FLP's chattier sub-second callbacks were mostly interpolation/repeats, but users may perceive a rate downgrade until M4 upsamples — one README sentence.
+- [x] `test_signalk_json.kt` at repo root → **removed.** It was a scratch `main()` demo outside every source set (so it never compiled with the project), duplicating what `SignalKTransmitterTest` already covers. Git history keeps it.
+- [x] README roadmap: rewrite "Planned" section against the milestones below; remove Option A/C language. *Also documents the honest caveats on today's data (uncalibrated heading, dynamics-degraded roll/pitch, ellipsoidal altitude) and the missing `gradle-wrapper.jar` build prerequisite.*
+- [x] **Decided:** keep the C3 azimuth implementation, with a speed guardrail. Note the earlier wording here ("interim… until M2") was misleading: **mount calibration is permanent architecture**, not a stopgap. C4 could never replace it — C4 is a scalar δ(θ) on heading and cannot produce the mount's tilt angles at all, so a tilted mount corrupts roll and pitch with or without a deviation curve. What M2 changes is only *how well γ can be measured*, not whether it is needed.
+  - **Guardrail added:** minimum 2.5 kn SOG for any GPS-referenced calibration, up from 0.5 m/s (≈1 kn). γ is set by equating heading with GPS *course*, so leeway and current-induced crab go straight into it; crab ≈ asin(cross-current / boat speed), which is ~30° at 1 kn in a 0.5 kn stream versus ~12° at 2.5 kn. The gate now fails loudly rather than silently doing nothing.
+  - **Procedure, in-app:** figure-of-eight the phone *before* mounting (Android's own magnetometer calibration starves once it's in a bracket, and re-swinging after mounting is impossible without disturbing γ), then calibrate motoring straight and level, clear of the marina. γ is measured *through* the compass, so a bad compass yields a bad mechanical constant — and a marina is the worst magnetic environment there is.
+  - **The gate does not cancel current, it only makes it matter less.** A current-cancelling reference — reciprocal runs averaged, a slack-water leg, or a surveyed sighting (§3) — is the actual fix, and was considered here and deliberately deferred to M2, where the calibration UI gains the provenance and history storage to hold two runs. Recorded so a later reader sees a decision, not an oversight.
+  - **Follow-ups not taken here** (say the word): gate on magnetometer accuracy, require low rate-of-turn, and store γ with provenance (timestamp, SOG, COG, accuracy) so a γ measured before M2 is identifiable. Any γ set today is provisional not because C3 is going away, but because it was measured with an uncalibrated instrument — **re-measure γ once M2 lands.**
+- [x] Publish nothing on `navigation.headingMagnetic` that implies calibrated quality. **Resolved spec-natively**, better than the custom marker first written for this: SignalK already distinguishes `headingCompass` ("not adjusted for magneticDeviation") from `headingMagnetic` ("headingCompass adjusted for magneticDeviation") from `headingTrue`. We publish `navigation.headingCompass` — whose spec description *is* our situation — plus `navigation.magneticVariation`, and neither `headingMagnetic` nor `headingTrue`, which would assert a correction we haven't made. The custom `.quality` path is dropped. See `frame-conventions.md` §11.2.
+- [x] Replace Fused Location Provider with `LocationManager` + `GPS_PROVIDER` (P8). This is cleanup, not a milestone: it changes the *input*, needs no new filtering, and every day on FLP is a day of database-teleport jumps in the data. Verify Doppler speed/bearing + accuracy fields survive the switch (they do — they're `Location` fields, not FLP features). Note the removed Play Services dependency in the README (F-Droid path). Expectation to manage: `GPS_PROVIDER` delivers fixes at the GNSS chip's native ~1 Hz; FLP's chattier sub-second callbacks were mostly interpolation/repeats, but users may perceive a rate downgrade until M4 upsamples — one README sentence.
 
 ## 5. Milestones
 
@@ -194,7 +198,7 @@ prerequisites; unlisted milestones are mutually independent and stackable.
 |---|---|---|---|---|
 | M0 | **Cleanup** | Section 4 checklist | — | Repo tells one story |
 | M1 | **Raw sensor pipeline + Mahony AHRS** | **First deliverable: raw logging + offline replay harness** — record uncalibrated mag/gyro/acc (at `event.timestamp`, monotonic ns) + GNSS fixes; replay recordings through the filter offline. Every sail becomes a regression dataset; filter tuning happens against recordings, not on the water. Then: raw sensor ingestion at 100–200 Hz (explicit `samplingPeriodUs`, asynchronous mag/gyro rates handled — see P3); Mahony **PI** (integral term = gyro-bias estimation) with explicit, gateable acc/mag gains; adaptive gravity gating (wave logic); mount rotation (C2 tilt + yaw constant, replacing C3); declination (C5) on top; stock `TYPE_ROTATION_VECTOR` **and** the current tilt-compensated-compass pipeline kept as parallel comparison traces (dev builds) | M0 | Correct roll/pitch under heel — the core instrument |
-| M2 | **Magnetometer calibration (ellipsoid)** | Calibration mode: log a slow circle (+ heeled segments both tacks), linear LSQ ellipsoid fit, before/after residual display, timestamped storage **with history**; explicit re-swing procedure documented in-app | M1 | Heading becomes trustworthy; current-immune by design |
+| M2 | **Magnetometer calibration (ellipsoid)** | Calibration mode: log a slow circle (+ heeled segments both tacks), linear LSQ ellipsoid fit, before/after residual display, timestamped storage **with history**; explicit re-swing procedure documented in-app. **Publishing promotes** from `navigation.headingCompass` to `headingMagnetic`, adding `navigation.magneticDeviation` (the correction actually applied) and `headingTrue` (`frame-conventions.md` §11.2). **Prompt a γ re-measurement** on completion: the mount yaw constant is measured through the compass, so every γ set before this milestone carries the uncalibrated magnetometer's error (§4) | M1 | Heading becomes trustworthy; current-immune by design |
 | M3 | **Heading integrity gates (G1–G3)** | Three gates per P6, hysteresis re-admission, single gain lever; quality state machine | M1 (G1, G2); M2 for meaningful absolute heading; G3 needs Doppler COG (already present) | Cable crossings, engine start, marina steel handled honestly |
 | M4 | **Position/velocity filter** | Loosely-coupled error-state KF (or gated complementary filter as v1): Doppler velocity + position as measurements, IMU propagation on 1 s leash (P1), innovation gating with boat-dynamics priors (P7), lever-arm band-limiting; sea-level altitude plausibility gate per P9 (geoid + tide prior) and honest altitude publishing — horizontal tightening from the altitude constraint is deferred with the raw-GNSS layer (P9 correction) | M0 (P8 source switch), M1 | GPS jumps gone; smooth 10–50 Hz pose out; honest altitude |
 | M5 | **Quality publishing** | Per-path quality/uncertainty on SignalK (heading gate state, position mode: anchored/coasting, calibration age); consumers inherit the honesty | M3 or M4 (publishes their states) | Whole-boat benefit; anchor alarm & plotter get trust levels |
@@ -243,13 +247,26 @@ the single cheapest de-risking artifact in the plan and is built first for that 
 - Per-state calibration (D4b) — needed at all at this mounting distance? Decide after
   one engine-on/off comparison measurement.
 - Quality path naming on SignalK — standard `.accuracy`-style companions vs. custom
-  paths; align with what common consumers (plotters, anchor alarms) actually read.
-  Partially addressed: `frame-conventions.md` §11 records that `navigation.attitude`'s
-  `yaw` semantics are ambiguous in the spec text and that heading should ride on the
-  unambiguous `headingMagnetic`/`headingTrue` paths until a consuming plotter confirms
-  otherwise. The quality-metadata naming question is still open.
+  paths vs. `meta`; align with what common consumers (plotters, anchor alarms) actually
+  read. **Narrowed, not closed.** The heading-honesty half is settled and needs no custom
+  vocabulary at all: the spec's own `headingCompass` → `headingMagnetic` → `headingTrue`
+  chain already encodes how much correction has been applied, so we publish at the rung we
+  have actually earned (`frame-conventions.md` §11.2). What remains open is genuine
+  *metadata* — per-value uncertainty and gate state for M5 — which the path vocabulary
+  does not cover.
 - ~~Frame conventions document~~ — **resolved**: promoted into M0 and written, see
   [`frame-conventions.md`](frame-conventions.md). It is normative: code that disagrees
-  with it is wrong. Its §9 audit found three defects in shipped code (rate-of-turn sign
-  and frame, attitude yaw carrying a rate, NaN-unbounded heading normalization), now M0
-  checklist items, and confirmed the Euler extraction and `R_W_V` chain are correct.
+  with it is wrong. Its §9 audit found five defects in shipped code (rate-of-turn sign and
+  frame, attitude yaw carrying a rate, NaN-unbounded heading normalization, non-finite
+  values reaching the JSON encoder, a no-op rate change), all fixed in M0, and confirmed
+  the Euler extraction and `R_W_V` chain are correct.
+- ~~SignalK sign conventions~~ — **resolved**: verified verbatim against the specification
+  schemas (`frame-conventions.md` §11.1). Ours match exactly — roll positive to starboard,
+  pitch positive bow-up, rate of turn positive to starboard, variation positive east and
+  additive. The rate-of-turn line is what makes audit A1 a defect rather than a preference.
+- ~~`navigation.attitude.yaw` semantics~~ — **resolved as unresolvable, and declined.**
+  SignalK defines no datum for it: with north as datum it duplicates the heading paths,
+  with mean heading as datum it is a yawing oscillation, and the spec's own wording points
+  each way in different places. We publish `roll` and `pitch` only — permanently, not
+  pending M1 (`frame-conventions.md` §11.3). If yawing motion is ever wanted, it goes on a
+  custom path with a stated datum.

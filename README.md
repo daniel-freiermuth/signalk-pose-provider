@@ -5,7 +5,8 @@ A modern Android application that streams smartphone sensor data to SignalK serv
 ## Features
 
 ### Current (MVP)
-- ✅ Stream GPS location data (fused location provider)
+
+- ✅ Stream GNSS location data (`LocationManager` + `GPS_PROVIDER`, no Play Services)
 - ✅ Real-time transmission via UDP to SignalK servers
 - ✅ Modern Android UI with Jetpack Compose
 - ✅ MVVM architecture with Hilt dependency injection
@@ -16,20 +17,37 @@ A modern Android application that streams smartphone sensor data to SignalK serv
 - ✅ JWT authentication for SignalK servers
 - ✅ Login/logout functionality with token management
 
-### Planned (Full Feature Set)
-- 🔄 Additional sensors: magnetometer, accelerometer, gyroscope, barometer
-- 🔄 Sensor fusion for improved heading/course/speed
-- 🔄 Server discovery on local network
-- 🔄 Configurable update rates
-- 🔄 Notification system
-- 🔄 Enhanced error handling and reconnection logic
+### Planned
+
+The roadmap is the milestone table in [`architectural-plan.md`](architectural-plan.md) §5.
+In short:
+
+| | Milestone | What you get |
+|---|---|---|
+| M0 | Cleanup | One coherent architecture in the repo; honest data on the wire |
+| M1 | Raw sensor pipeline + Mahony AHRS | Roll/pitch that stay correct under heel and waves |
+| M2 | Ellipsoid magnetometer calibration | Heading you can trust, immune to current by construction |
+| M3 | Heading integrity gates | Cable crossings, engine start and marina steel handled honestly |
+| M4 | Position/velocity filter | GPS jumps gone; smooth pose at 10–50 Hz |
+| M5 | Quality publishing | Every value carries what it's worth |
+| M6–M8 | Current vector, diagnostics, heave | Closing the heading/COG/current triangle |
+
+Design documents:
+- [`architectural-plan.md`](architectural-plan.md) — principles, milestones, and the
+  reasoning behind each decision (including the rejected ones)
+- [`frame-conventions.md`](frame-conventions.md) — **normative** frames, signs, units and
+  time base; code that disagrees with it is wrong
+- [`compass-calibration-design.md`](compass-calibration-design.md) — superseded, kept as
+  decision history
 
 ## Technical Stack
 
 - **Language**: Kotlin 1.9.20
 - **UI**: Jetpack Compose with Material 3
 - **Architecture**: MVVM with Hilt for dependency injection
-- **Location**: Google Play Services Fused Location Provider
+- **Location**: Platform `LocationManager` with `GPS_PROVIDER` (no Play Services — see
+  [`architectural-plan.md`](architectural-plan.md) P8; keeps the build free of proprietary
+  dependencies for F-Droid)
 - **Networking**: UDP sockets for SignalK communication
 - **Serialization**: Kotlinx Serialization
 - **Background Processing**: Android Foreground Services
@@ -39,28 +57,79 @@ A modern Android application that streams smartphone sensor data to SignalK serv
 
 The app transmits data using standard SignalK paths with quality indicators:
 
-### Navigation Data
-- `navigation.position` - GPS coordinates
-- `navigation.position.accuracy` - Horizontal accuracy in meters
-- `navigation.speedOverGround` - Speed from GPS
-- `navigation.speedOverGround.accuracy` - Speed accuracy (Android 8.0+)
-- `navigation.courseOverGroundTrue` - Course from GPS  
-- `navigation.courseOverGroundTrue.accuracy` - Bearing accuracy (Android 8.0+)
-- `navigation.gnss.altitude` - Altitude from GPS
-- `navigation.gnss.altitude.accuracy` - Vertical accuracy (Android 8.0+)
-- `navigation.gnss.type` - GPS provider (GPS, Network, Fused)
+All angles are radians and all speeds are m/s, per the SignalK spec and
+[`frame-conventions.md`](frame-conventions.md) §8.
 
-### Planned Sensor Data
-- `environment.outside.pressure` - Atmospheric pressure (planned)
-- `navigation.headingMagnetic` - Magnetic heading (planned)
-- `navigation.headingTrue` - True heading (planned)
+### Navigation Data
+
+- `navigation.position` - GNSS coordinates
+- `navigation.position.accuracy` - Horizontal accuracy in meters
+- `navigation.speedOverGround` - Speed as reported by the GPS provider
+- `navigation.speedOverGround.accuracy` - Speed accuracy
+- `navigation.courseOverGroundTrue` - Course as reported by the GPS provider
+- `navigation.courseOverGroundTrue.accuracy` - Bearing accuracy
+- `navigation.gnss.altitude` - Altitude from GNSS *(see caveat below)*
+- `navigation.gnss.altitude.accuracy` - Vertical accuracy
+- `navigation.gnss.type` - Provider name (now always `gps`)
+
+Speed and course come straight from the GNSS engine and are never derived by differencing
+positions — differencing turns multipath into fake velocity
+([`architectural-plan.md`](architectural-plan.md) P2). Real receivers compute velocity from
+carrier **Doppler**, which is what makes it jump-free, though the Android API itself
+guarantees only the value, not its provenance.
+
+### Orientation Data
+
+- `navigation.headingCompass` - Compass heading, **not** adjusted for magnetic deviation
+- `navigation.magneticVariation` - Declination at the current position (WMM model), positive east
+- `navigation.attitude` - `{ roll, pitch }`; roll positive to starboard, pitch positive bow-up
+- `navigation.rateOfTurn` - Vehicle-frame turn rate, **positive to starboard**
+- `sensors.magnetometer.accuracy` - Android's own magnetometer accuracy, 0–3
+
+Sign conventions are verified verbatim against the SignalK specification schemas — see
+[`frame-conventions.md`](frame-conventions.md) §11.
+
+### Environmental Data
+
+- `environment.outside.pressure` - Atmospheric pressure (Pa)
+- `environment.outside.temperature` - Ambient temperature (K), if the device has the sensor
+- `environment.outside.relativeHumidity` - Relative humidity (ratio), if the device has the sensor
+
+### Honest caveats on the current data
+
+- **Heading is uncalibrated, and the path name says so.** SignalK distinguishes
+  `headingCompass` ("not adjusted for magneticDeviation") from `headingMagnetic`
+  ("headingCompass adjusted for magneticDeviation") from `headingTrue`. We publish
+  `headingCompass`, because we correct for mount alignment only — the boat's own magnetic
+  signature (engine, keel, rigging) is not calibrated out until M2, and there is no
+  disturbance gating until M3. **`headingMagnetic` and `headingTrue` are deliberately not
+  published**; both would assert a correction we have not made. `magneticVariation` is
+  published because it is a property of position, not of our compass — but note it does
+  **not** let you reconstruct true heading: `headingCompass + variation` still lacks the
+  deviation term, and deviation is exactly what nobody has until M2. At M2 heading promotes
+  to `headingMagnetic`, with `magneticDeviation` alongside it, and true heading becomes
+  computable for the first time.
+- **Roll and pitch degrade under way.** The current attitude comes from a low-passed
+  tilt-compensated compass with no gyro in the loop, so wave and heel dynamics corrupt it.
+  M1 replaces this. Note the published roll is *instantaneous inclination* — steady heel
+  plus wave-driven roll oscillation — not heel alone.
+- **`navigation.gnss.altitude` is height above the WGS84 ellipsoid**, which is what Android
+  reports — not height above sea level. The difference (geoid undulation) is tens of metres
+  in many places. M4 publishes a corrected altitude per plan P9.
+- **No yaw is published, and none will be.** Beyond the old field having carried a gyro
+  rate in an angle slot, SignalK defines no datum for `attitude.yaw`: with north as datum it
+  merely duplicates the heading paths, with mean heading as datum it is a yawing
+  oscillation, and the spec never says which. Heading rides on the heading paths, which are
+  unambiguous. See [`frame-conventions.md`](frame-conventions.md) §11.3.
 
 ## Configuration
 
 - **Default UDP Port**: 55555 (SignalK standard)
 - **Default Server**: 192.168.1.100:3000
 - **Update Frequency**: 1Hz (configurable to 0.5-2Hz)
-- **Location Priority**: High accuracy with sensor fusion
+- **Location Source**: GNSS only. Fixes arrive at the chip's native rate, typically 1 Hz;
+  a shorter configured interval will not produce more fixes. Higher-rate pose output is
+  M4's job, from the filter, not from the provider.
 - **DNS Refresh**: Automatic every 5 minutes (handles dynamic IPs)
 - **Hostname Support**: Full support for mDNS/Bonjour (e.g., `signalk.local`)
 
@@ -69,17 +138,23 @@ The app transmits data using standard SignalK paths with quality indicators:
 ### Prerequisites
 
 - **Java 17 or higher** (OpenJDK recommended)
-- **No Android Studio required** - uses embedded Gradle wrapper
+- **A Gradle distribution or Android Studio**, once — see the wrapper note below
+- **Android SDK** (Android Studio or `cmdline-tools`)
 - **Linux/macOS/Windows** supported
 
 ### Quick Build (Command Line)
 
-The project includes the standard Gradle wrapper, so no additional setup is needed:
+> **Note**: `gradle-wrapper.jar` is deliberately not committed (see `.gitignore`), so a
+> fresh clone has `gradlew` but not the jar it needs. Generate it once with a system Gradle
+> installation — `gradle wrapper --gradle-version <version from
+> gradle/wrapper/gradle-wrapper.properties>` — or open the project in Android Studio, which
+> restores it during sync. You also need the Android SDK, via Android Studio or
+> `cmdline-tools`, with `ANDROID_HOME` set or `sdk.dir` in `local.properties`.
 
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd Android-SignalK-Companion
+cd signalk-pose-provider
 
 # Build debug APK (for development/testing)
 ./gradlew assembleDebug
@@ -96,6 +171,7 @@ cd Android-SignalK-Companion
 ### Installation
 
 #### Option 1: ADB (if you have Android SDK)
+
 ```bash
 # Install debug version
 adb install ./app/build/outputs/apk/debug/app-debug.apk
@@ -105,6 +181,7 @@ adb install ./app/build/outputs/apk/release/app-release.apk
 ```
 
 #### Option 2: Manual Installation
+
 1. Copy the APK file to your Android device
 2. Enable "Install from Unknown Sources" in Android Settings
 3. Tap the APK file to install
@@ -158,43 +235,38 @@ If you prefer using Android Studio:
 │   ├── main/          # Main screen and ViewModel
 │   └── theme/         # Compose theme and styling
 ├── service/
-│   ├── LocationService.kt           # GPS data collection
+│   ├── LocationService.kt           # GNSS fixes via LocationManager/GPS_PROVIDER
+│   ├── SensorService.kt             # IMU/environmental sensors, attitude
 │   ├── SignalKTransmitter.kt        # SignalK message handling & UDP transmission
-│   └── SignalKBackgroundService.kt  # Foreground service
+│   ├── SignalKStreamingService.kt   # Foreground streaming service
+│   └── AuthenticationService.kt     # JWT login/token handling
+├── util/
+│   └── DeviceCalibration.kt         # Frame math: mount rotation, attitude extraction
 ├── data/
 │   └── model/         # Data classes and SignalK models
 └── di/
     └── AppModule.kt   # Hilt dependency injection
 ```
 
+Frame, sign and unit conventions for everything under `service/` and `util/` are normative
+in [`frame-conventions.md`](frame-conventions.md); `FrameConventionsTest` encodes its
+reference poses as tests.
+
 ## Permissions Required
 
-- `ACCESS_FINE_LOCATION` - High-accuracy GPS
-- `ACCESS_COARSE_LOCATION` - Network-based location
+- `ACCESS_FINE_LOCATION` - GNSS fixes
+- `ACCESS_COARSE_LOCATION` - Declared because Android 12+ requires it alongside
+  `ACCESS_FINE_LOCATION`; no network-based location is used
 - `INTERNET` - UDP transmission
 - `FOREGROUND_SERVICE` - Background operation
 - `POST_NOTIFICATIONS` - Service notifications
 
 ## Development Roadmap
 
-### Phase 1: MVP ✅
-- [x] Basic project structure
-- [x] GPS location streaming
-- [x] UDP SignalK transmission
-- [x] Basic UI with start/stop
-- [x] Command-line build system
-
-### Phase 2: Core Features 🔄
-- [ ] Additional sensor support
-- [ ] Sensor fusion algorithms
-- [ ] Data quality metrics
-- [ ] Enhanced configuration UI
-
-### Phase 3: Polish 🔄
-- [ ] JWT authentication
-- [ ] Server discovery
-- [ ] Advanced error handling
-- [ ] Performance optimization
+See the milestone table under [Planned](#planned) above, and
+[`architectural-plan.md`](architectural-plan.md) §5 for the full version with dependencies
+and ship value per milestone. The plan is the single source of truth for what is next;
+this README describes only what the app does today.
 
 ## Troubleshooting
 
@@ -241,6 +313,7 @@ For optimal performance in marinas:
 The app supports SignalK JWT authentication for secure connections:
 
 ### Features
+
 - **HTTP(S)-based login** via `/signalk/v1/auth/login` endpoint
 - **JWT token management** with automatic expiry handling
 - **Token inclusion** in all SignalK UDP messages for authenticated access
@@ -249,12 +322,14 @@ The app supports SignalK JWT authentication for secure connections:
 - **Secure logout** with server-side token invalidation via HTTP(S)
 
 ### Server Compatibility
+
 - ✅ **OpenPlotter/SignalK Node Server** - Full authentication support
 - ✅ **Wilhelmsk** - Authentication supported
 - ✅ **SignalK Python Server** - Authentication supported  
 - ✅ **Open servers** - Authentication optional, app works without login
 
 ### Security Notes
+
 - **HTTPS preferred** - Uses HTTPS when available for secure credential transmission
 - **HTTP fallback** - Works with HTTP for development/local servers  
 - **Dual protocol design** - HTTP(S) for authentication, UDP for data

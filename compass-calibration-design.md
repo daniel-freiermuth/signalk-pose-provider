@@ -1,5 +1,46 @@
 # Compass Calibration — Design Notes
 
+> [!WARNING]
+> **SUPERSEDED — historical record, not current design.**
+> Superseded by [`architectural-plan.md`](architectural-plan.md) (Aug 2026). Kept
+> deliberately: it is the decision history, and the reasoning that was *rejected* is worth
+> as much as the reasoning that was kept.
+>
+> **What changed, and why:**
+> - **Option A/C (stack corrections on Android's fused rotation vector)** → superseded by
+>   plan P3. We own the sensor pipeline instead: raw sensors, our own filter.
+> - **C4 Fourier deviation curve as a *correction*** → **demoted to a diagnostic.** It has
+>   a fatal degeneracy: with GPS course as the heading reference, a steady current forges a
+>   clean, well-fitted, entirely spurious semicircular deviation curve. Ellipsoid
+>   calibration (plan M2) needs no external heading reference and is immune. The Fourier
+>   machinery survives as a residual report (plan M7).
+> - **C3 single-point azimuth** → absorbed into the mount rotation's yaw constant — into the
+>   *mount*, note, not into C4. See the caveat below.
+> - **Gyro interference detector** → repurposed as gate G1, feeding filter gain rather than
+>   a UI warning.
+> - **Option B ("raw pipeline: 12+ params, marginal gain")** → that cost estimate was
+>   wrong, and this document's own conclusion has been reversed. See plan P3.
+>
+> **Read the C3 row below with care.** It says C3 is a "special case of C4 (A-only)", which
+> is true *only for the heading offset*, and the row's own "Counters" column scopes it that
+> way. It does not mean C4 could replace C3. C4 is a scalar function δ(θ) — measured heading
+> in, corrected heading out — so it cannot produce the mount's tilt angles (α, β) at all, and
+> a tilted mount corrupts roll and pitch, which no deviation curve touches. The two are
+> different pipelines that overlap in one scalar.
+>
+> Even on that scalar they are different physical quantities: γ is *mechanical* (the angle
+> between phone and centreline, fixed until the bracket moves) while C4's A term is
+> *magnetic* (constant deviation from the boat's iron, changing with the boat's magnetic
+> state). C4 would absorb both indistinguishably — which is the argument for keeping them
+> separate, and why mount calibration is permanent architecture rather than something M2
+> retires.
+>
+> **What survived, and is still good:** the D1–D7 distortion taxonomy below, and the
+> closing insight that D6b is uncorrectable — detection and honesty beat sophisticated
+> correction. That became plan principle P5.
+>
+> Frame, sign and unit conventions now live in [`frame-conventions.md`](frame-conventions.md).
+
 ## Magnetic Distortion Sources
 
 | ID   | Source                      | Frame    | Varies with…                | Correctable? |
