@@ -364,16 +364,6 @@ class SignalKTransmitter @Inject constructor(
             }
         }
         
-        // GPS quality indicators
-        locationData.provider?.let { provider ->
-            values.add(
-                SignalKValue(
-                    path = "navigation.gnss.type",
-                    value = SignalKValues.string(provider)
-                )
-            )
-        }
-
         val update = SignalKUpdate(
             source = source,
             timestamp = timestamp,

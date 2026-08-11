@@ -7,6 +7,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.hardware.GeomagneticField
 import android.util.Log
+import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.util.DeviceCalibration
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.Locale
 import kotlin.math.*
 
 @Singleton
@@ -74,6 +76,8 @@ class SensorService @Inject constructor(
     private var cachedVariationLat = 0.0
     private var cachedVariationLon = 0.0
     private var cachedVariationAtMs = 0L
+    /** Guards the no-fix warning so it fires on the transition, not on every sensor event. */
+    private var loggedMissingFix = false
 
     companion object {
         private const val TAG = "SensorService"
@@ -285,17 +289,21 @@ class SensorService @Inject constructor(
      */
     private fun currentMagneticVariation(): Float? {
         val locationData = locationService.locationUpdates.value ?: run {
-            Log.w(TAG, "No position fix - magnetic variation unknown, true heading unavailable")
+            // Log on the transition only. This runs on every accelerometer and magnetometer
+            // event, so an unconditional warning is hundreds of lines a second for as long
+            // as there is no fix — which is the entire time the app is indoors or starting
+            // up. Same hot-path trap as the orientation log removed earlier.
+            if (!loggedMissingFix) {
+                Log.w(TAG, "No position fix - magnetic variation unknown, true heading unavailable")
+                loggedMissingFix = true
+            }
             return null
         }
+        loggedMissingFix = false
 
         val now = System.currentTimeMillis()
         val cached = cachedVariationRad
-        if (cached != null &&
-            now - cachedVariationAtMs < VARIATION_CACHE_MAX_AGE_MS &&
-            abs(locationData.latitude - cachedVariationLat) < VARIATION_CACHE_MAX_MOVE_DEG &&
-            abs(locationData.longitude - cachedVariationLon) < VARIATION_CACHE_MAX_MOVE_DEG
-        ) {
+        if (cached != null && isVariationCacheValid(locationData, now)) {
             return cached
         }
 
@@ -317,10 +325,19 @@ class SensorService @Inject constructor(
             cachedVariationLon = locationData.longitude
             cachedVariationAtMs = now
             variationRad
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
+            // What GeomagneticField throws for an out-of-range latitude or longitude.
             Log.e(TAG, "Error calculating magnetic variation: ${e.message}")
             null
         }
+    }
+
+    /** Whether [cachedVariationRad] is still close enough in time and position to reuse. */
+    private fun isVariationCacheValid(location: LocationData, now: Long): Boolean {
+        val fresh = now - cachedVariationAtMs < VARIATION_CACHE_MAX_AGE_MS
+        val near = abs(location.latitude - cachedVariationLat) < VARIATION_CACHE_MAX_MOVE_DEG &&
+            abs(location.longitude - cachedVariationLon) < VARIATION_CACHE_MAX_MOVE_DEG
+        return fresh && near
     }
 
     /**
@@ -380,7 +397,7 @@ class SensorService @Inject constructor(
 
     /** Formats a radian value as `, name=12.3°`, or "" when absent. Log-only helper. */
     private fun Float?.degOrNull(name: String): String =
-        this?.let { ", $name=${"%.1f".format(Math.toDegrees(it.toDouble()))}°" } ?: ""
+        this?.let { ", $name=${"%.1f".format(Locale.US, Math.toDegrees(it.toDouble()))}°" } ?: ""
 
     private fun logAvailableSensors() {
         val availableSensors = mutableListOf<String>()

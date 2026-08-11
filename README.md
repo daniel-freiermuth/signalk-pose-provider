@@ -70,7 +70,12 @@ All angles are radians and all speeds are m/s, per the SignalK spec and
 - `navigation.courseOverGroundTrue.accuracy` - Bearing accuracy
 - `navigation.gnss.altitude` - Altitude from GNSS *(see caveat below)*
 - `navigation.gnss.altitude.accuracy` - Vertical accuracy
-- `navigation.gnss.type` - Provider name (now always `gps`)
+
+`navigation.gnss.type` is **not published**. The spec defines it as fix type (2D/3D,
+DGNSS, RTK, …); `Location.getProvider()` returns `"gps"`, the Android provider name, which
+is a different piece of information and would misrepresent the spec's field if published
+there. `GPS_PROVIDER` doesn't expose true fix-type information without the raw
+`GnssStatus`/`GnssMeasurement` layer (deferred under P8) to derive it honestly.
 
 Speed and course come straight from the GNSS engine and are never derived by differencing
 positions — differencing turns multipath into fake velocity

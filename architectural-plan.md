@@ -113,8 +113,10 @@ database positions using opaque, pedestrian/car-tuned logic — it can snap to a
 access point's database location or switch providers mid-track, i.e. it *injects* the
 discontinuities this project exists to remove, and its error characteristics (database
 teleports) violate M4's filter assumptions (multipath-like, gateable, ~zero-mean).
-`GPS_PROVIDER` gives unadulterated fixes with per-fix accuracy, Doppler
-speed/bearing, and satellite metadata. Side effect: removes the proprietary Play
+`GPS_PROVIDER` gives unadulterated fixes with per-fix accuracy, speed/bearing with
+their accuracies, and satellite metadata. (Real receivers derive velocity from carrier
+Doppler — that is what makes it jump-free — but the Android API guarantees the value, not
+its provenance; verifying it directly needs the deferred raw `GnssMeasurement` layer.) Side effect: removes the proprietary Play
 Services dependency — unblocking an F-Droid-clean build. Deferred (recorded honestly,
 like old Option B): the raw `GnssMeasurement` layer (carrier smoothing, dual-frequency
 processing) offers further headroom but is high effort for modest gain on a phone
@@ -142,7 +144,7 @@ M8 heave estimate; its primary marine job (pressure trend for weather) is unaffe
 |---|---|---|
 | Option A/C: stack corrections on `TYPE_ROTATION_VECTOR` + Android C1 | **Superseded** by P3 | Stale-C1 leakage, heeled-reach vertical error, no gateable gain. Option C's quality gating survives — generalized into P6 — but on top of our own pipeline. |
 | C4 Fourier deviation curve **as correction** | **Superseded** — demoted to validation report | Fatal degeneracy: with COG as reference at a single speed, a constant current produces a crab angle ≈ arcsin(v_c/v_b · sin(θ−θ_c)) — first-order identical to semicircular (B, C) deviation. A 0.5 kn current at 4 kn forges a clean, well-fitted, spurious ~7° deviation curve. Ellipsoid calibration needs no external heading reference (truth criterion is internal: constant field magnitude), so it is immune. Fourier machinery survives as a *diagnostic*: residual semicircular structure after calibration ⇒ heeling error or unmodeled current. |
-| C3 single-point azimuth as separate layer | **Absorbed** | Becomes the single yaw-alignment constant of the mount rotation (determined via reciprocal runs / slack-water leg / sighting). One correction pipeline, one provenance record — not two layers that can silently disagree. **Absorbed into the mount rotation, not into C4** — the old doc's "special case of C4 (A-only)" holds for the heading offset only. C4 is a scalar δ(θ) and produces no tilt information, so it cannot replace mount calibration; and γ (mechanical, fixed until the bracket moves) is a different physical quantity from C4's A (magnetic, varies with the boat's state) even where their effects coincide. |
+| C3 single-point azimuth as separate layer | **Absorbed** | Becomes the single yaw-alignment constant of the mount rotation. The intended determination — reciprocal runs averaged, a slack-water leg, or a surveyed sighting — is the **M2 target**, not today's behaviour: the shipped flow still accepts a single GPS course above the 2.5 kn gate (§4), which reduces crab bias without cancelling it. One correction pipeline, one provenance record — not two layers that can silently disagree. **Absorbed into the mount rotation, not into C4** — the old doc's "special case of C4 (A-only)" holds for the heading offset only. C4 is a scalar δ(θ) and produces no tilt information, so it cannot replace mount calibration; and γ (mechanical, fixed until the bracket moves) is a different physical quantity from C4's A (magnetic, varies with the boat's state) even where their effects coincide. |
 | Gyro detector as standalone "warning UI" feature | **Repurposed** | Becomes gate G1 feeding the Mahony gain (P6). The UI warning is a side effect of the gate state, not the product. |
 
 Corrections to the *conversation* record too, for symmetry: (a) a flat calibration
@@ -162,10 +164,12 @@ is measured against what actually shipped.
 
 Verified against code during the same review (claims that hold): all published SOG/COG
 originate from `Location.getSpeed()`/`getBearing()` with their accuracy fields
-(`SignalKTransmitter.kt` — the §4 audit item is confirmed done); the position source
-really is FLP today (`LocationService.kt`, `FusedLocationProviderClient`), so the P8
-switch is live, not hypothetical; Doppler speed/bearing/accuracies are `Location`
-fields and survive the switch.
+(`SignalKTransmitter.kt` — the §4 audit item is confirmed done); at the time of that
+review the position source was still FLP (`LocationService.kt`,
+`FusedLocationProviderClient`), confirming the P8 switch below was live work rather than
+hypothetical — that switch has since landed, and §4's checklist is the current state, not
+this paragraph; Doppler speed/bearing/accuracies are `Location` fields and survived the
+switch.
 
 ## 4. Cleanup (current-version hygiene)
 
@@ -178,7 +182,7 @@ architectures:
 - [x] Replace `normalizeHeading`'s `while` loops with the branch-free form (audit A5) — the old version was an unbounded loop, i.e. a hang, on NaN. Now `DeviceCalibration.wrapTo2Pi`, with a non-finite-input test.
 - [x] Mark `compass-calibration-design.md` as superseded (banner + link here); do not delete — it's the decision history.
 - [x] Remove/park any C4-as-correction scaffolding if present. *Verified absent (Aug 2026): no Fourier/deviation-curve code was ever written; the only calibration code is C2/C3 mount alignment. Nothing to remove.*
-- [x] Audit that **all** published COG/SOG originate from `Location.getSpeed()`/`getBearing()` (Doppler) with their accuracy fields — never from position differencing anywhere in the pipeline. *Verified in code review (Aug 2026): `SignalKTransmitter.kt` publishes Doppler speed/bearing + accuracies; no position differencing found.*
+- [x] Audit that **all** published COG/SOG originate from `Location.getSpeed()`/`getBearing()` with their accuracy fields — never from position differencing anywhere in the pipeline. *Verified in code review (Aug 2026): `SignalKTransmitter.kt` publishes Doppler speed/bearing + accuracies; no position differencing found.*
 - [x] `test_signalk_json.kt` at repo root → **removed.** It was a scratch `main()` demo outside every source set (so it never compiled with the project), duplicating what `SignalKTransmitterTest` already covers. Git history keeps it.
 - [x] README roadmap: rewrite "Planned" section against the milestones below; remove Option A/C language. *Also documents the honest caveats on today's data (uncalibrated heading, dynamics-degraded roll/pitch, ellipsoidal altitude). The `gradle-wrapper.jar` gap it originally flagged is closed — the jar is now committed, so `./gradlew` works on a fresh clone.*
 - [x] **Decided:** keep the C3 azimuth implementation, with a speed guardrail. Note the earlier wording here ("interim… until M2") was misleading: **mount calibration is permanent architecture**, not a stopgap. C4 could never replace it — C4 is a scalar δ(θ) on heading and cannot produce the mount's tilt angles at all, so a tilted mount corrupts roll and pitch with or without a deviation curve. What M2 changes is only *how well γ can be measured*, not whether it is needed.
