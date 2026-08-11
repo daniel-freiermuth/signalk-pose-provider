@@ -199,7 +199,12 @@ class MahonyAhrs(
         if (dtRaw <= 0f || !dtRaw.isFinite()) return
         val dt = if (dtRaw > MAX_DT_SECONDS) MAX_DT_SECONDS else dtRaw
 
-        val e = correctionTerm()
+        // Bias-corrected rate, i.e. our best estimate of how fast the boat is actually
+        // swinging. That is what the accelerometer gate needs to know (P7).
+        val bx = wx - gyroBias[0]
+        val by = wy - gyroBias[1]
+        val bz = wz - gyroBias[2]
+        val e = correctionTerm(sqrt(bx * bx + by * by + bz * bz))
 
         // PI: proportional term steers the estimate, integral term learns the bias.
         // The integral runs only near convergence — see BIAS_FREEZE_ERROR.
@@ -293,17 +298,14 @@ class MahonyAhrs(
      * to ω. The same argument gives the integral term its `−ki·e` sign: a positive gyro bias
      * over-rotates the estimate, producing negative `e`, which drives the bias estimate up.
      */
-    private fun correctionTerm(): FloatArray {
+    private fun correctionTerm(gyroMagnitude: Float): FloatArray {
         val e = floatArrayOf(0f, 0f, 0f)
         accelerometerAccepted = false
         magnetometerAccepted = false
 
-        if (haveAccel && accelGain > 0f) {
-            val magnitude = norm(accel)
-            // Gate: only trust the accelerometer when it is plausibly measuring gravity
-            // and the boat is not swinging (P6, P7).
-            if (abs(magnitude - GRAVITY) <= accelTolerance && magnitude > 1e-6f) {
-                val a = floatArrayOf(accel[0] / magnitude, accel[1] / magnitude, accel[2] / magnitude)
+        if (accelGain > 0f && accelerometerGate(gyroMagnitude)) {
+            val a = normalize(accel)
+            if (a != null) {
                 // Predicted "up" in the body frame: world +Z rotated into body (§4.1).
                 val up = attitude.rotateInverse(WORLD_UP)
                 val c = cross(a, up)
@@ -337,7 +339,20 @@ class MahonyAhrs(
         return e
     }
 
-    /** Exposed so callers can report why a correction was skipped. */
+    /**
+     * Whether the accelerometer may be treated as a vertical reference right now.
+     *
+     * Two conditions, and both matter (P6, P7):
+     * - `|a| ≈ g`. Under wave or slamming loads the accelerometer is measuring the boat's
+     *   motion, not the vertical.
+     * - The boat is not swinging hard. The phone sits away from the centre of rotation, so a
+     *   fast swing produces real lever-arm acceleration at the phone that is not
+     *   acceleration of the boat — and crucially it can pass the `|a| ≈ g` check while
+     *   pointing somewhere other than down.
+     *
+     * This is the single gate the correction path uses; it is public so callers can report
+     * *why* a correction was skipped rather than reimplementing the test.
+     */
     fun accelerometerGate(gyroMagnitude: Float): Boolean {
         if (!haveAccel) return false
         val magnitude = norm(accel)

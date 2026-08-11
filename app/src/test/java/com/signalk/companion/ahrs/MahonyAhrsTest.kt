@@ -322,6 +322,33 @@ class MahonyAhrsTest {
     }
 
     @Test
+    fun `rejects the accelerometer while the boat is swinging hard`() {
+        // Regression test: this gate was declared and documented but never consulted by the
+        // correction path, so a hard swing still pulled the vertical. The phone sits off the
+        // centre of rotation, so swinging produces real lever-arm acceleration at the phone
+        // that is not acceleration of the boat (P7) — and it can pass |a| ≈ g while pointing
+        // somewhere other than down.
+        val f = MahonyAhrs(kp = 2f, ki = 0f)
+        val (accel, mag) = sensorsAtRest(levelAtHeading(0f))
+        var t = 1_000_000_000L
+        f.onAccelerometer(accel[0], accel[1], accel[2])
+        f.onMagnetometer(mag[0], mag[1], mag[2])
+        f.onGyroscope(t, 0f, 0f, 0f)
+
+        // A hard tack: well above maxGyroForAccel, with a perfectly plausible |a|.
+        val fast = MahonyAhrs.DEFAULT_MAX_GYRO_FOR_ACCEL * 2f
+        t += 10_000_000L
+        f.onGyroscope(t, 0f, 0f, fast)
+        assertFalse(f.accelerometerAccepted, "a hard swing must gate out the accelerometer")
+        assertTrue(f.magnetometerAccepted, "heading is unaffected by turning — mag stays live")
+
+        // And it comes back once the swing stops.
+        t += 10_000_000L
+        f.onGyroscope(t, 0f, 0f, 0f)
+        assertTrue(f.accelerometerAccepted, "the gate must reopen when the swing stops")
+    }
+
+    @Test
     fun `accepts the accelerometer at rest`() {
         val f = settle(levelAtHeading(0f), MahonyAhrs(kp = 2f, ki = 0f), seconds = 1.0)
         assertTrue(f.accelerometerAccepted, "a 1 g reading at rest must be accepted")
