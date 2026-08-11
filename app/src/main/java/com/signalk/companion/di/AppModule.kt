@@ -1,6 +1,8 @@
 package com.signalk.companion.di
 
 import android.content.Context
+import com.signalk.companion.replay.RecordingSession
+import com.signalk.companion.service.AttitudeEngine
 import com.signalk.companion.service.AuthenticationService
 import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SensorService
@@ -37,6 +39,26 @@ object AppModule {
         return SensorService(context, locationService)
     }
     
+    @Provides
+    @Singleton
+    fun provideRecordingSession(@ApplicationContext context: Context): RecordingSession {
+        return RecordingSession(context)
+    }
+
+    /**
+     * The M1 attitude pipeline. Singleton and separate from [SensorService] on purpose: the
+     * two run side by side, the legacy path still owning what is published, until the filter
+     * has been tuned against recorded sails.
+     */
+    @Provides
+    @Singleton
+    fun provideAttitudeEngine(
+        @ApplicationContext context: Context,
+        recordingSession: RecordingSession
+    ): AttitudeEngine {
+        return AttitudeEngine(context, recordingSession)
+    }
+
     @Provides
     @Singleton
     fun provideSignalKTransmitter(

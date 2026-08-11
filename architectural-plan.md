@@ -217,7 +217,7 @@ guards. The harness records raw uncalibrated sensors with the HAL's own bias est
 stored *alongside* rather than pre-subtracted, so a recording stays replayable when the
 correction strategy changes at M2, and replays are deterministic — same recording plus same
 configuration gives the same trace, which is what makes a sail a regression test rather than
-an anecdote. All pure JVM, 36 behavioural tests against synthetic sensors derived from a
+an anecdote. All pure JVM, 61 behavioural tests against synthetic sensors derived from a
 known truth, so a sign error in the ENU re-derivation shows up as divergence rather than a
 plausible number.
 
@@ -230,11 +230,45 @@ reports that in `availability`, so a recording cannot misrepresent its own prove
 is ~35 kB/s, so a six-hour passage is on the order of 750 MB, which is affordable but not
 something to leave running by accident.
 
-**Still missing from M1:** wiring the recorder and filter into the running app —
-`SensorService` still runs the legacy tilt-compensated compass, and nothing publishes from
-`MahonyAhrs` yet; UI to start and stop a recording; and the parallel comparison traces
-against stock fusion and today's pipeline. No gain is tuned — the harness exists precisely
-so tuning happens against recorded sails rather than against my guesses.
+`AttitudeEngine` is the live pipeline — `RawSensorSource` → `MahonyAhrs` → mount rotation →
+pose — and is deliberately the same shape as `ReplayRunner`, so a recording made on the boat
+replays offline and gives the same answer. It runs inside the foreground service, which now
+owns recording as an action independent of streaming (a recording is worth making with no
+server in sight, and it must survive the screen going dark). `RecordingSession` holds the
+Android-side decisions `RecordingWriter` refused to make: files land in
+`getExternalFilesDir("recordings")` rather than `filesDir`, because a recording nobody can
+pull off the phone over USB is not a regression dataset. The main screen gained a recording
+card showing file, record count and size, and — beside it — the filter's own heading, heel,
+pitch, rate of turn and gate states.
+
+**The comparison traces are in.** Android's `TYPE_ROTATION_VECTOR` is recorded as an `R`
+line at 25 Hz and shown live next to our own heading. It is never an input: feeding stock
+fusion back into the filter would make the comparison circular and re-import exactly the
+black box P3 exists to remove. Two details that make it usable rather than decorative —
+Android's rotation vector is defined against the *same* ENU world frame and device frame we
+chose in §1, so no frame conversion is involved, only the scalar-first/scalar-last swap,
+which lives in one reviewed place; and the vector is stored exactly as delivered, with the
+scalar written as `-` when the device omitted it rather than silently reconstructed, because
+"the sensor did not report this" is information.
+
+**`AttitudeEngine` publishes nothing to SignalK.** `SensorService` still owns the published
+output and the two run side by side. That is not an oversight: no gain in this filter has
+ever seen a boat, and the milestone's ship value — "correct roll/pitch under heel" — is only
+true once the gains have been tuned against a recorded sail. Switching the published source
+is a decision for whoever holds the recordings, and the code is arranged so it is a small
+one.
+
+**Still missing from M1, and not doable from here:** tuning. Every gain, tolerance and gate
+threshold is a guess with a rationale attached, and the harness exists precisely so those
+become measurements rather than guesses. That needs a recorded sail. The same recording
+answers the open hard-iron question below.
+
+**Interim hard-iron default: the HAL's estimate.** `AttitudeEngine` defaults to
+`HardIronStrategy.HalEstimate`, i.e. it subtracts `values[3..5]`. The alternative for the M1
+window is *no* correction at all, which would be worse heading than the app ships today —
+having dropped Android's correction without having our own. It is a `var`, and the recordings
+store the raw field alongside the estimate specifically so the choice can be re-decided
+offline rather than argued about.
 
 Two departures from the milestone text, both deliberate:
 - **The filter came before the logging/replay harness**, inverting the stated order. The
@@ -256,6 +290,11 @@ out: accept it (M1's ship value is roll/pitch under heel, and heading already pu
 `headingCompass` with the caveat attached); subtract `values[3..5]`, the HAL's own bias
 estimate, as an M1-only stopgap; or pull the ellipsoid fit forward into M1. The filter takes
 already-corrected magnetometer input precisely so this stays a caller decision.
+
+*Provisionally taken:* the HAL estimate, as the interim default in `AttitudeEngine`. It is
+the reversible option — `HardIronStrategy` is swappable at replay time and the recordings
+store the raw field alongside the estimate — so the first recorded sail settles it by
+measurement rather than by argument. Re-confirm once such a recording exists.
 
 **Stacking notes.** M1→M2→M3 is the attitude track; M4 is the position track and only
 needs M1 (attitude for gravity removal + frame rotation) — the two tracks can proceed
