@@ -221,11 +221,20 @@ an anecdote. All pure JVM, 36 behavioural tests against synthetic sensors derive
 known truth, so a sign error in the ENU re-derivation shows up as divergence rather than a
 plausible number.
 
-**Still missing from M1:** Android sensor ingestion at explicit `samplingPeriodUs`; the
-on-device logger that writes recordings; wiring the filter into `SensorService` in place of
-the current tilt-compensated compass; and the parallel comparison traces against stock
-fusion and today's pipeline. Nothing here is connected to the running app yet, and no gain
-is tuned — the harness exists precisely so tuning happens against recorded sails.
+`RawSensorSource` now provides the Android ingestion half: uncalibrated magnetometer and
+gyroscope plus accelerometer, at an explicit `samplingPeriodUs` (200 Hz default) on a
+dedicated `HandlerThread` rather than the main looper, stamped with `event.timestamp`. It
+falls back to the calibrated sensor types where a device lacks the uncalibrated ones and
+reports that in `availability`, so a recording cannot misrepresent its own provenance.
+`RecordingWriter` carries the file side, with a byte budget — 200 Hz across three sensors
+is ~35 kB/s, so a six-hour passage is on the order of 750 MB, which is affordable but not
+something to leave running by accident.
+
+**Still missing from M1:** wiring the recorder and filter into the running app —
+`SensorService` still runs the legacy tilt-compensated compass, and nothing publishes from
+`MahonyAhrs` yet; UI to start and stop a recording; and the parallel comparison traces
+against stock fusion and today's pipeline. No gain is tuned — the harness exists precisely
+so tuning happens against recorded sails rather than against my guesses.
 
 Two departures from the milestone text, both deliberate:
 - **The filter came before the logging/replay harness**, inverting the stated order. The
