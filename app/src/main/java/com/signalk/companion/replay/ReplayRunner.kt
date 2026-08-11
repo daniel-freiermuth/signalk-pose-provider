@@ -55,7 +55,9 @@ data class AttitudeSample(
     val biasEstimatorRunning: Boolean
 ) {
     // Generated equals/hashCode would compare the FloatArray by identity. This class exists
-    // to be compared in tests, so define them on content instead.
+    // to be compared in tests, so define them on content instead — including the gate states,
+    // which are part of what a replay regression test is checking. Omitting them let a trace
+    // whose gates behaved differently still compare equal.
     override fun equals(other: Any?): Boolean =
         other is AttitudeSample &&
             timestampNs == other.timestampNs &&
@@ -63,10 +65,23 @@ data class AttitudeSample(
             pitchRad == other.pitchRad &&
             rollRad == other.rollRad &&
             attitude == other.attitude &&
-            gyroBias.contentEquals(other.gyroBias)
+            gyroBias.contentEquals(other.gyroBias) &&
+            accelerometerAccepted == other.accelerometerAccepted &&
+            magnetometerAccepted == other.magnetometerAccepted &&
+            biasEstimatorRunning == other.biasEstimatorRunning
 
-    override fun hashCode(): Int =
-        timestampNs.hashCode() * 31 + attitude.hashCode()
+    override fun hashCode(): Int {
+        var result = timestampNs.hashCode()
+        result = 31 * result + headingRad.hashCode()
+        result = 31 * result + pitchRad.hashCode()
+        result = 31 * result + rollRad.hashCode()
+        result = 31 * result + attitude.hashCode()
+        result = 31 * result + gyroBias.contentHashCode()
+        result = 31 * result + accelerometerAccepted.hashCode()
+        result = 31 * result + magnetometerAccepted.hashCode()
+        result = 31 * result + biasEstimatorRunning.hashCode()
+        return result
+    }
 }
 
 /**
@@ -93,14 +108,28 @@ class ReplayRunner(
     val fixes: MutableList<FixRecord> = mutableListOf()
 
     /**
+     * Android's fused attitude, in order, for comparison only — never fed to the filter.
+     * Carried so a replay can answer "is ours better, and where?" against the same sail.
+     */
+    val referenceAttitudes: MutableList<RotationVectorRecord> = mutableListOf()
+
+    /**
      * Run the records through the filter.
      *
      * Records are consumed in the order given — a recording is written in arrival order, and
      * the filter's own §7 guards handle any out-of-order or duplicated timestamps rather
      * than this runner silently sorting them away. Sorting here would hide exactly the
      * delivery pathology worth knowing about.
+     *
+     * Resets the filter and clears [fixes]/[referenceAttitudes] first, so calling this
+     * more than once on the same instance — comparing gain settings or hard-iron strategies
+     * against one recording, say — replays each time from a clean state rather than
+     * continuing from wherever the previous call left off.
      */
     fun run(records: Sequence<SensorRecord>): List<AttitudeSample> {
+        filter.reset(clearBias = true)
+        fixes.clear()
+        referenceAttitudes.clear()
         val out = mutableListOf<AttitudeSample>()
         for (record in records) {
             when (record) {
@@ -110,6 +139,10 @@ class ReplayRunner(
                     filter.onMagnetometer(m[0], m[1], m[2])
                 }
                 is FixRecord -> fixes.add(record)
+                // Collected, never consumed: feeding Android's fused output back into our
+                // filter would make the comparison circular and re-import the black box P3
+                // exists to remove.
+                is RotationVectorRecord -> referenceAttitudes.add(record)
                 is GyroRecord -> {
                     filter.onGyroscope(record.timestampNs, record.x, record.y, record.z)
                     if (filter.isInitialised) out.add(sample(record.timestampNs))
