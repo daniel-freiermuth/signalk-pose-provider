@@ -23,9 +23,10 @@ import javax.inject.Singleton
  * also violates the assumptions of the M4 filter, which expects multipath-like, gateable,
  * roughly zero-mean error.
  *
- * `GPS_PROVIDER` gives unadulterated chip output: per-fix accuracy, Doppler speed and
- * bearing with their accuracies, and no Play Services dependency (which unblocks an
- * F-Droid-clean build).
+ * `GPS_PROVIDER` gives unadulterated chip output: per-fix accuracy, speed and bearing with
+ * their accuracies, and no Play Services dependency (which unblocks an F-Droid-clean
+ * build). On provenance, see [toLocationData] — real receivers derive velocity from carrier
+ * Doppler, but the Android API guarantees only the value, not how it was obtained.
  *
  * Expect fixes at the chip's native rate, typically 1 Hz. FLP's sub-second callbacks were
  * largely interpolation and repeats; this reports only what was actually measured. Higher
@@ -36,11 +37,32 @@ class LocationService @Inject constructor() {
 
     private var locationManager: LocationManager? = null
     private var locationListener: LocationListener? = null
-
-    /** Application context, retained so a rate change can re-register without a caller-supplied context. */
-    private var appContext: Context? = null
     private var currentIntervalMs: Long = DEFAULT_INTERVAL_MS
     private var lastLocationTime = 0L
+
+    /**
+     * Guards every state transition below. [startLocationUpdates], [updateLocationRate]
+     * (both overloads), and [stopLocationUpdates] each run a read-modify-write across
+     * [removeUpdates] and [registerListener] against [locationManager] and [locationListener].
+     * Two callers racing — a config update landing while a start is still in flight, say —
+     * can otherwise have one overwrite [locationListener] after the other has already
+     * registered its own, leaving that registration live with nothing left to pass to
+     * [LocationManager.removeUpdates]: a permanent duplicate GNSS listener that
+     * [stopLocationUpdates] can no longer reach.
+     *
+     * It is not enough to lock each entry point's own body: [startLocationUpdates] and the
+     * two-argument [updateLocationRate] both fold their entire decision — resolve the
+     * interval, check whether a restart applies, do the restart — into [doStart]'s *single*
+     * lock acquisition. Splitting that into "check, then separately call the start path" (an
+     * earlier version of this lock) left a window where a concurrent [stopLocationUpdates]
+     * between the check and the restart could resurrect a registration just stopped.
+     *
+     * A plain lock rather than `@Synchronized` on the suspend functions: none of the bodies
+     * actually suspends today, but a monitor held across a real suspension point can block
+     * an unrelated coroutine on the same dispatcher thread, which is a much worse failure
+     * than the one this is fixing.
+     */
+    private val registrationLock = Any()
 
     private val _locationUpdates = MutableStateFlow<LocationData?>(null)
     val locationUpdates: StateFlow<LocationData?> = _locationUpdates
@@ -57,73 +79,104 @@ class LocationService @Inject constructor() {
         private const val MIN_DISTANCE_M = 0f
     }
 
-    @Throws(SecurityException::class)
     // Default resolves to the last requested interval, not the compile-time default, so a
     // rate set through updateLocationRate() while inactive is honoured on the next start
     // rather than silently discarded. currentIntervalMs starts at DEFAULT_INTERVAL_MS.
-    suspend fun startLocationUpdates(context: Context, updateIntervalMs: Long = currentIntervalMs) {
-        Log.d(TAG, "Starting GNSS location updates with interval: ${updateIntervalMs}ms")
-
-        // Clean up any existing registration to prevent double-delivery.
-        // Don't null out _locationUpdates — preserve the last fix across reconfiguration.
-        removeUpdates()
-
-        appContext = context.applicationContext
-        currentIntervalMs = updateIntervalMs
-        lastLocationTime = 0L // Reset for accurate interval logging
-
-        val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        locationManager = manager
-
-        // A device with no GNSS hardware has no GPS_PROVIDER at all, and both
-        // isProviderEnabled() and requestLocationUpdates() reject an unknown provider.
-        // Bail out cleanly rather than crashing the streaming service on a tablet.
-        if (LocationManager.GPS_PROVIDER !in manager.allProviders) {
-            Log.e(TAG, "Device has no GPS_PROVIDER - GNSS unavailable, no position will be published")
-            locationManager = null
-            appContext = null
-            return
-        }
-
-        if (!manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            // Not fatal: registration stays live and fixes start flowing if the user
-            // enables location later. Log it so a silent no-data state is explainable.
-            Log.w(TAG, "GPS provider is disabled in system settings - no fixes until enabled")
-        }
-
-        registerListener(manager, updateIntervalMs)
-
-        Log.d(TAG, "GNSS location updates started successfully")
+    //
+    // `Long?` rather than a `= currentIntervalMs` default: a Kotlin default value is
+    // evaluated at the top of the function, before registrationLock is taken, so a caller
+    // racing a concurrent rate change could still see the pre-change value. Resolving null
+    // to currentIntervalMs *inside* doStart() closes that window.
+    @Throws(SecurityException::class)
+    suspend fun startLocationUpdates(context: Context, updateIntervalMs: Long? = null) {
+        doStart(context, updateIntervalMs, onlyIfActive = false)
     }
 
     fun stopLocationUpdates() {
         Log.d(TAG, "Stopping location updates")
-        removeUpdates()
-        locationManager = null
-        appContext = null
+        synchronized(registrationLock) {
+            removeUpdates()
+            locationManager = null
+        }
         _locationUpdates.value = null
     }
 
-    fun isLocationUpdatesActive(): Boolean {
-        return locationManager != null && locationListener != null
-    }
+    fun isLocationUpdatesActive(): Boolean = synchronized(registrationLock) { isActiveLocked() }
 
+    private fun isActiveLocked(): Boolean = locationManager != null && locationListener != null
+
+    /**
+     * Change the update rate, restarting the registration only if it is already active.
+     *
+     * Everything — the active check and the restart — now happens inside [doStart]'s single
+     * lock acquisition. Splitting them into "check, then separately call startLocationUpdates"
+     * (the previous shape) left a window where a concurrent [stopLocationUpdates] between the
+     * check and the restart could resurrect a registration the caller had just stopped.
+     */
     @Throws(SecurityException::class)
     suspend fun updateLocationRate(context: Context, updateIntervalMs: Long) {
-        Log.d(TAG, "Updating location rate to ${updateIntervalMs}ms")
-        // Recorded before the active check, so a rate set while stopped survives to the
-        // next start — startLocationUpdates()'s default reads this back.
-        currentIntervalMs = updateIntervalMs
-        if (isLocationUpdatesActive()) {
-            startLocationUpdates(context, updateIntervalMs)
-        }
+        doStart(context, updateIntervalMs, onlyIfActive = true)
     }
 
     /**
-     * Change the update rate using the context captured at start.
+     * The single locked entry point behind [startLocationUpdates] and the two-argument
+     * [updateLocationRate]: resolves the interval, decides whether to (re)register, and does
+     * the actual [removeUpdates]/[registerListener] transition, all under [registrationLock]
+     * so no other entry point's transition can interleave with it.
+     *
+     * @param onlyIfActive false for an unconditional (re)start; true to only restart an
+     *   already-live registration, recording the interval for next start otherwise — the
+     *   behaviour a rate change on an inactive service should have.
+     */
+    @Throws(SecurityException::class)
+    private fun doStart(context: Context, updateIntervalMs: Long?, onlyIfActive: Boolean) {
+        synchronized(registrationLock) {
+            val interval = updateIntervalMs ?: currentIntervalMs
+            currentIntervalMs = interval
+
+            if (onlyIfActive && !isActiveLocked()) {
+                Log.d(TAG, "Not active - rate change to ${interval}ms recorded for next start")
+                return
+            }
+
+            Log.d(TAG, "Starting GNSS location updates with interval: ${interval}ms")
+
+            // Clean up any existing registration to prevent double-delivery.
+            // Don't null out _locationUpdates — preserve the last fix across reconfiguration.
+            removeUpdates()
+            lastLocationTime = 0L // Reset for accurate interval logging
+
+            val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            locationManager = manager
+
+            // A device with no GNSS hardware has no GPS_PROVIDER at all, and both
+            // isProviderEnabled() and requestLocationUpdates() reject an unknown provider.
+            // Bail out cleanly rather than crashing the streaming service on a tablet.
+            if (LocationManager.GPS_PROVIDER !in manager.allProviders) {
+                Log.e(TAG, "Device has no GPS_PROVIDER - GNSS unavailable, no position will be published")
+                locationManager = null
+                return
+            }
+
+            if (!manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                // Not fatal: registration stays live and fixes start flowing if the user
+                // enables location later. Log it so a silent no-data state is explainable.
+                Log.w(TAG, "GPS provider is disabled in system settings - no fixes until enabled")
+            }
+
+            registerListener(manager, interval)
+        }
+
+        Log.d(TAG, "GNSS location updates started successfully")
+    }
+
+    /**
+     * Change the update rate on the existing [LocationManager] registration, without a
+     * caller-supplied context.
      *
      * The previous implementation only logged, so a rate change from the running service
-     * silently did nothing; retaining the application context makes it actually re-register.
+     * silently did nothing; re-registering on the already-cached [locationManager] makes it
+     * actually take effect.
      *
      * Unlike [startLocationUpdates] this does not propagate [SecurityException]: the one
      * caller is a config update inside the running foreground service, and taking the whole
@@ -131,19 +184,21 @@ class LocationService @Inject constructor() {
      * logging and carrying on without fixes.
      */
     fun updateLocationRate(updateIntervalMs: Long) {
-        val manager = locationManager
-        if (manager == null || appContext == null) {
-            Log.d(TAG, "Not active - rate change to ${updateIntervalMs}ms recorded for next start")
-            currentIntervalMs = updateIntervalMs
-            return
-        }
+        synchronized(registrationLock) {
+            val manager = locationManager
+            if (manager == null) {
+                Log.d(TAG, "Not active - rate change to ${updateIntervalMs}ms recorded for next start")
+                currentIntervalMs = updateIntervalMs
+                return
+            }
 
-        Log.d(TAG, "Updating location rate to ${updateIntervalMs}ms")
-        removeUpdates()
-        try {
-            registerListener(manager, updateIntervalMs)
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Location permission lost while re-registering - no further fixes", e)
+            Log.d(TAG, "Updating location rate to ${updateIntervalMs}ms")
+            removeUpdates()
+            try {
+                registerListener(manager, updateIntervalMs)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Location permission lost while re-registering - no further fixes", e)
+            }
         }
     }
 
