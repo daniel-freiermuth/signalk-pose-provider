@@ -23,6 +23,7 @@ package com.signalk.companion.replay
  * A <ns> <x> <y> <z>                                  accelerometer, m/s²
  * G <ns> <x> <y> <z> <bx> <by> <bz>                   gyroscope, rad/s + HAL drift estimate
  * M <ns> <x> <y> <z> <bx> <by> <bz>                   magnetometer, µT + HAL hard-iron estimate
+ * R <ns> <x> <y> <z> <w>                              Android rotation vector, scalar-LAST; '-' if absent
  * F <ns> <lat> <lon> <alt> <sog> <cog> <hAcc> <sAcc> <cAcc>   GNSS fix; '-' where absent
  * ```
  */
@@ -62,6 +63,46 @@ data class MagRecord(
     val biasX: Float = 0f, val biasY: Float = 0f, val biasZ: Float = 0f
 ) : SensorRecord
 
+/**
+ * Android's own fused attitude, `TYPE_ROTATION_VECTOR`, recorded purely as a **comparison
+ * trace** (M1). It is never an input to our filter — P3 exists precisely because this
+ * output cannot be gated or inspected — but having it in the same recording is what lets a
+ * replay answer "is ours actually better, and where?" rather than assuming so.
+ *
+ * Values are Android's raw event values, stored as delivered: **scalar-last**
+ * `[x, y, z, (w)]`, with `w` frequently absent. Deliberately not normalised into our
+ * convention at record time — a recording should hold what the sensor said, and the
+ * conversion is exactly the scalar-first/scalar-last trap frame-conventions.md §3.2 warns
+ * about, so it belongs in one reviewed place rather than at every write site.
+ */
+data class RotationVectorRecord(
+    override val timestampNs: Long,
+    val x: Float, val y: Float, val z: Float,
+    /** Absent on many devices; reconstructed by [toQuaternion]. */
+    val w: Float? = null
+) : SensorRecord {
+
+    /**
+     * Convert to our convention: Hamilton, **scalar-first**, `q_W_D` (device → world).
+     *
+     * The frames need no conversion, which is what makes this comparison worth having at
+     * all: Android's rotation vector is defined against the same world frame we chose in
+     * frame-conventions.md §1 — X east, Y north, Z up — and the same device frame. Only the
+     * scalar position differs.
+     *
+     * Android documents the rotation vector as `[x·sin(θ/2), y·sin(θ/2), z·sin(θ/2)]` with
+     * an optional fourth element `cos(θ/2)`. Where the scalar is missing it is recovered
+     * from the unit-norm constraint; the `coerceAtLeast` guards against a marginally
+     * over-unit vector producing a NaN from `sqrt` of a negative.
+     */
+    fun toQuaternion(): com.signalk.companion.ahrs.Quaternion {
+        val scalar = w ?: kotlin.math.sqrt(
+            (1f - x * x - y * y - z * z).coerceAtLeast(0f)
+        )
+        return com.signalk.companion.ahrs.Quaternion(scalar, x, y, z).normalized()
+    }
+}
+
 /** A GNSS fix, timestamped on the sensor clock so M4 can align it with IMU propagation. */
 data class FixRecord(
     override val timestampNs: Long,
@@ -92,6 +133,10 @@ object RecordingFormat {
             "${record.driftX} ${record.driftY} ${record.driftZ}"
         is MagRecord -> "M ${record.timestampNs} ${record.x} ${record.y} ${record.z} " +
             "${record.biasX} ${record.biasY} ${record.biasZ}"
+        // Scalar last, and '-' rather than a reconstructed value when the device omitted it:
+        // a recording states what the sensor said, and "absent" is information.
+        is RotationVectorRecord -> "R ${record.timestampNs} ${record.x} ${record.y} " +
+            "${record.z} ${opt(record.w)}"
         is FixRecord -> "F ${record.timestampNs} ${record.latitude} ${record.longitude} " +
             "${opt(record.altitude)} ${opt(record.speedMps)} ${opt(record.courseDeg)} " +
             "${opt(record.horizontalAccuracyM)} ${opt(record.speedAccuracyMps)} " +
@@ -124,6 +169,10 @@ object RecordingFormat {
                     f.getOrNull(5)?.toFloat() ?: 0f,
                     f.getOrNull(6)?.toFloat() ?: 0f,
                     f.getOrNull(7)?.toFloat() ?: 0f
+                )
+                "R" -> if (f.size < 5) null else RotationVectorRecord(
+                    f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(),
+                    optF(f.getOrNull(5))
                 )
                 "F" -> if (f.size < 4) null else FixRecord(
                     f[1].toLong(), f[2].toDouble(), f[3].toDouble(),

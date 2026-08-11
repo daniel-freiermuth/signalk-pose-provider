@@ -93,6 +93,12 @@ class ReplayRunner(
     val fixes: MutableList<FixRecord> = mutableListOf()
 
     /**
+     * Android's fused attitude, in order, for comparison only — never fed to the filter.
+     * Carried so a replay can answer "is ours better, and where?" against the same sail.
+     */
+    val referenceAttitudes: MutableList<RotationVectorRecord> = mutableListOf()
+
+    /**
      * Run the records through the filter.
      *
      * Records are consumed in the order given — a recording is written in arrival order, and
@@ -110,6 +116,10 @@ class ReplayRunner(
                     filter.onMagnetometer(m[0], m[1], m[2])
                 }
                 is FixRecord -> fixes.add(record)
+                // Collected, never consumed: feeding Android's fused output back into our
+                // filter would make the comparison circular and re-import the black box P3
+                // exists to remove.
+                is RotationVectorRecord -> referenceAttitudes.add(record)
                 is GyroRecord -> {
                     filter.onGyroscope(record.timestampNs, record.x, record.y, record.z)
                     if (filter.isInitialised) out.add(sample(record.timestampNs))

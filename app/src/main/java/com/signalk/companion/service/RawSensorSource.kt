@@ -13,6 +13,7 @@ import android.util.Log
 import com.signalk.companion.replay.AccelRecord
 import com.signalk.companion.replay.GyroRecord
 import com.signalk.companion.replay.MagRecord
+import com.signalk.companion.replay.RotationVectorRecord
 import com.signalk.companion.replay.SensorRecord
 
 /**
@@ -52,7 +53,9 @@ class RawSensorSource(private val context: Context) {
         /** False when the device only offers the calibrated gyroscope. */
         val gyroscopeUncalibrated: Boolean,
         /** False when the device only offers the calibrated magnetometer. */
-        val magnetometerUncalibrated: Boolean
+        val magnetometerUncalibrated: Boolean,
+        /** Android's fused attitude, recorded for comparison only. Absent on some devices. */
+        val hasRotationVector: Boolean = false
     ) {
         /** The filter needs all three; without them M1 cannot produce an attitude. */
         val isUsable: Boolean get() = hasAccelerometer && hasGyroscope && hasMagnetometer
@@ -66,6 +69,9 @@ class RawSensorSource(private val context: Context) {
 
         /** 200 Hz. Above the wave and rig band with margin; see P3. */
         const val DEFAULT_SAMPLING_PERIOD_US = 5_000
+
+        /** 25 Hz for the comparison trace — enough to resolve boat motion, see [start]. */
+        const val REFERENCE_SAMPLING_PERIOD_US = 40_000
 
         /**
          * Deliver events as they arrive rather than in batches. Batching saves power by
@@ -88,12 +94,18 @@ class RawSensorSource(private val context: Context) {
         sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED)
             ?: sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
 
+    // Deliberately TYPE_ROTATION_VECTOR and not TYPE_GAME_ROTATION_VECTOR: the comparison
+    // worth having is against the magnetometer-aided solution, since heading is the number
+    // this project is judged on. Recorded only; never an input (P3).
+    private val rotationVector = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+
     val availability = Availability(
         hasAccelerometer = accelerometer != null,
         hasGyroscope = gyroscope != null,
         hasMagnetometer = magnetometer != null,
         gyroscopeUncalibrated = gyroscope?.type == Sensor.TYPE_GYROSCOPE_UNCALIBRATED,
-        magnetometerUncalibrated = magnetometer?.type == Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED
+        magnetometerUncalibrated = magnetometer?.type == Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED,
+        hasRotationVector = rotationVector != null
     )
 
     /**
@@ -118,6 +130,7 @@ class RawSensorSource(private val context: Context) {
      */
     fun start(
         samplingPeriodUs: Int = DEFAULT_SAMPLING_PERIOD_US,
+        recordReferenceAttitude: Boolean = true,
         onRecord: (SensorRecord) -> Unit
     ): Boolean {
         if (isRunning) stop()
@@ -161,6 +174,19 @@ class RawSensorSource(private val context: Context) {
             Log.d(TAG, "Registered ${sensor.stringType} at ${samplingPeriodUs}us: $ok")
         }
 
+        // The reference trace is registered at a lower rate on purpose. It is never
+        // integrated, only compared, so it needs to resolve boat motion rather than the
+        // filter's step size — and at 200 Hz it would be a third of the recording's bulk
+        // for no extra answer.
+        if (recordReferenceAttitude) {
+            rotationVector?.let { sensor ->
+                val ok = sensorManager.registerListener(
+                    eventListener, sensor, REFERENCE_SAMPLING_PERIOD_US, NO_BATCHING_US, handler
+                )
+                Log.d(TAG, "Registered ${sensor.stringType} (comparison only): $ok")
+            } ?: Log.d(TAG, "No TYPE_ROTATION_VECTOR - recording without a comparison trace")
+        }
+
         clockOffsetNs = 0L
         Log.i(TAG, "Raw sensor ingestion started at ${1_000_000 / samplingPeriodUs} Hz")
         return true
@@ -197,8 +223,11 @@ class RawSensorSource(private val context: Context) {
         // HAL's bias estimate. Both are recorded so the M2 boundary can be crossed (§4.3).
         Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED ->
             MagRecord(timestamp, values[0], values[1], values[2], values[3], values[4], values[5])
-        Sensor.TYPE_MAGNETIC_FIELD ->
-            MagRecord(timestamp, values[0], values[1], values[2])
+        // Stored exactly as delivered: scalar-LAST, with values[3] absent on many devices.
+        // The conversion into our scalar-first convention lives in RotationVectorRecord.
+        Sensor.TYPE_ROTATION_VECTOR -> RotationVectorRecord(
+            timestamp, values[0], values[1], values[2], values.getOrNull(3)
+        )
 
         else -> null
     }

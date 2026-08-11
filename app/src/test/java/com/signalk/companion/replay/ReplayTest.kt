@@ -20,6 +20,7 @@ class ReplayTest {
             AccelRecord(1_000_000_000L, 0.1f, -0.2f, 9.81f),
             GyroRecord(1_005_000_000L, 0.01f, -0.02f, 0.03f, 1e-4f, 2e-4f, -3e-4f),
             MagRecord(1_010_000_000L, 12.5f, -30.25f, -40f, 1.5f, -2.5f, 3.5f),
+            RotationVectorRecord(1_015_000_000L, 0.1f, 0.2f, 0.3f, 0.927f),
             FixRecord(1_020_000_000L, 59.3293, 18.0686, 12.5, 3.2f, 187.4f, 4.1f, 0.2f, 2.5f)
         )
         val text = records.joinToString("\n") { RecordingFormat.format(it) }
@@ -50,6 +51,38 @@ class ReplayTest {
         val parsed = RecordingFormat.parseAll(text.lineSequence()).toList()
         assertEquals(1, parsed.size, "only the one well-formed record should survive")
         assertEquals(1000L, parsed[0].timestampNs)
+    }
+
+    @Test
+    fun `a rotation vector without a scalar stays absent through the round trip`() {
+        // Many devices deliver only three components. Recording a reconstructed scalar as
+        // though the sensor had reported it would lose the fact that it did not.
+        val record = RotationVectorRecord(7_000L, 0.1f, 0.2f, 0.3f)
+        val line = RecordingFormat.format(record)
+        assertTrue(line.endsWith(" -"), "missing scalar must be written as absent: $line")
+        assertEquals(record, RecordingFormat.parse(line))
+    }
+
+    @Test
+    fun `a missing rotation vector scalar is reconstructed from the unit-norm constraint`() {
+        val full = RotationVectorRecord(0L, 0.1f, 0.2f, 0.3f, 0.9273f)
+        val stripped = RotationVectorRecord(0L, 0.1f, 0.2f, 0.3f)
+        val a = full.toQuaternion()
+        val b = stripped.toQuaternion()
+        // Tolerances allow for the rounded scalar in `full`: it is a shade off unit length,
+        // so normalisation nudges every component. The claim is that reconstruction lands in
+        // the same place, not that it is bit-identical.
+        assertEquals(a.w.toDouble(), b.w.toDouble(), 1e-3)
+        assertEquals(a.x.toDouble(), b.x.toDouble(), 1e-3)
+    }
+
+    @Test
+    fun `an over-unit rotation vector does not produce NaN`() {
+        // Float rounding at the HAL can push the vector marginally past unit length; sqrt of
+        // a negative there would silently poison the comparison trace.
+        val q = RotationVectorRecord(0L, 0.8f, 0.8f, 0.8f).toQuaternion()
+        assertTrue(q.w.isFinite() && q.x.isFinite(), "reconstruction must stay finite")
+        assertEquals(0f, q.w, 1e-6f, "a degenerate scalar clamps to zero, not NaN")
     }
 
     @Test
@@ -173,6 +206,27 @@ class ReplayTest {
         assertEquals(2.5f, runner.fixes[0].speedMps)
         assertTrue(samples.all { it.timestampNs < 2_000_000_000L },
             "only gyro ticks advance the filter, so no sample comes from the fix")
+    }
+
+    @Test
+    fun `the reference attitude is collected but never fed to the filter`() {
+        // A deliberately absurd Android attitude interleaved with a clean recording. If it
+        // reached the filter the answer would move; the whole value of the comparison trace
+        // is that it does not.
+        val clean = syntheticRecording(90f, 3.0)
+        val withReference = clean.flatMap { record ->
+            if (record is GyroRecord) {
+                listOf(record, RotationVectorRecord(record.timestampNs, 0.7f, 0.7f, 0f, 0.1f))
+            } else listOf(record)
+        }
+
+        val plain = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f)).run(clean.asSequence())
+        val runner = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f))
+        val withRef = runner.run(withReference.asSequence())
+
+        assertEquals(plain, withRef, "the comparison trace must not change our own solution")
+        assertEquals(clean.count { it is GyroRecord }, runner.referenceAttitudes.size,
+            "every reference sample must still be retained for comparison")
     }
 
     @Test
