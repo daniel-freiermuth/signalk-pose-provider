@@ -26,22 +26,39 @@ class AppSettingsTest {
         `when`(mockEditor.putFloat(anyString(), anyFloat())).thenReturn(mockEditor)
     }
 
+    // Calibration angles are ZXZ (α, β, γ), the parameterisation the app moved to in
+    // "feat: replace UI from Tait-Bryan to Euler decomposition". These tests still asserted
+    // the superseded ZYX form — keys `calibration_rz/ry/rx_deg`, and a symmetric pitch bound
+    // that made β = 91° illegal — so they had been failing against the shipped code ever
+    // since that migration. Updated to the current parameterisation with their intent
+    // unchanged: out-of-range is rejected, valid values are stored under the documented keys.
+
     @Test
-    fun testSetCalibrationAngles_rejectsRzOutOfRange() {
+    fun testSetCalibrationAngles_rejectsAlphaOutOfRange() {
         assertThrows<IllegalArgumentException> {
             AppSettings.setCalibrationAngles(mockContext, 181f, 0f, 0f)
         }
     }
 
     @Test
-    fun testSetCalibrationAngles_rejectsRyOutOfRange() {
+    fun testSetCalibrationAngles_rejectsBetaAboveRange() {
         assertThrows<IllegalArgumentException> {
-            AppSettings.setCalibrationAngles(mockContext, 0f, 91f, 0f)
+            AppSettings.setCalibrationAngles(mockContext, 0f, 181f, 0f)
         }
     }
 
     @Test
-    fun testSetCalibrationAngles_rejectsRxOutOfRange() {
+    fun testSetCalibrationAngles_rejectsBetaBelowRange() {
+        // β is tilt from horizontal, defined on [0°, 180°]. Unlike the symmetric ZYX pitch
+        // it replaced, a negative β is invalid rather than merely unusual — a case the old
+        // test could not express, so it is added here rather than translated.
+        assertThrows<IllegalArgumentException> {
+            AppSettings.setCalibrationAngles(mockContext, 0f, -1f, 0f)
+        }
+    }
+
+    @Test
+    fun testSetCalibrationAngles_rejectsGammaOutOfRange() {
         assertThrows<IllegalArgumentException> {
             AppSettings.setCalibrationAngles(mockContext, 0f, 0f, -181f)
         }
@@ -50,17 +67,25 @@ class AppSettingsTest {
     @Test
     fun testSetCalibrationAngles_acceptsValidValues() {
         AppSettings.setCalibrationAngles(mockContext, 90f, 45f, -30f)
-        verify(mockEditor).putFloat(eq("calibration_rz_deg"), eq(90f))
-        verify(mockEditor).putFloat(eq("calibration_ry_deg"), eq(45f))
-        verify(mockEditor).putFloat(eq("calibration_rx_deg"), eq(-30f))
+        verify(mockEditor).putFloat(eq("calibration_alpha_deg"), eq(90f))
+        verify(mockEditor).putFloat(eq("calibration_beta_deg"), eq(45f))
+        verify(mockEditor).putFloat(eq("calibration_gamma_deg"), eq(-30f))
     }
 
     @Test
     fun testSetCalibrationAngles_acceptsBoundaryValues() {
-        AppSettings.setCalibrationAngles(mockContext, 180f, 90f, 180f)
-        verify(mockEditor).putFloat(eq("calibration_rz_deg"), eq(180f))
-        verify(mockEditor).putFloat(eq("calibration_ry_deg"), eq(90f))
-        verify(mockEditor).putFloat(eq("calibration_rx_deg"), eq(180f))
+        AppSettings.setCalibrationAngles(mockContext, 180f, 180f, -180f)
+        verify(mockEditor).putFloat(eq("calibration_alpha_deg"), eq(180f))
+        verify(mockEditor).putFloat(eq("calibration_beta_deg"), eq(180f))
+        verify(mockEditor).putFloat(eq("calibration_gamma_deg"), eq(-180f))
+    }
+
+    @Test
+    fun testSetCalibrationAngles_acceptsBetaAtZero() {
+        // β = 0 is the flat-mount gimbal-lock case DeviceCalibration documents; it is a
+        // legal stored value even though the decomposition is degenerate there.
+        AppSettings.setCalibrationAngles(mockContext, 0f, 0f, 0f)
+        verify(mockEditor).putFloat(eq("calibration_beta_deg"), eq(0f))
     }
 
     @Test
