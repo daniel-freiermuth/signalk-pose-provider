@@ -29,6 +29,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import com.signalk.companion.replay.RecordingSession
+import com.signalk.companion.service.AttitudeEngine
 import com.signalk.companion.util.DeviceCalibration
 import android.hardware.SensorManager
 import java.text.SimpleDateFormat
@@ -210,6 +212,14 @@ fun MainScreen(
                 sensorData = uiState.sensorData
             )
             
+            // Raw Recording Card (M1)
+            RecordingCard(
+                recording = uiState.recording,
+                attitude = uiState.attitude,
+                permissionsGranted = permissionsState.allPermissionsGranted,
+                onToggle = { viewModel.toggleRecording() }
+            )
+
             // Live Transmission Card
             if (uiState.isStreaming) {
                 LiveTransmissionCard(
@@ -274,6 +284,115 @@ fun ConnectionStatusCard(
                 else
                     MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+/**
+ * Raw sensor recording, and the M1 filter's own pose beside it (M1).
+ *
+ * The pose here is **not** what the app publishes — `SensorService` still owns that. It is
+ * shown next to the legacy value on purpose: an untuned filter's number is only meaningful
+ * as a comparison, and having both on one screen is what makes a disagreement visible while
+ * you are still on the water and can note what the boat was doing.
+ */
+@Composable
+fun RecordingCard(
+    recording: RecordingSession.Status,
+    attitude: AttitudeEngine.State?,
+    permissionsGranted: Boolean,
+    onToggle: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Raw Recording",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = "Records uncalibrated sensors at 200 Hz for offline replay. " +
+                    "About 35 kB/s — roughly 130 MB per hour.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Button(
+                onClick = onToggle,
+                enabled = permissionsGranted || recording.isRecording,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = if (recording.isRecording) Icons.Default.Close
+                        else Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (recording.isRecording) "Stop Recording" else "Start Recording")
+            }
+
+            recording.fileName?.let { name ->
+                SensorDataRow("File", name)
+                SensorDataRow("Records", recording.recordCount.toString())
+                SensorDataRow("Size", "%.1f MB".format(recording.bytesWritten / 1_000_000.0))
+            }
+
+            if (recording.isTruncated) {
+                Text(
+                    text = "Recording stopped at the size limit — the sail is complete up to that point.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            recording.error?.let { message ->
+                Text(
+                    text = "Recording failed: $message",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            if (attitude != null) {
+                HorizontalDivider()
+                Text(
+                    text = "Filter (comparison only — not published)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                SensorDataRow("Heading", "%.1f°".format(Math.toDegrees(attitude.headingRad.toDouble())))
+                SensorDataRow("Heel", "%.1f°".format(Math.toDegrees(attitude.rollRad.toDouble())))
+                SensorDataRow("Pitch", "%.1f°".format(Math.toDegrees(attitude.pitchRad.toDouble())))
+                SensorDataRow(
+                    "Rate of turn",
+                    "%.1f°/s".format(Math.toDegrees(attitude.rateOfTurnRadS.toDouble()))
+                )
+                attitude.referenceHeadingRad?.let {
+                    SensorDataRow(
+                        "Android heading",
+                        "%.1f°".format(Math.toDegrees(it.toDouble()))
+                    )
+                }
+                // The gate states are the beginning of M5's quality publishing: an instrument
+                // that says why it is coasting is worth more than one that goes quiet.
+                SensorDataRow(
+                    "Corrections",
+                    listOfNotNull(
+                        if (attitude.accelerometerAccepted) "accel" else null,
+                        if (attitude.magnetometerAccepted) "mag" else null,
+                        if (attitude.biasEstimatorRunning) "bias" else null
+                    ).joinToString(", ").ifEmpty { "coasting on gyro" }
+                )
+                SensorDataRow(
+                    "Gyro bias",
+                    "%.2f°/s".format(Math.toDegrees(attitude.gyroBiasMagnitude.toDouble()))
+                )
+            }
         }
     }
 }

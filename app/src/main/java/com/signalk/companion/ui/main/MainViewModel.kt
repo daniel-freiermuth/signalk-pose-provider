@@ -10,6 +10,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
+import com.signalk.companion.replay.RecordingSession
+import com.signalk.companion.service.AttitudeEngine
 import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SensorService
 import com.signalk.companion.service.SignalKStreamingService
@@ -52,7 +54,14 @@ data class MainUiState(
     val lastTransmissionTime: Long? = null,
     val isAuthenticated: Boolean = false,
     val username: String? = null,
-    val isLoggingIn: Boolean = false
+    val isLoggingIn: Boolean = false,
+    /** M1 raw recording: file name, record count, byte count, truncation. */
+    val recording: RecordingSession.Status = RecordingSession.Status(),
+    /**
+     * The M1 filter's pose, shown next to the legacy value as a comparison trace. Null until
+     * a recording is running — the engine is what produces it, and it is not published.
+     */
+    val attitude: AttitudeEngine.State? = null
 )
 
 @HiltViewModel
@@ -61,7 +70,9 @@ class MainViewModel @Inject constructor(
     private val locationService: LocationService,
     private val sensorService: SensorService,
     private val signalKTransmitter: SignalKTransmitter,
-    private val authenticationService: AuthenticationService
+    private val authenticationService: AuthenticationService,
+    private val recordingSession: RecordingSession,
+    private val attitudeEngine: AttitudeEngine
 ) : ViewModel() {
     
     private var streamingService: SignalKStreamingService? = null
@@ -165,6 +176,21 @@ class MainViewModel @Inject constructor(
             }
         }
         
+        // M1 recording status and the filter's own pose. Both are observed unconditionally —
+        // they are cheap StateFlows that sit idle when nothing is recording, and the
+        // recording outlives this ViewModel, so the UI must be able to rejoin one in progress.
+        viewModelScope.launch {
+            recordingSession.status.collect { status ->
+                _uiState.update { it.copy(recording = status) }
+            }
+        }
+
+        viewModelScope.launch {
+            attitudeEngine.state.collect { attitude ->
+                _uiState.update { it.copy(attitude = attitude) }
+            }
+        }
+
         // Observe SignalK connection status for UI
         viewModelScope.launch {
             signalKTransmitter.connectionStatus.collect { isConnected ->
@@ -246,7 +272,10 @@ class MainViewModel @Inject constructor(
      */
     fun onAppBackground() {
         isAppInForeground = false
-        if (!_uiState.value.isStreaming) {
+        // A recording needs GNSS as much as streaming does, and backgrounding the app is the
+        // normal state of a phone on a boat — shutting location down here would silently
+        // produce a recording with no fixes in it.
+        if (!_uiState.value.isStreaming && !_uiState.value.recording.isRecording) {
             stopForegroundSensors()
         }
     }
@@ -557,6 +586,42 @@ class MainViewModel @Inject constructor(
         }
     }
     
+    /**
+     * Start or stop a raw sensor recording (M1).
+     *
+     * Routed through the foreground service rather than driven from here: a recording must
+     * survive the screen turning off and the app being backgrounded, which is the normal
+     * state of a phone on a boat, and a ViewModel guarantees neither.
+     */
+    fun toggleRecording() {
+        val action = if (_uiState.value.recording.isRecording) {
+            SignalKStreamingService.ACTION_STOP_RECORDING
+        } else {
+            SignalKStreamingService.ACTION_START_RECORDING
+        }
+
+        if (!bound) {
+            val intent = Intent(applicationContext, SignalKStreamingService::class.java)
+            applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        }
+
+        val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
+            this.action = action
+            putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, _uiState.value.locationIntervalMs)
+        }
+
+        if (action == SignalKStreamingService.ACTION_START_RECORDING &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        ) {
+            applicationContext.startForegroundService(serviceIntent)
+        } else {
+            applicationContext.startService(serviceIntent)
+        }
+    }
+
+    /** Recording files on the device, newest first — for a "what have I got?" readout. */
+    fun listRecordings(): List<java.io.File> = recordingSession.list()
+
     fun login(username: String, password: String) {
         authJob?.cancel()
         authJob = viewModelScope.launch {
