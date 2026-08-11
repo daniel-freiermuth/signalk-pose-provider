@@ -14,11 +14,15 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.signalk.companion.MainActivity
 import com.signalk.companion.R
+import com.signalk.companion.data.model.LocationData
+import com.signalk.companion.replay.FixRecord
+import com.signalk.companion.replay.RecordingSession
 import com.signalk.companion.util.BatteryOptimizationHelper
 import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.UrlParser
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -50,12 +54,39 @@ class SignalKStreamingService : Service() {
     @Inject
     lateinit var signalKTransmitter: SignalKTransmitter
 
+    /** The M1 attitude pipeline. Runs independently of streaming; publishes nothing yet. */
+    @Inject
+    lateinit var attitudeEngine: AttitudeEngine
+
+    @Inject
+    lateinit var recordingSession: RecordingSession
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val binder = LocalBinder()
 
     // Coroutine job for forwarding sensor/location data to the transmitter.
     // Null when not streaming so no data is forwarded and no CPU is burned.
     private var transmissionJob: kotlinx.coroutines.Job? = null
+
+    // Forwards GNSS fixes into the recording. Null when not recording.
+    private var recordingJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * The newest start command that asked for a teardown, shared by both stop paths.
+     *
+     * `stopSelfResult(id)` only stops the service when `id` is the latest start command, which
+     * is what keeps a teardown from killing a start that raced it. The catch is that streaming
+     * and recording tear down on different threads — [stopStreaming] finishes in a coroutine
+     * while [stopRecording] runs inline from [onStartCommand] — so each can see the other
+     * mid-flight and defer to it. When that happens the deferring command's id is the newer
+     * one, and whoever *does* finish last would be calling `stopSelfResult` with an id the
+     * framework has already superseded: the stop is rejected and the service lingers IDLE with
+     * GNSS still registered, which on a boat is a flat battery rather than a crash.
+     *
+     * Carrying the newest id here means the last path to finish speaks for every stop request
+     * that led to it, while a genuinely *new* start still supersedes them all and survives.
+     */
+    @Volatile private var lastStopRequestId = 0
 
     // Configuration options
     private var sendLocation: Boolean = true
@@ -91,6 +122,8 @@ class SignalKStreamingService : Service() {
         const val ACTION_START_STREAMING = "START_STREAMING"
         const val ACTION_STOP_STREAMING = "STOP_STREAMING"
         const val ACTION_UPDATE_CONFIG = "UPDATE_CONFIG"
+        const val ACTION_START_RECORDING = "START_RECORDING"
+        const val ACTION_STOP_RECORDING = "STOP_RECORDING"
         
         const val EXTRA_PARSED_URL = "PARSED_URL"
         const val EXTRA_LOCATION_RATE = "LOCATION_RATE"
@@ -119,6 +152,11 @@ class SignalKStreamingService : Service() {
         serviceScope.launch {
             signalKTransmitter.connectionStatus.collect { isConnected ->
                 Log.d(TAG, "SignalK connection status: $isConnected")
+                // Only while streaming is the one thing this notification is about. A
+                // recording running on its own keeps the transmitter idle, and letting its
+                // disconnected state overwrite "Recording raw sensor data" with
+                // "Connecting to SignalK..." would describe the wrong job entirely.
+                if (_streamingState.value == StreamingState.IDLE) return@collect
                 if (isConnected) {
                     updateNotification("Connected to SignalK - Messages sent: ${_messagesSent.value}")
                 } else {
@@ -174,7 +212,8 @@ class SignalKStreamingService : Service() {
                         sensorRate = AppSettings.getSensorIntervalMs(this).toInt(),
                         sendLocation = AppSettings.getSendLocation(this),
                         sendHeading = AppSettings.getSendHeading(this),
-                        sendPressure = AppSettings.getSendPressure(this)
+                        sendPressure = AppSettings.getSendPressure(this),
+                        startId = startId
                     )
                 } else {
                     Log.e(TAG, "Cannot resume: saved server URL '$serverUrl' is invalid — stopping")
@@ -203,7 +242,10 @@ class SignalKStreamingService : Service() {
                 val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
                 
                 if (parsedUrl != null) {
-                    startStreaming(parsedUrl, locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
+                    startStreaming(
+                        parsedUrl, locationRate, sensorRate,
+                        sendLocation, sendHeading, sendPressure, startId
+                    )
                 } else {
                     Log.w(TAG, "ACTION_START_STREAMING received but parsedUrl is null - ignoring request")
                 }
@@ -218,7 +260,24 @@ class SignalKStreamingService : Service() {
                 updateStreamingConfig(locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
             }
             ACTION_STOP_STREAMING -> {
+                lastStopRequestId = startId
                 stopStreaming()
+            }
+            ACTION_START_RECORDING -> {
+                val started = startRecording(intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L))
+                // toggleRecording() calls startForegroundService() for this action, which
+                // obligates a startForeground() call within seconds or the system kills the
+                // process for breaking that contract. A failed startRecording() never makes
+                // that call; streaming (if active) already has, so only a fully idle service
+                // needs to stop itself here to avoid being the one left holding the promise.
+                if (!started && _streamingState.value == StreamingState.IDLE) {
+                    Log.w(TAG, "Recording failed to start and nothing else needs the service - stopping")
+                    stopSelfResult(startId)
+                }
+            }
+            ACTION_STOP_RECORDING -> {
+                lastStopRequestId = startId
+                stopRecording()
             }
         }
         
@@ -230,7 +289,8 @@ class SignalKStreamingService : Service() {
 
     private fun startStreaming(parsedUrl: UrlParser.ParsedUrl,
                                locationRate: Long, sensorRate: Int,
-                               sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true) {
+                               sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true,
+                               startId: Int = 0) {
         if (_streamingState.value != StreamingState.IDLE) {
             Log.d(TAG, "Already streaming or starting (state=${_streamingState.value}), ignoring start request")
             return
@@ -313,7 +373,41 @@ class SignalKStreamingService : Service() {
                 Log.e(TAG, errorMessage, e)
                 _error.value = errorMessage
                 _streamingState.value = StreamingState.IDLE
-                stopSelf()
+
+                // The throw can land anywhere in the sequence above, including the very last
+                // line — startForeground() itself throws when the OS refuses the promotion.
+                // By then the transmitter, the sensors, the forwarding job and the resume
+                // flag are all live, so clearing the state enum alone would leave a service
+                // that reports IDLE still transmitting, and leave wasStreaming set for the
+                // next OS restart to resume a session that never actually started. Undo the
+                // whole partial start, not the flag that describes it.
+                AppSettings.setWasStreaming(this@SignalKStreamingService, false)
+                transmissionJob?.cancel()
+                transmissionJob = null
+                try {
+                    signalKTransmitter.stopStreaming()
+                } catch (stopError: Exception) {
+                    Log.w(TAG, "Transmitter refused to stop after a failed start", stopError)
+                }
+                sensorService.stopSensorUpdates()
+
+                // A recording is an independent reason for this service to exist, and it is
+                // the one artefact that cannot be re-taken. stopSelf() here would reach
+                // onDestroy(), which stops the attitude engine and closes the recording — so
+                // a mistyped hostname would end a sail already being recorded. GNSS is left
+                // alone on this path for the same reason: the recording still wants it, and
+                // on the other path onDestroy() stops it anyway.
+                if (recordingSession.isRecording) {
+                    updateNotification("Recording raw sensor data")
+                } else {
+                    // stopSelfResult, not stopSelf: this failure is handled on a background
+                    // dispatcher, so the read above can be stale by the time it is acted on.
+                    // A recording that started in that gap arrived as its own start command
+                    // and has bumped the id, which makes this call a no-op — otherwise a
+                    // failed connection attempt could destroy the service out from under a
+                    // sail that had just begun recording.
+                    stopSelfResult(startId)
+                }
             }
         }
     }
@@ -330,15 +424,195 @@ class SignalKStreamingService : Service() {
         transmissionJob = null
 
         serviceScope.launch {
-            locationService.stopLocationUpdates()
+            // A recording may still be running and still needs GNSS and the service alive.
+            // Tearing the service down here would end the sail mid-file — and a recording is
+            // exactly the artefact you cannot re-take.
+            val recording = recordingSession.isRecording
+            if (!recording) locationService.stopLocationUpdates()
             sensorService.stopSensorUpdates()
             signalKTransmitter.stopStreaming()
-            
+
             _streamingState.value = StreamingState.IDLE
-            
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+
+            // Re-read rather than reusing the snapshot above: signalKTransmitter.stopStreaming()
+            // is a real teardown, and a recording started during it would otherwise be judged
+            // by a value read before it existed — then closed by onDestroy().
+            if (recordingSession.isRecording) {
+                // The notification now belongs to the recording, not streaming; its Stop
+                // button follows from that automatically (see currentStopAction).
+                updateNotification("Recording raw sensor data")
+            } else {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                // stopSelfResult, not stopSelf: every recording start arrives as its own
+                // start command, so one racing this teardown has already bumped the startId
+                // and this call becomes a no-op. That is the framework serialising the two
+                // transitions for us, which the re-read above alone cannot do. The id is
+                // lastStopRequestId rather than this command's own, so that a stop-recording
+                // that ran while this coroutine was in flight — and deferred to it — is
+                // spoken for here (see lastStopRequestId).
+                stopSelfResult(lastStopRequestId)
+            }
         }
+    }
+
+    // ------------------------------------------------------------------ recording (M1)
+
+    /**
+     * Start a raw sensor recording, and the attitude engine that consumes the same records.
+     *
+     * Deliberately independent of streaming. A recording is worth making with no server in
+     * sight — the harness exists so filter gains are tuned against recorded sails rather than
+     * on the water — so this promotes the service to the foreground on its own, and stopping
+     * a recording only tears the service down if nothing else is using it.
+     *
+     * GNSS fixes are forwarded separately from the sensor stream because they arrive on a
+     * different thread and a different clock source; [FixRecord]'s timestamp is the fix's
+     * `elapsedRealtimeNanos`, which shares the sensor time base (frame-conventions.md §7). A
+     * fix without that timestamp is dropped rather than stamped with an invented one: an
+     * unplaceable fix is worse than a missing one for M4.
+     */
+    fun startRecording(locationRate: Long = 1000L): Boolean {
+        if (recordingSession.isRecording) {
+            Log.d(TAG, "Recording already in progress, ignoring start request")
+            return true
+        }
+
+        // A recording whose writer failed mid-sail detaches itself inside RecordingSession,
+        // so the session reports "not recording" while this job is still collecting fixes.
+        // stopRecording() reaps it, but nothing forces the user through stop first — the UI
+        // simply offers Start again. Overwriting the field without this would leave the old
+        // collector alive, and every fix would then be written twice into the new file.
+        recordingJob?.cancel()
+        recordingJob = null
+
+        if (recordingSession.start() == null) {
+            Log.e(TAG, "Could not open a recording file - not starting the engine")
+            return false
+        }
+
+        // AttitudeEngine keeps its own mount-rotation state (Volatile, see AttitudeEngine),
+        // separate from SensorService's — without this it would start at identity and every
+        // M1 boat-frame reading would be reported in raw device coordinates instead.
+        attitudeEngine.setCalibrationAngles(
+            AppSettings.getCalibrationAlphaDeg(this),
+            AppSettings.getCalibrationBetaDeg(this),
+            AppSettings.getCalibrationGammaDeg(this)
+        )
+        if (!attitudeEngine.start(record = true)) {
+            Log.e(TAG, "Attitude engine refused to start - closing the empty recording")
+            recordingSession.stop()
+            return false
+        }
+
+        // Whatever fix is current *now* predates the recording by definition. locationUpdates
+        // is a StateFlow and replays its last value to the collector below, so a baseline of
+        // zero would let that stale fix — possibly minutes old, from a previous sail — be
+        // forwarded as though it had been measured during this one. Read before GNSS is
+        // (re)started, so a fix that arrives because of this recording is never mistaken for
+        // the pre-recording one and dropped.
+        val baselineFixNs = locationService.locationUpdates.value?.toFixRecord()?.timestampNs ?: 0L
+
+        // UNDISPATCHED: the body runs on this thread, to completion, before startRecording()
+        // returns. startLocationUpdates() is a suspend function that never actually suspends,
+        // so a normally-dispatched child could still be queued when stopRecording() cancels
+        // it — and cancellation cannot interrupt a body that has no suspension point to
+        // observe it at. It would then re-register GNSS *after* stopRecording() had already
+        // stopped it, leaving the receiver running with nobody left to own it. Taking
+        // ownership here orders the start strictly before any stop that follows.
+        serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            // The service may already have GNSS running for streaming; starting it twice
+            // would double-register. LocationService re-registers cleanly, but there is
+            // no reason to disturb a working stream.
+            if (!locationService.isLocationUpdatesActive()) {
+                try {
+                    locationService.startLocationUpdates(this@SignalKStreamingService, locationRate)
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "Location permission not granted - recording without fixes", e)
+                }
+            }
+        }
+
+        recordingJob = serviceScope.launch {
+            var lastFixNs = baselineFixNs
+            locationService.locationUpdates.collect { locationData ->
+                val fix = locationData?.toFixRecord() ?: return@collect
+                // Skip the replayed value and any repeat delivery of a fix already forwarded.
+                if (fix.timestampNs == lastFixNs) return@collect
+                lastFixNs = fix.timestampNs
+                attitudeEngine.onFix(fix)
+            }
+        }
+
+        try {
+            startForeground(NOTIFICATION_ID, createNotification("Recording raw sensor data"))
+        } catch (e: Exception) {
+            // The system can refuse the promotion outright — ForegroundServiceStartNotAllowed
+            // when the start did not come from a context that earns it, a SecurityException
+            // when the declared service type is not permitted. Uncaught, that propagates out
+            // of onStartCommand() and takes the process with it, so the `return false` path
+            // the caller already handles would never run and the buffered tail of the
+            // recording would die in the crash instead of reaching disk. Roll back by hand.
+            Log.e(TAG, "Foreground promotion refused - rolling the recording back", e)
+            recordingJob?.cancel()
+            recordingJob = null
+            attitudeEngine.stop()
+            recordingSession.stop()
+            releaseGnssUnlessStreamingWantsIt()
+            return false
+        }
+        Log.i(TAG, "Recording started")
+        return true
+    }
+
+    /**
+     * Give up GNSS unless streaming is still running *and* still asking for position.
+     *
+     * Streaming with `sendLocation` disabled means the recording was the receiver's only
+     * reason to be on, and leaving it registered then is a flat battery for nothing. Shared
+     * by the two paths that end a recording — a clean stop and a failed foreground promotion
+     * — because they have to make the same call and drifted apart once already.
+     */
+    private fun releaseGnssUnlessStreamingWantsIt() {
+        if (_streamingState.value == StreamingState.IDLE || !sendLocation) {
+            locationService.stopLocationUpdates()
+        }
+    }
+
+    /**
+     * Stop the recording and return the file, or null if none was running.
+     *
+     * Order matters: the engine is stopped first so the sensor thread is gone before the
+     * writer closes. [RecordingSession] is explicitly single-writer, and closing underneath a
+     * live 200 Hz callback is the one way to lose the tail of a sail.
+     */
+    fun stopRecording(): java.io.File? {
+        // Keyed on the job as well as the session, because the two can disagree:
+        // RecordingSession detaches its own writer when a write fails mid-sail (storage
+        // full, an MTP hiccup), so it reports "not recording" while this service still owns
+        // the attitude engine, the sensor thread, the GNSS forwarding job and the foreground
+        // promise. Returning early there would strand all of it — running, recording
+        // nothing, with no path left that tears it down.
+        if (recordingJob == null && !recordingSession.isRecording) return null
+
+        recordingJob?.cancel()
+        recordingJob = null
+
+        attitudeEngine.stop()
+        val file = recordingSession.stop()
+        Log.i(TAG, "Recording stopped: ${file?.absolutePath}")
+
+        releaseGnssUnlessStreamingWantsIt()
+        if (_streamingState.value == StreamingState.IDLE) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            // stopSelfResult with the id of the command that asked for this stop, so a start
+            // racing it survives - and, through lastStopRequestId, so that a stop-streaming
+            // still finishing on its own thread is spoken for rather than left to call this
+            // with an id the framework has already superseded.
+            stopSelfResult(lastStopRequestId)
+        } else {
+            updateNotification("Messages sent: ${_messagesSent.value}")
+        }
+        return file
     }
 
     private fun updateStreamingConfig(locationRate: Long, sensorRate: Int, sendLocation: Boolean, sendHeading: Boolean, sendPressure: Boolean) {
@@ -357,7 +631,10 @@ class SignalKStreamingService : Service() {
             
             // Handle location service changes
             val wasLocationActive = locationService.isLocationUpdatesActive()
-            val shouldLocationBeActive = sendLocation
+            // An active recording needs GNSS as much as sendLocation does - a config update
+            // that turns sendLocation off must not stop fixes out from under a recording that
+            // is still running, the same ownership rule stopRecording() applies on its side.
+            val shouldLocationBeActive = sendLocation || recordingSession.isRecording
             
             if (wasLocationActive && !shouldLocationBeActive) {
                 Log.d(TAG, "Stopping location updates (disabled in config)")
@@ -397,6 +674,7 @@ class SignalKStreamingService : Service() {
 
     fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
         sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
+        attitudeEngine.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
         Log.d(TAG, "Updated calibration angles: α=${alphaDeg}°, β=${betaDeg}°, γ=${gammaDeg}°")
     }
 
@@ -428,7 +706,28 @@ class SignalKStreamingService : Service() {
         notificationManager.createNotificationChannel(channel)
     }
 
+    /**
+     * What the notification's single Stop button means right now.
+     *
+     * Derived from live state rather than passed in, because there is exactly one
+     * notification and several unrelated things rebuild it: connection-status changes and
+     * every transmission-counter tick call [updateNotification] with nothing but text. When
+     * the action was a parameter with a streaming default, those refreshes quietly replaced
+     * a recording's "Stop recording" button with one dispatching [ACTION_STOP_STREAMING] —
+     * which cannot stop the recording the notification is describing.
+     *
+     * A recording outranks streaming: streaming can be restarted from the app in seconds,
+     * a sail cannot be re-sailed, so the button that is always reachable stops the recording.
+     */
+    private fun currentStopAction(): Pair<String, String> =
+        if (recordingSession.isRecording) {
+            ACTION_STOP_RECORDING to "Stop recording"
+        } else {
+            ACTION_STOP_STREAMING to "Stop"
+        }
+
     private fun createNotification(contentText: String): Notification {
+        val (stopAction, stopLabel) = currentStopAction()
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent,
@@ -436,7 +735,7 @@ class SignalKStreamingService : Service() {
         )
 
         val stopIntent = Intent(this, SignalKStreamingService::class.java).apply {
-            action = ACTION_STOP_STREAMING
+            action = stopAction
         }
         val stopPendingIntent = PendingIntent.getService(
             this, 0, stopIntent,
@@ -450,7 +749,7 @@ class SignalKStreamingService : Service() {
             .setContentIntent(pendingIntent)
             .addAction(
                 android.R.drawable.ic_media_pause,
-                "Stop",
+                stopLabel,
                 stopPendingIntent
             )
             .setOngoing(true)
@@ -464,8 +763,37 @@ class SignalKStreamingService : Service() {
         // Safety-net: stop sensors if the service is destroyed without ViewModel cleanup
         // (e.g., OS-restart path with no Activity). ViewModel will restart them for
         // foreground display if the app is still visible.
+        // Close any open recording before the process goes away, so the last buffered records
+        // reach disk rather than dying with the service.
+        recordingJob?.cancel()
+        recordingJob = null
+        attitudeEngine.stop()
+        recordingSession.stop()
         sensorService.stopSensorUpdates()
         locationService.stopLocationUpdates()
         serviceScope.cancel()
     }
+}
+
+/**
+ * A fix on the sensor time base, or null when the platform did not supply one.
+ *
+ * Dropping the fix is deliberate. `elapsedRealtimeNanos` is what lets M4 place a fix on the
+ * IMU timeline (frame-conventions.md §7); substituting wall clock would put a plausible but
+ * wrong timestamp in a recording that is meant to be ground truth, and wall clock jumps
+ * whenever NTP or the receiver corrects it.
+ */
+private fun LocationData.toFixRecord(): FixRecord? {
+    val monotonicNs = elapsedRealtimeNanos ?: return null
+    return FixRecord(
+        timestampNs = monotonicNs,
+        latitude = latitude,
+        longitude = longitude,
+        altitude = altitude,
+        speedMps = speed,
+        courseDeg = bearing,
+        horizontalAccuracyM = accuracy,
+        speedAccuracyMps = speedAccuracy,
+        courseAccuracyDeg = bearingAccuracy
+    )
 }
