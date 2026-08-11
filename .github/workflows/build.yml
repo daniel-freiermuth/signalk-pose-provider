@@ -1,0 +1,71 @@
+name: build
+
+# Compiles and unit-tests the app against a real Android SDK.
+#
+# This exists because the Android-dependent sources cannot be built everywhere they are
+# edited: an environment without the SDK can parse Kotlin and run the pure-JVM tests, but it
+# cannot tell you whether `LocationManager.allProviders` is spelled correctly or whether the
+# Compose changes type-check. That gap is what this workflow closes — for every push, on
+# hardware that has the SDK.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded run tells you nothing useful; cancel it and keep the queue short.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # Pinned to the toolchain the build declares (sourceCompatibility 17,
+          # jvmTarget 17) rather than tracking the runner default, so a runner image
+          # upgrade cannot silently change what the app is compiled against.
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Only write to the shared cache from the default branch. PR branches read it but
+          # cannot poison it for everyone else.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Report the toolchain
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || echo "no platforms directory"
+          java -version
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Assemble debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload test report
+        # Runs even when the tests fail — which is exactly when the report is worth having.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          retention-days: 14
+          if-no-files-found: warn
