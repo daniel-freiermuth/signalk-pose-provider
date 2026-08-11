@@ -210,11 +210,22 @@ prerequisites; unlisted milestones are mutually independent and stackable.
 | M7 | **Validation & diagnostics** | Fourier residual report post-calibration (the demoted C4): per-tack residuals ⇒ heeling-error estimate; calibration history trending (magnetic biography of the boat); maneuver-based current fix (every tack = free current estimate) as fallback where no STW | M2 (+M6 optional) | Turns residuals into boat knowledge |
 | M8 | **Nice-to-haves** | Heave from band-limited single integration (wave-periodicity anchored), fused with barometer heave-band signal (P9); geofenced suspicion near charted cable corridors; two-speed calibration sail to fit current as nuisance params where STW absent; raw `GnssMeasurement` layer only if meter-class proves insufficient (deferred per P8; also where P9's altitude-aided horizontal tightening actually lives) | M1–M4 | Polish |
 
-**M1 in progress.** Landed so far: `Quaternion` and `MahonyAhrs` — the PI filter with
+**M1 in progress.** Landed so far: `Quaternion` and `MahonyAhrs` (the attitude filter),
+plus `Recording` and `ReplayRunner` (the harness). `MahonyAhrs` is the PI filter with
 gyro-bias estimation, gateable acc/mag gains, TRIAD attitude seeding, and the §7 time
-guards. Pure JVM code with 24 behavioural tests against synthetic sensors derived from a
+guards. The harness records raw uncalibrated sensors with the HAL's own bias estimates
+stored *alongside* rather than pre-subtracted, so a recording stays replayable when the
+correction strategy changes at M2, and replays are deterministic — same recording plus same
+configuration gives the same trace, which is what makes a sail a regression test rather than
+an anecdote. All pure JVM, 36 behavioural tests against synthetic sensors derived from a
 known truth, so a sign error in the ENU re-derivation shows up as divergence rather than a
 plausible number.
+
+**Still missing from M1:** Android sensor ingestion at explicit `samplingPeriodUs`; the
+on-device logger that writes recordings; wiring the filter into `SensorService` in place of
+the current tilt-compensated compass; and the parallel comparison traces against stock
+fusion and today's pipeline. Nothing here is connected to the running app yet, and no gain
+is tuned — the harness exists precisely so tuning happens against recorded sails.
 
 Two departures from the milestone text, both deliberate:
 - **The filter came before the logging/replay harness**, inverting the stated order. The
