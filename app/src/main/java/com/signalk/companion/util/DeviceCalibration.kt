@@ -31,6 +31,29 @@ object DeviceCalibration {
     )
 
     /**
+     * Minimum speed over ground for any GPS-referenced calibration, in knots.
+     *
+     * These calibrations set the mount's yaw offset γ by equating the boat's heading with
+     * its GPS **course**. Those two differ by leeway plus current-induced crab, and the
+     * error goes straight into γ permanently. Crab angle ≈ asin(cross-track current / boat
+     * speed), so the damage is worst when slow — with a 0.5 kn beam current:
+     *
+     *   1 kn → ~30°   2 kn → ~15°   2.5 kn → ~12°   4 kn → ~7°   6 kn → ~5°
+     *
+     * The previous gate was 0.5 m/s (≈1 kn), i.e. the worst case was permitted silently.
+     * 2.5 kn is a compromise: reachable while motoring out of a harbour, which is when this
+     * is realistically pressed, and far enough up the curve that the residual is small in
+     * the slack water that situation usually implies.
+     *
+     * The gate cannot detect current, only make it matter less. Calibrate motoring straight
+     * in still water; see the procedure note in architectural-plan.md §4.
+     */
+    const val MIN_CALIBRATION_SPEED_KN = 2.5f
+
+    /** [MIN_CALIBRATION_SPEED_KN] in m/s, the unit Android reports speed in. */
+    const val MIN_CALIBRATION_SPEED_MPS = MIN_CALIBRATION_SPEED_KN * 0.514444f
+
+    /**
      * Compose a rotation matrix from ZYX Euler angles (in degrees).
      * R = Rz(rz) * Ry(ry) * Rx(rx)
      */
@@ -171,17 +194,6 @@ object DeviceCalibration {
     }
 
     /**
-     * Multiply a 3x3 matrix (row-major) by a 3-element vector. Returns M * v.
-     */
-    fun multiplyMatrixVector3(M: FloatArray, v: FloatArray): FloatArray {
-        return floatArrayOf(
-            M[0] * v[0] + M[1] * v[1] + M[2] * v[2],
-            M[3] * v[0] + M[4] * v[1] + M[5] * v[2],
-            M[6] * v[0] + M[7] * v[1] + M[8] * v[2]
-        )
-    }
-
-    /**
      * Transpose a 3x3 matrix (row-major). For rotation matrices, transpose == inverse.
      */
     fun transpose3x3(R: FloatArray): FloatArray {
@@ -190,6 +202,105 @@ object DeviceCalibration {
             R[1], R[4], R[7],
             R[2], R[5], R[8]
         )
+    }
+
+    /** Vehicle attitude as nautical angles, radians. See [extractNauticalAngles]. */
+    data class NauticalAngles(
+        val headingRad: Float,   // [0, 2π), 0 = North, increasing clockwise
+        val pitchRad: Float,     // [−π/2, π/2], positive = bow up
+        val rollRad: Float       // (−π, π], positive = starboard down
+    )
+
+    /**
+     * Wrap an angle into [0, 2π).
+     *
+     * Branch-free: the `while`-loop form this replaces was an unbounded loop — a hang, not
+     * an error — on a non-finite input. NaN propagates instead, and the transmitter drops
+     * non-finite values rather than emitting unparseable JSON.
+     *
+     * See frame-conventions.md §5 (audit finding A5).
+     */
+    fun wrapTo2Pi(angleRad: Float): Float {
+        val twoPi = (2 * PI).toFloat()
+        val wrapped = angleRad - twoPi * floor(angleRad / twoPi)
+        // Float rounding can land exactly on 2π for small negative inputs; fold to 0.
+        // NaN fails the comparison and propagates unchanged, which is intended.
+        return if (wrapped >= twoPi) 0f else wrapped
+    }
+
+    /**
+     * Extract nautical heading/pitch/roll from a vehicle attitude matrix R_W_V.
+     *
+     * Row-major storage means column j of R_W_V is the world-frame image of vehicle axis j
+     * (frame-conventions.md §3.1):
+     *
+     *   column 0 = R[0], R[3], R[6] = starboard direction, in ENU
+     *   column 1 = R[1], R[4], R[7] = bow direction,       in ENU
+     *   column 2 = R[2], R[5], R[8] = mast-up direction,   in ENU
+     *
+     * From which:
+     * - heading = atan2(East of bow, North of bow)
+     * - pitch   = asin(Up of bow)                      → positive bow-up
+     * - roll    = atan2(−Up of starboard, Up of mast)  → positive starboard-down
+     *
+     * Extracted from the matrix directly rather than via `SensorManager.getOrientation()`,
+     * which assumes device portrait-frame semantics and is wrong whenever the vehicle axes
+     * don't align with the phone's natural orientation.
+     *
+     * The `coerceIn` on the asin argument is load-bearing: floating-point error can push a
+     * legitimately vertical bow past 1.0 and yield NaN, which then propagates silently
+     * through every downstream path.
+     *
+     * Verified against the reference poses in frame-conventions.md §10.
+     */
+    fun extractNauticalAngles(R_W_V: FloatArray): NauticalAngles {
+        val heading = atan2(R_W_V[1], R_W_V[4])
+        val pitch = asin(R_W_V[7].coerceIn(-1f, 1f))
+        val roll = atan2(-R_W_V[6], R_W_V[8])
+        return NauticalAngles(wrapTo2Pi(heading), pitch, roll)
+    }
+
+    /**
+     * Rate of turn in the nautical sense, from a raw device-frame gyroscope reading.
+     *
+     * Two conversions, both mandatory (frame-conventions.md §3.3 and §4.2, audit A1):
+     *
+     * 1. Rotate the rate into the vehicle frame: ω_V = R_D_V^T · ω_D. The gyroscope reports
+     *    rates about *device* axes; using device Z directly is correct only for a phone
+     *    mounted perfectly flat.
+     * 2. Invert the sign. Android's gyroscope follows the right-hand rule, so a positive
+     *    rate about the vehicle's up axis is counterclockwise seen from above — a turn to
+     *    *port*. SignalK's `navigation.rateOfTurn` is positive to *starboard*.
+     *
+     * @return rad/s, positive to starboard.
+     */
+    fun rateOfTurnFromGyro(R_D_V: FloatArray, gyro_D: FloatArray): Float {
+        val omega_V = deviceToVehicle(R_D_V, gyro_D)
+        return -omega_V[2]
+    }
+
+    /**
+     * Multiply a 3x3 matrix (row-major) by a 3-vector. Returns R * v.
+     */
+    fun rotateVector(R: FloatArray, v: FloatArray): FloatArray {
+        return floatArrayOf(
+            R[0] * v[0] + R[1] * v[1] + R[2] * v[2],
+            R[3] * v[0] + R[4] * v[1] + R[5] * v[2],
+            R[6] * v[0] + R[7] * v[1] + R[8] * v[2]
+        )
+    }
+
+    /**
+     * Express a device-frame vector in the vehicle frame: v_V = R_D_V^T * v_D.
+     *
+     * The transpose is required because [calibrationMatrix]-style matrices are R_D_V,
+     * which map *vehicle* vectors into the *device* frame; going the other way is the
+     * inverse, and for a rotation matrix inverse == transpose.
+     *
+     * See frame-conventions.md §3.3.
+     */
+    fun deviceToVehicle(R_D_V: FloatArray, v_D: FloatArray): FloatArray {
+        return rotateVector(transpose3x3(R_D_V), v_D)
     }
 
     /**

@@ -293,7 +293,7 @@ class MainViewModel @Inject constructor(
             val speed = location?.speed
             Log.d(TAG, "calibrateAll: bearing=$bearing, speed=$speed")
 
-            if (bearing != null && speed != null && speed > 0.5f) {
+            if (bearing != null && speed != null && speed >= DeviceCalibration.MIN_CALIBRATION_SPEED_MPS) {
                 val R_W_V = DeviceCalibration.buildFlatHeadingMatrix(bearing)
                 val R_D_V = DeviceCalibration.computeCalibration(R_W_D, R_W_V)
                 val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
@@ -322,8 +322,18 @@ class MainViewModel @Inject constructor(
             val bearing = location?.bearing
             val speed = location?.speed
             Log.d(TAG, "calibrateAzimuth: bearing=$bearing, speed=$speed")
-            if (bearing == null || speed == null || speed <= 0.5f) {
-                Log.w(TAG, "calibrateAzimuth: GPS heading not available")
+            if (bearing == null || speed == null || speed < DeviceCalibration.MIN_CALIBRATION_SPEED_MPS) {
+                Log.w(TAG, "calibrateAzimuth: below ${DeviceCalibration.MIN_CALIBRATION_SPEED_KN} kn or no GPS course")
+                // Fail loudly. The heading reference is GPS *course*, which only equals
+                // heading at speed; silently doing nothing leaves the user believing a
+                // calibration happened. See DeviceCalibration.MIN_CALIBRATION_SPEED_KN.
+                _uiState.update {
+                    it.copy(
+                        error = "Needs at least ${DeviceCalibration.MIN_CALIBRATION_SPEED_KN} kn " +
+                            "steady speed — heading is taken from GPS course, which only " +
+                            "matches heading when moving well."
+                    )
+                }
                 return@launch
             }
 

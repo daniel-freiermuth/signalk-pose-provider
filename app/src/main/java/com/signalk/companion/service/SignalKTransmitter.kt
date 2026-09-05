@@ -31,6 +31,7 @@ class SignalKTransmitter @Inject constructor(
     
     companion object {
         private const val TAG = "SignalKTransmitter"
+
     }
     
     /**
@@ -363,16 +364,6 @@ class SignalKTransmitter @Inject constructor(
             }
         }
         
-        // GPS quality indicators
-        locationData.provider?.let { provider ->
-            values.add(
-                SignalKValue(
-                    path = "navigation.gnss.type",
-                    value = SignalKValues.string(provider)
-                )
-            )
-        }
-
         val update = SignalKUpdate(
             source = source,
             timestamp = timestamp,
@@ -396,24 +387,32 @@ class SignalKTransmitter @Inject constructor(
         
         val values = mutableListOf<SignalKValue>()
         
-        // Navigation orientation data (only if heading is enabled)
+        // Navigation orientation data (only if heading is enabled).
+        //
+        // Heading rides on `navigation.headingCompass`, whose spec description — "magnetic
+        // heading received from the compass, this is not adjusted for magneticDeviation" —
+        // is a precise statement of what we have until M2. `headingMagnetic` is defined as
+        // "headingCompass adjusted for magneticDeviation" and `headingTrue` as
+        // "headingMagnetic adjusted for magneticVariation", so publishing on either would
+        // assert a correction we have not made. The spec's own vocabulary is the honesty
+        // marker; no custom quality path is needed (frame-conventions.md §11).
+        //
+        // At M2 this promotes to `headingMagnetic`, alongside `navigation.magneticDeviation`
+        // carrying the correction actually applied.
         if (sendHeading) {
-            sensorData.magneticHeading?.let { heading ->
-                values.add(
-                    SignalKValue(
-                        path = "navigation.headingMagnetic",
-                        value = SignalKValues.number(heading.toDouble()) // Already in radians
-                    )
-                )
+            sensorData.compassHeading?.let { heading ->
+                SignalKValues.finiteNumber(heading.toDouble())?.let { v ->  // already radians
+                    values.add(SignalKValue(path = "navigation.headingCompass", value = v))
+                }
             }
-            
-            sensorData.trueHeading?.let { heading ->
-                values.add(
-                    SignalKValue(
-                        path = "navigation.headingTrue",
-                        value = SignalKValues.number(heading.toDouble()) // Already in radians
-                    )
-                )
+
+            // Variation is a property of position, not of our compass, so it is honest to
+            // publish today. It also lets a consumer derive true heading itself, with the
+            // deviation caveat visible in the path name it came from.
+            sensorData.magneticVariation?.let { variation ->
+                SignalKValues.finiteNumber(variation.toDouble())?.let { v ->  // already radians
+                    values.add(SignalKValue(path = "navigation.magneticVariation", value = v))
+                }
             }
         } // End of sendHeading condition
 
@@ -429,12 +428,24 @@ class SignalKTransmitter @Inject constructor(
             }
         }
 
-        // Device attitude (roll, pitch, yaw)
-        if (sensorData.roll != null || sensorData.pitch != null || sensorData.yaw != null) {
+        // Vehicle attitude. Roll is positive to starboard ("list to starboard" in the spec's
+        // wording), pitch positive bow-up — both verified verbatim against the schema. Roll
+        // here is instantaneous inclination: steady heel plus wave-driven roll oscillation
+        // (frame-conventions.md §5).
+        //
+        // No `yaw` member, permanently rather than pending M1. The field that used to be here
+        // carried a gyro *rate* in a slot consumers read as an *angle* (audit A2), but the
+        // deeper reason is that SignalK defines no datum for `attitude.yaw`: with north as
+        // datum it merely duplicates the heading paths, and with mean heading as datum it is
+        // a yawing oscillation — two incompatible readings the spec never resolves
+        // (frame-conventions.md §11). Heading rides on the heading paths, which are
+        // unambiguous.
+        val rollValue = sensorData.roll?.toDouble()?.takeIf { it.isFinite() }
+        val pitchValue = sensorData.pitch?.toDouble()?.takeIf { it.isFinite() }
+        if (rollValue != null || pitchValue != null) {
             val attitude = buildJsonObject {
-                sensorData.roll?.let { put("roll", JsonPrimitive(it.toDouble())) }
-                sensorData.pitch?.let { put("pitch", JsonPrimitive(it.toDouble())) }
-                sensorData.yaw?.let { put("yaw", JsonPrimitive(it.toDouble())) }
+                rollValue?.let { put("roll", JsonPrimitive(it)) }
+                pitchValue?.let { put("pitch", JsonPrimitive(it)) }
             }
             values.add(
                 SignalKValue(
@@ -443,14 +454,12 @@ class SignalKTransmitter @Inject constructor(
                 )
             )
         }
-        
+
+        // Vehicle-frame rate of turn, positive to starboard (frame-conventions.md §4.2).
         sensorData.rateOfTurn?.let { rate ->
-            values.add(
-                SignalKValue(
-                    path = "navigation.rateOfTurn",
-                    value = SignalKValues.number(rate.toDouble()) // Already in rad/s
-                )
-            )
+            SignalKValues.finiteNumber(rate.toDouble())?.let { v ->  // already rad/s
+                values.add(SignalKValue(path = "navigation.rateOfTurn", value = v))
+            }
         }
         
         // Environmental sensors (conditional based on settings)

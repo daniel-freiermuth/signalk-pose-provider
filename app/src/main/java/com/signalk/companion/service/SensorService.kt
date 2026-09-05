@@ -7,6 +7,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.hardware.GeomagneticField
 import android.util.Log
+import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.util.DeviceCalibration
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.Locale
 import kotlin.math.*
 
 @Singleton
@@ -46,7 +48,11 @@ class SensorService @Inject constructor(
     
     // Marine navigation configuration: device-to-vehicle calibration matrix (R_D_V)
     // R_W_V = R_W_D * calibrationMatrix gives vehicle attitude in world frame.
-    private var calibrationMatrix = DeviceCalibration.IDENTITY_3X3.copyOf()
+    // @Volatile because this is genuinely cross-thread: SignalKStreamingService writes it
+    // from a Dispatchers.Default coroutine while sensor callbacks read it on the main
+    // looper. The volatile write/read pair also publishes the array's contents safely,
+    // since the matrix is fully built before assignment.
+    @Volatile private var calibrationMatrix = DeviceCalibration.IDENTITY_3X3.copyOf()
     @Volatile private var hasRotationMatrix = false
     
     // Current sensor delay setting and rate limiting
@@ -65,8 +71,26 @@ class SensorService @Inject constructor(
     // Track active state
     private var isActive = false
 
+    // Magnetic variation cache — see currentMagneticVariation()
+    private var cachedVariationRad: Float? = null
+    private var cachedVariationLat = 0.0
+    private var cachedVariationLon = 0.0
+    private var cachedVariationAtMs = 0L
+    /** Guards the no-fix warning so it fires on the transition, not on every sensor event. */
+    private var loggedMissingFix = false
+
     companion object {
         private const val TAG = "SensorService"
+
+        /** Recompute variation after this long, even if the boat has barely moved. */
+        private const val VARIATION_CACHE_MAX_AGE_MS = 10 * 60 * 1000L
+
+        /**
+         * Recompute variation once position moves this far, in degrees of lat/lon.
+         * 0.01° is about 1.1 km; declination gradients are well under 1° per 100 km, so
+         * the cached value stays accurate to far better than the compass itself.
+         */
+        private const val VARIATION_CACHE_MAX_MOVE_DEG = 0.01
     }
 
     fun startSensorUpdates(updateIntervalMs: Int = 1000) {
@@ -210,110 +234,133 @@ class SensorService @Inject constructor(
             
             // Apply calibration: R_W_V = R_W_D * R_D_V
             val vehicleMatrix = DeviceCalibration.multiply3x3(rotationMatrix, calibrationMatrix)
-            
-            // Extract orientation from vehicle attitude matrix.
-            //
-            // vehicleMatrix columns (row-major, ENU world frame):
-            //   col 0 = vehicle X = starboard direction in world → [R[0], R[3], R[6]]
-            //   col 1 = vehicle Y = bow direction in world      → [R[1], R[4], R[7]]
-            //   col 2 = vehicle Z = up direction in world       → [R[2], R[5], R[8]]
-            //
-            // We extract angles directly from the matrix instead of using
-            // SensorManager.getOrientation(), which assumes device portrait-frame
-            // semantics and gives wrong results when the vehicle axes don't align
-            // with the phone's natural portrait orientation.
 
-            // Heading: bearing of bow projected onto the horizontal plane.
-            // atan2(East_component_of_bow, North_component_of_bow)
-            var magneticHeading = atan2(vehicleMatrix[1].toDouble(), vehicleMatrix[4].toDouble()).toFloat()
+            // Nautical angles from the vehicle attitude matrix. The extraction is a pure
+            // function so the reference poses of frame-conventions.md §10 can test it
+            // directly; see FrameConventionsTest.
+            val angles = DeviceCalibration.extractNauticalAngles(vehicleMatrix)
+            val compassHeading = angles.headingRad
+            val pitch = angles.pitchRad
+            val roll = angles.rollRad
 
-            // Pitch: elevation of bow above horizontal (bow-up positive, nautical convention).
-            // Up_component_of_bow = vehicleMatrix[7] (row 2, col 1); asin gives elevation angle.
-            val pitch = asin(vehicleMatrix[7].coerceIn(-1f, 1f).toDouble()).toFloat()
+            // Magnetic variation (declination) at our position, positive east. SignalK
+            // defines it as the quantity *added* to a magnetic heading to get true, which
+            // matches GeomagneticField's sign — see frame-conventions.md §4.4.
+            val variation = currentMagneticVariation()
 
-            // Roll: starboard-down positive (nautical convention).
-            // atan2(−Up_component_of_stbd, Up_component_of_up) where Up_of_stbd = vehicleMatrix[6].
-            val roll = atan2(-vehicleMatrix[6].toDouble(), vehicleMatrix[8].toDouble()).toFloat()
-            
-            // Normalize heading to 0-2π range
-            magneticHeading = normalizeHeading(magneticHeading)
-            
-            // Calculate true heading by adding magnetic declination
-            val trueHeading = calculateTrueHeading(magneticHeading)
-            
-            Log.d(TAG, "Magnetic heading: ${Math.toDegrees(magneticHeading.toDouble()).toFloat()}°, " +
-                      "True heading: ${Math.toDegrees(trueHeading.toDouble()).toFloat()}°, " +
-                      "pitch: ${Math.toDegrees(pitch.toDouble()).toFloat()}°, " +
-                      "roll: ${Math.toDegrees(roll.toDouble()).toFloat()}°")
-            
-            updateSensorData { 
+            // Compass heading referred to true north. NOT a true heading: the deviation
+            // step is missing entirely until M2, so this is wrong by the boat's deviation
+            // (frame-conventions.md §11.2). Display only, never published.
+            // Null rather than falling back to the compass heading — labelling a magnetic
+            // heading "true" is exactly the dishonesty P5 exists to prevent.
+            val approxTrueHeading = variation?.let { DeviceCalibration.wrapTo2Pi(compassHeading + it) }
+
+            // No log here on purpose: updateOrientation() runs on every accelerometer AND
+            // magnetometer event, so a formatted log line would build several strings a
+            // hundred times a second — the same hot-path waste as the uncached variation
+            // lookup. The orientation values are logged instead at the rate-limited
+            // emission point in updateSensorData().
+            updateSensorData {
                 copy(
-                    magneticHeading = magneticHeading,
-                    trueHeading = trueHeading,
+                    compassHeading = compassHeading,
+                    approxTrueHeading = approxTrueHeading,
+                    magneticVariation = variation,
                     pitch = pitch,
-                    roll = roll,
-                    yaw = magneticHeading
-                ) 
+                    roll = roll
+                )
             }
         }
     }
 
-    private fun normalizeHeading(heading: Float): Float {
-        var normalized = heading
-        while (normalized < 0) normalized += (2 * PI).toFloat()
-        while (normalized >= (2 * PI).toFloat()) normalized -= (2 * PI).toFloat()
-        return normalized
-    }
-
-    private fun calculateTrueHeading(magneticHeading: Float): Float {
-        // Get current location from LocationService
-        val locationData = locationService.locationUpdates.value
-        
-        if (locationData == null) {
-            Log.w(TAG, "No location data available for magnetic declination calculation, using magnetic heading as true heading")
-            return magneticHeading
+    /**
+     * Magnetic variation at the current position, in radians, positive east.
+     *
+     * Returns null when there is no position fix — variation is a function of position, and
+     * without one we simply do not know it.
+     *
+     * Cached. [updateOrientation] runs on every accelerometer *and* magnetometer event, so
+     * an uncached `GeomagneticField` would evaluate the WMM spherical-harmonic model up to a
+     * few hundred times a second for a value that changes by well under a degree over tens
+     * of kilometres. That is real battery and thermal load on an always-on mounted phone
+     * (plan §6). Recomputed when the position moves materially or the entry ages out.
+     *
+     * Cache state is touched only from the sensor callback thread, so it needs no
+     * synchronisation of its own.
+     */
+    private fun currentMagneticVariation(): Float? {
+        val locationData = locationService.locationUpdates.value ?: run {
+            // Log on the transition only. This runs on every accelerometer and magnetometer
+            // event, so an unconditional warning is hundreds of lines a second for as long
+            // as there is no fix — which is the entire time the app is indoors or starting
+            // up. Same hot-path trap as the orientation log removed earlier.
+            if (!loggedMissingFix) {
+                Log.w(TAG, "No position fix - magnetic variation unknown, true heading unavailable")
+                loggedMissingFix = true
+            }
+            return null
         }
-        
-        try {
-            // Calculate magnetic declination using Android's GeomagneticField
-            // Use 0.0 for altitude if not available (has minimal impact on declination)
+        loggedMissingFix = false
+
+        val now = System.currentTimeMillis()
+        val cached = cachedVariationRad
+        if (cached != null && isVariationCacheValid(locationData, now)) {
+            return cached
+        }
+
+        return try {
+            // Altitude has negligible effect on declination; 0 is fine when unavailable.
             val geomagneticField = GeomagneticField(
                 locationData.latitude.toFloat(),
                 locationData.longitude.toFloat(),
                 (locationData.altitude ?: 0.0).toFloat(),
-                System.currentTimeMillis()
+                now
             )
-            
-            // Get declination in degrees and convert to radians
+
             val declinationDegrees = geomagneticField.declination
-            val declinationRadians = Math.toRadians(declinationDegrees.toDouble()).toFloat()
-            
-            Log.d(TAG, "Magnetic declination: ${declinationDegrees}° at ${locationData.latitude}, ${locationData.longitude}")
-            
-            // True heading = Magnetic heading + Declination
-            val trueHeading = normalizeHeading(magneticHeading + declinationRadians)
-            
-            return trueHeading
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Error calculating magnetic declination: ${e.message}")
-            return magneticHeading
+            Log.d(TAG, "Magnetic variation: ${declinationDegrees}° at ${locationData.latitude}, ${locationData.longitude}")
+
+            val variationRad = Math.toRadians(declinationDegrees.toDouble()).toFloat()
+            cachedVariationRad = variationRad
+            cachedVariationLat = locationData.latitude
+            cachedVariationLon = locationData.longitude
+            cachedVariationAtMs = now
+            variationRad
+        } catch (e: IllegalArgumentException) {
+            // What GeomagneticField throws for an out-of-range latitude or longitude.
+            Log.e(TAG, "Error calculating magnetic variation: ${e.message}")
+            null
         }
     }
 
+    /** Whether [cachedVariationRad] is still close enough in time and position to reuse. */
+    private fun isVariationCacheValid(location: LocationData, now: Long): Boolean {
+        val fresh = now - cachedVariationAtMs < VARIATION_CACHE_MAX_AGE_MS
+        val near = abs(location.latitude - cachedVariationLat) < VARIATION_CACHE_MAX_MOVE_DEG &&
+            abs(location.longitude - cachedVariationLon) < VARIATION_CACHE_MAX_MOVE_DEG
+        return fresh && near
+    }
+
+    /**
+     * Publish rate of turn in the vehicle frame, with the nautical sign convention.
+     *
+     * Two corrections over the previous version (frame-conventions.md audit A1):
+     *
+     * 1. **Frame.** The gyroscope reports rates about the *device* axes. Taking the raw
+     *    device Z rate is correct only for a phone mounted perfectly flat; otherwise it
+     *    is the boat's turn rate projected onto the wrong axis. Rotate into the vehicle
+     *    frame first: ω_V = R_D_V^T · ω_D  (frame-conventions.md §3.3).
+     *
+     * 2. **Sign.** Android's gyroscope is positive by the right-hand rule, so a positive
+     *    rate about the vehicle's up axis is counterclockwise seen from above — a turn to
+     *    *port*. SignalK's `navigation.rateOfTurn` is positive to *starboard*, so the sign
+     *    is inverted exactly once, here (frame-conventions.md §4.2).
+     *
+     * Previously both were wrong, which published an inverted rate of turn.
+     */
     private fun updateGyroscopeData() {
-        // Transform gyroscope data from device frame to vehicle frame using the
-        // calibration matrix.  R_D_V maps vehicle→device, so its transpose
-        // (= inverse) maps device→vehicle.
-        val vehicleGyro = DeviceCalibration.multiplyMatrixVector3(
-            DeviceCalibration.transpose3x3(calibrationMatrix),
-            gyroscope_data
-        )
-        // Rate of turn is the vehicle-frame Z-axis (yaw) rotation rate.
-        val rateOfTurn = vehicleGyro[2]  // rad/s
-        
-        updateSensorData { 
-            copy(rateOfTurn = rateOfTurn) 
+        val rateOfTurn = DeviceCalibration.rateOfTurnFromGyro(calibrationMatrix, gyroscope_data)
+        updateSensorData {
+            copy(rateOfTurn = rateOfTurn)
         }
     }
 
@@ -337,8 +384,20 @@ class SensorService @Inject constructor(
         lastUpdateTime = currentTime
         pendingSensorUpdate = false
         
-        Log.d(TAG, "Sensor data emitted. Actual interval: ${actualInterval}ms (configured: ${updateIntervalMs}ms)")
+        // Orientation values ride along here rather than being logged per sensor event,
+        // so diagnostics cost one formatted line per emission instead of one per callback.
+        val d = pendingData
+        Log.d(TAG, "Sensor data emitted. Actual interval: ${actualInterval}ms " +
+                  "(configured: ${updateIntervalMs}ms)" +
+                  d.compassHeading.degOrNull("compass")+
+                  d.approxTrueHeading.degOrNull("approxTrue") +
+                  d.pitch.degOrNull("pitch") +
+                  d.roll.degOrNull("roll"))
     }
+
+    /** Formats a radian value as `, name=12.3°`, or "" when absent. Log-only helper. */
+    private fun Float?.degOrNull(name: String): String =
+        this?.let { ", $name=${"%.1f".format(Locale.US, Math.toDegrees(it.toDouble()))}°" } ?: ""
 
     private fun logAvailableSensors() {
         val availableSensors = mutableListOf<String>()
