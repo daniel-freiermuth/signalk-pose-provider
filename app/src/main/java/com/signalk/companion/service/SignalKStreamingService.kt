@@ -14,6 +14,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.signalk.companion.MainActivity
 import com.signalk.companion.R
+import com.signalk.companion.data.model.LocationData
+import com.signalk.companion.replay.FixRecord
+import com.signalk.companion.replay.RecordingSession
 import com.signalk.companion.util.BatteryOptimizationHelper
 import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.UrlParser
@@ -50,12 +53,22 @@ class SignalKStreamingService : Service() {
     @Inject
     lateinit var signalKTransmitter: SignalKTransmitter
 
+    /** The M1 attitude pipeline. Runs independently of streaming; publishes nothing yet. */
+    @Inject
+    lateinit var attitudeEngine: AttitudeEngine
+
+    @Inject
+    lateinit var recordingSession: RecordingSession
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val binder = LocalBinder()
 
     // Coroutine job for forwarding sensor/location data to the transmitter.
     // Null when not streaming so no data is forwarded and no CPU is burned.
     private var transmissionJob: kotlinx.coroutines.Job? = null
+
+    // Forwards GNSS fixes into the recording. Null when not recording.
+    private var recordingJob: kotlinx.coroutines.Job? = null
 
     // Configuration options
     private var sendLocation: Boolean = true
@@ -91,6 +104,8 @@ class SignalKStreamingService : Service() {
         const val ACTION_START_STREAMING = "START_STREAMING"
         const val ACTION_STOP_STREAMING = "STOP_STREAMING"
         const val ACTION_UPDATE_CONFIG = "UPDATE_CONFIG"
+        const val ACTION_START_RECORDING = "START_RECORDING"
+        const val ACTION_STOP_RECORDING = "STOP_RECORDING"
         
         const val EXTRA_PARSED_URL = "PARSED_URL"
         const val EXTRA_LOCATION_RATE = "LOCATION_RATE"
@@ -220,6 +235,21 @@ class SignalKStreamingService : Service() {
             ACTION_STOP_STREAMING -> {
                 stopStreaming()
             }
+            ACTION_START_RECORDING -> {
+                val started = startRecording(intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L))
+                // toggleRecording() calls startForegroundService() for this action, which
+                // obligates a startForeground() call within seconds or the system kills the
+                // process for breaking that contract. A failed startRecording() never makes
+                // that call; streaming (if active) already has, so only a fully idle service
+                // needs to stop itself here to avoid being the one left holding the promise.
+                if (!started && _streamingState.value == StreamingState.IDLE) {
+                    Log.w(TAG, "Recording failed to start and nothing else needs the service - stopping")
+                    stopSelfResult(startId)
+                }
+            }
+            ACTION_STOP_RECORDING -> {
+                stopRecording()
+            }
         }
         
         // START_STICKY: the OS will restart this service after an unexpected kill.
@@ -330,15 +360,142 @@ class SignalKStreamingService : Service() {
         transmissionJob = null
 
         serviceScope.launch {
-            locationService.stopLocationUpdates()
+            // A recording may still be running and still needs GNSS and the service alive.
+            // Tearing the service down here would end the sail mid-file — and a recording is
+            // exactly the artefact you cannot re-take.
+            val recording = recordingSession.isRecording
+            if (!recording) locationService.stopLocationUpdates()
             sensorService.stopSensorUpdates()
             signalKTransmitter.stopStreaming()
-            
+
             _streamingState.value = StreamingState.IDLE
-            
+
+            if (recording) {
+                // The notification now belongs to the recording, not streaming - its Stop
+                // action must keep dispatching ACTION_STOP_RECORDING, or the notification
+                // that started this way silently reverts to a button that cannot stop it.
+                updateNotification(
+                    "Recording raw sensor data",
+                    stopAction = ACTION_STOP_RECORDING,
+                    stopLabel = "Stop recording"
+                )
+            } else {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ recording (M1)
+
+    /**
+     * Start a raw sensor recording, and the attitude engine that consumes the same records.
+     *
+     * Deliberately independent of streaming. A recording is worth making with no server in
+     * sight — the harness exists so filter gains are tuned against recorded sails rather than
+     * on the water — so this promotes the service to the foreground on its own, and stopping
+     * a recording only tears the service down if nothing else is using it.
+     *
+     * GNSS fixes are forwarded separately from the sensor stream because they arrive on a
+     * different thread and a different clock source; [FixRecord]'s timestamp is the fix's
+     * `elapsedRealtimeNanos`, which shares the sensor time base (frame-conventions.md §7). A
+     * fix without that timestamp is dropped rather than stamped with an invented one: an
+     * unplaceable fix is worse than a missing one for M4.
+     */
+    fun startRecording(locationRate: Long = 1000L): Boolean {
+        if (recordingSession.isRecording) {
+            Log.d(TAG, "Recording already in progress, ignoring start request")
+            return true
+        }
+
+        if (recordingSession.start() == null) {
+            Log.e(TAG, "Could not open a recording file - not starting the engine")
+            return false
+        }
+
+        // AttitudeEngine keeps its own mount-rotation state (Volatile, see AttitudeEngine),
+        // separate from SensorService's — without this it would start at identity and every
+        // M1 boat-frame reading would be reported in raw device coordinates instead.
+        attitudeEngine.setCalibrationAngles(
+            AppSettings.getCalibrationAlphaDeg(this),
+            AppSettings.getCalibrationBetaDeg(this),
+            AppSettings.getCalibrationGammaDeg(this)
+        )
+        if (!attitudeEngine.start(record = true)) {
+            Log.e(TAG, "Attitude engine refused to start - closing the empty recording")
+            recordingSession.stop()
+            return false
+        }
+
+        recordingJob = serviceScope.launch {
+            launch {
+                // The service may already have GNSS running for streaming; starting it twice
+                // would double-register. LocationService re-registers cleanly, but there is
+                // no reason to disturb a working stream.
+                if (!locationService.isLocationUpdatesActive()) {
+                    try {
+                        locationService.startLocationUpdates(this@SignalKStreamingService, locationRate)
+                    } catch (e: SecurityException) {
+                        Log.e(TAG, "Location permission not granted - recording without fixes", e)
+                    }
+                }
+            }
+            launch {
+                var lastFixNs = 0L
+                locationService.locationUpdates.collect { locationData ->
+                    val fix = locationData?.toFixRecord() ?: return@collect
+                    // locationUpdates is a StateFlow and replays its last value, so the fix
+                    // that was current when recording started would otherwise be written
+                    // again — and any repeat delivery with it.
+                    if (fix.timestampNs == lastFixNs) return@collect
+                    lastFixNs = fix.timestampNs
+                    attitudeEngine.onFix(fix)
+                }
+            }
+        }
+
+        startForeground(
+            NOTIFICATION_ID,
+            createNotification(
+                "Recording raw sensor data",
+                stopAction = ACTION_STOP_RECORDING,
+                stopLabel = "Stop recording"
+            )
+        )
+        Log.i(TAG, "Recording started")
+        return true
+    }
+
+    /**
+     * Stop the recording and return the file, or null if none was running.
+     *
+     * Order matters: the engine is stopped first so the sensor thread is gone before the
+     * writer closes. [RecordingSession] is explicitly single-writer, and closing underneath a
+     * live 200 Hz callback is the one way to lose the tail of a sail.
+     */
+    fun stopRecording(): java.io.File? {
+        if (!recordingSession.isRecording) return null
+
+        recordingJob?.cancel()
+        recordingJob = null
+
+        attitudeEngine.stop()
+        val file = recordingSession.stop()
+        Log.i(TAG, "Recording stopped: ${file?.absolutePath}")
+
+        if (_streamingState.value == StreamingState.IDLE || !sendLocation) {
+            // Leave GNSS running only if streaming is both active and actually wants it -
+            // streaming with sendLocation disabled means the recording was GNSS's only
+            // reason to be active, and leaving it running now would just drain the battery.
+            locationService.stopLocationUpdates()
+        }
+        if (_streamingState.value == StreamingState.IDLE) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
+        } else {
+            updateNotification("Messages sent: ${_messagesSent.value}")
         }
+        return file
     }
 
     private fun updateStreamingConfig(locationRate: Long, sensorRate: Int, sendLocation: Boolean, sendHeading: Boolean, sendPressure: Boolean) {
@@ -357,7 +514,10 @@ class SignalKStreamingService : Service() {
             
             // Handle location service changes
             val wasLocationActive = locationService.isLocationUpdatesActive()
-            val shouldLocationBeActive = sendLocation
+            // An active recording needs GNSS as much as sendLocation does - a config update
+            // that turns sendLocation off must not stop fixes out from under a recording that
+            // is still running, the same ownership rule stopRecording() applies on its side.
+            val shouldLocationBeActive = sendLocation || recordingSession.isRecording
             
             if (wasLocationActive && !shouldLocationBeActive) {
                 Log.d(TAG, "Stopping location updates (disabled in config)")
@@ -397,6 +557,7 @@ class SignalKStreamingService : Service() {
 
     fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
         sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
+        attitudeEngine.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
         Log.d(TAG, "Updated calibration angles: α=${alphaDeg}°, β=${betaDeg}°, γ=${gammaDeg}°")
     }
 
@@ -408,8 +569,12 @@ class SignalKStreamingService : Service() {
         updateNotification("Messages sent: ${_messagesSent.value}")
     }
     
-    private fun updateNotification(contentText: String) {
-        val notification = createNotification(contentText)
+    private fun updateNotification(
+        contentText: String,
+        stopAction: String = ACTION_STOP_STREAMING,
+        stopLabel: String = "Stop"
+    ) {
+        val notification = createNotification(contentText, stopAction, stopLabel)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
@@ -430,7 +595,11 @@ class SignalKStreamingService : Service() {
         }
     }
 
-    private fun createNotification(contentText: String): Notification {
+    private fun createNotification(
+        contentText: String,
+        stopAction: String = ACTION_STOP_STREAMING,
+        stopLabel: String = "Stop"
+    ): Notification {
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent,
@@ -438,7 +607,7 @@ class SignalKStreamingService : Service() {
         )
 
         val stopIntent = Intent(this, SignalKStreamingService::class.java).apply {
-            action = ACTION_STOP_STREAMING
+            action = stopAction
         }
         val stopPendingIntent = PendingIntent.getService(
             this, 0, stopIntent,
@@ -452,7 +621,7 @@ class SignalKStreamingService : Service() {
             .setContentIntent(pendingIntent)
             .addAction(
                 android.R.drawable.ic_media_pause,
-                "Stop",
+                stopLabel,
                 stopPendingIntent
             )
             .setOngoing(true)
@@ -466,8 +635,37 @@ class SignalKStreamingService : Service() {
         // Safety-net: stop sensors if the service is destroyed without ViewModel cleanup
         // (e.g., OS-restart path with no Activity). ViewModel will restart them for
         // foreground display if the app is still visible.
+        // Close any open recording before the process goes away, so the last buffered records
+        // reach disk rather than dying with the service.
+        recordingJob?.cancel()
+        recordingJob = null
+        attitudeEngine.stop()
+        recordingSession.stop()
         sensorService.stopSensorUpdates()
         locationService.stopLocationUpdates()
         serviceScope.cancel()
     }
+}
+
+/**
+ * A fix on the sensor time base, or null when the platform did not supply one.
+ *
+ * Dropping the fix is deliberate. `elapsedRealtimeNanos` is what lets M4 place a fix on the
+ * IMU timeline (frame-conventions.md §7); substituting wall clock would put a plausible but
+ * wrong timestamp in a recording that is meant to be ground truth, and wall clock jumps
+ * whenever NTP or the receiver corrects it.
+ */
+private fun LocationData.toFixRecord(): FixRecord? {
+    val monotonicNs = elapsedRealtimeNanos ?: return null
+    return FixRecord(
+        timestampNs = monotonicNs,
+        latitude = latitude,
+        longitude = longitude,
+        altitude = altitude,
+        speedMps = speed,
+        courseDeg = bearing,
+        horizontalAccuracyM = accuracy,
+        speedAccuracyMps = speedAccuracy,
+        courseAccuracyDeg = bearingAccuracy
+    )
 }

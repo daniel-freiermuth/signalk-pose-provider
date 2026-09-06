@@ -1,0 +1,297 @@
+package com.signalk.companion.replay
+
+import com.signalk.companion.ahrs.MahonyAhrs
+import com.signalk.companion.util.DeviceCalibration
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
+
+class ReplayTest {
+
+    private val g = MahonyAhrs.GRAVITY
+
+    // ------------------------------------------------------------------ format
+
+    @Test
+    fun `records round-trip through the text format`() {
+        val records = listOf(
+            AccelRecord(1_000_000_000L, 0.1f, -0.2f, 9.81f),
+            GyroRecord(1_005_000_000L, 0.01f, -0.02f, 0.03f, 1e-4f, 2e-4f, -3e-4f),
+            MagRecord(1_010_000_000L, 12.5f, -30.25f, -40f, 1.5f, -2.5f, 3.5f),
+            RotationVectorRecord(1_015_000_000L, 0.1f, 0.2f, 0.3f, 0.927f),
+            FixRecord(1_020_000_000L, 59.3293, 18.0686, 12.5, 3.2f, 187.4f, 4.1f, 0.2f, 2.5f)
+        )
+        val text = records.joinToString("\n") { RecordingFormat.format(it) }
+        val parsed = RecordingFormat.parseAll(text.lineSequence()).toList()
+        assertEquals(records, parsed)
+    }
+
+    @Test
+    fun `absent optional fix fields survive the round trip`() {
+        val fix = FixRecord(5_000L, 1.0, 2.0) // everything optional missing
+        val parsed = RecordingFormat.parse(RecordingFormat.format(fix))
+        assertEquals(fix, parsed)
+    }
+
+    @Test
+    fun `comments blanks and malformed lines are skipped, not fatal`() {
+        // A recording is a field artefact: a battery pull mid-write truncates the last line,
+        // and losing that line must not cost the whole sail.
+        val text = """
+            ${RecordingFormat.header("test", 1L, 2L)}
+
+            A 1000 0.0 0.0 9.81
+            not-a-record
+            G 2000 oops bad numbers
+            A 3000 0.0
+            A 40
+        """.trimIndent()
+        val parsed = RecordingFormat.parseAll(text.lineSequence()).toList()
+        assertEquals(1, parsed.size, "only the one well-formed record should survive")
+        assertEquals(1000L, parsed[0].timestampNs)
+    }
+
+    @Test
+    fun `a rotation vector without a scalar stays absent through the round trip`() {
+        // Many devices deliver only three components. Recording a reconstructed scalar as
+        // though the sensor had reported it would lose the fact that it did not.
+        val record = RotationVectorRecord(7_000L, 0.1f, 0.2f, 0.3f)
+        val line = RecordingFormat.format(record)
+        assertTrue(line.endsWith(" -"), "missing scalar must be written as absent: $line")
+        assertEquals(record, RecordingFormat.parse(line))
+    }
+
+    @Test
+    fun `a missing rotation vector scalar is reconstructed from the unit-norm constraint`() {
+        val full = RotationVectorRecord(0L, 0.1f, 0.2f, 0.3f, 0.9273f)
+        val stripped = RotationVectorRecord(0L, 0.1f, 0.2f, 0.3f)
+        val a = full.toQuaternion()
+        val b = stripped.toQuaternion()
+        // Tolerances allow for the rounded scalar in `full`: it is a shade off unit length,
+        // so normalisation nudges every component. The claim is that reconstruction lands in
+        // the same place, not that it is bit-identical.
+        assertEquals(a.w.toDouble(), b.w.toDouble(), 1e-3)
+        assertEquals(a.x.toDouble(), b.x.toDouble(), 1e-3)
+    }
+
+    @Test
+    fun `an over-unit rotation vector does not produce NaN`() {
+        // Float rounding at the HAL can push the vector marginally past unit length; sqrt of
+        // a negative there would silently poison the comparison trace.
+        val q = RotationVectorRecord(0L, 0.8f, 0.8f, 0.8f).toQuaternion()
+        assertTrue(q.w.isFinite() && q.x.isFinite(), "reconstruction must stay finite")
+        assertEquals(0f, q.w, 1e-6f, "a degenerate scalar clamps to zero, not NaN")
+    }
+
+    @Test
+    fun `header does not parse as a record`() {
+        val header = RecordingFormat.header("Pixel", 1234L, 5678L)
+        assertTrue(RecordingFormat.parseAll(header.lineSequence()).toList().isEmpty())
+    }
+
+    // ------------------------------------------------------------------ replay
+
+    /** A synthetic sail: level, heading 90°, at rest, sampled at 100 Hz. */
+    private fun syntheticRecording(headingDeg: Float, seconds: Double): List<SensorRecord> {
+        val theta = Math.toRadians(-headingDeg.toDouble()).toFloat() // world→body about up
+        val c = cos(theta.toDouble()).toFloat(); val s = sin(theta.toDouble()).toFloat()
+        // Rotate world vectors into the body frame for a level boat on this heading.
+        fun toBody(v: FloatArray) = floatArrayOf(
+            c * v[0] + s * v[1], -s * v[0] + c * v[1], v[2]
+        )
+        val accel = toBody(floatArrayOf(0f, 0f, g))
+        val field = toBody(floatArrayOf(0f, 25f, -43.3f))
+
+        val out = mutableListOf<SensorRecord>()
+        var t = 1_000_000_000L
+        repeat((seconds * 100).toInt()) {
+            out.add(AccelRecord(t, accel[0], accel[1], accel[2]))
+            out.add(MagRecord(t, field[0], field[1], field[2]))
+            out.add(GyroRecord(t, 0f, 0f, 0f))
+            t += 10_000_000L
+        }
+        return out
+    }
+
+    @Test
+    fun `replay recovers the recorded attitude`() {
+        val samples = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f))
+            .run(syntheticRecording(90f, 5.0).asSequence())
+        assertTrue(samples.isNotEmpty(), "replay must emit attitude samples")
+        val last = samples.last()
+        assertEquals(90.0, Math.toDegrees(last.headingRad.toDouble()), 0.5, "heading")
+        assertEquals(0.0, Math.toDegrees(last.rollRad.toDouble()), 0.5, "roll")
+    }
+
+    @Test
+    fun `replay is deterministic`() {
+        // The property that makes a recorded sail a regression test rather than an anecdote.
+        val recording = syntheticRecording(137f, 3.0)
+        val a = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0.1f)).run(recording.asSequence())
+        val b = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0.1f)).run(recording.asSequence())
+        assertEquals(a, b, "same recording and configuration must give the same trace")
+    }
+
+    @Test
+    fun `a second run on the same instance starts from a clean state`() {
+        // Tuning replays one recording repeatedly against different gains or hard-iron
+        // strategies on whatever ReplayRunner is at hand - a second run must not continue
+        // from wherever the first left off, either in the filter or in fixes/referenceAttitudes.
+        val recording = syntheticRecording(137f, 3.0) +
+            listOf(
+                FixRecord(4_000_000_000L, 59.0, 18.0, speedMps = 2.5f),
+                RotationVectorRecord(4_000_000_000L, 0.1f, 0.2f, 0.3f, 0.927f)
+            )
+        val runner = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0.1f))
+        val first = runner.run(recording.asSequence())
+        val second = runner.run(recording.asSequence())
+        assertEquals(first, second, "the same recording replayed twice must give the same trace")
+        assertEquals(1, runner.fixes.size, "fixes from a prior run must not accumulate")
+        assertEquals(1, runner.referenceAttitudes.size,
+            "reference attitudes from a prior run must not accumulate")
+    }
+
+    @Test
+    fun `replay through a text round trip gives the same answer`() {
+        // Guards the format against silently losing precision: replaying the parsed text
+        // must match replaying the in-memory records.
+        val recording = syntheticRecording(212f, 3.0)
+        val direct = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f)).run(recording.asSequence())
+        val text = recording.joinToString("\n") { RecordingFormat.format(it) }
+        val viaText = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f))
+            .run(RecordingFormat.parseAll(text.lineSequence()))
+        assertEquals(direct, viaText)
+    }
+
+    @Test
+    fun `hard-iron strategies are comparable on one recording`() {
+        // The point of storing raw field plus HAL estimate: replay the same sail both ways.
+        // Here a known 10 µT offset is injected on the body X axis and reported as the HAL
+        // estimate, so subtracting it should recover the true heading and ignoring it
+        // should not.
+        val base = syntheticRecording(0f, 5.0)
+        val offset = 10f
+        val withBias = base.map {
+            if (it is MagRecord) it.copy(x = it.x + offset, biasX = offset) else it
+        }
+
+        val uncorrected = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f), HardIronStrategy.None)
+            .run(withBias.asSequence()).last()
+        val corrected = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f), HardIronStrategy.HalEstimate)
+            .run(withBias.asSequence()).last()
+
+        assertEquals(0.0, Math.toDegrees(corrected.headingRad.toDouble()), 0.5,
+            "subtracting the known bias must recover true heading")
+        val uncorrectedErr = abs(Math.toDegrees(uncorrected.headingRad.toDouble()).let {
+            if (it > 180) 360 - it else it
+        })
+        assertTrue(uncorrectedErr > 5.0,
+            "ignoring a 10 µT hard iron must visibly skew heading, got ${uncorrectedErr}°")
+    }
+
+    @Test
+    fun `mount rotation is applied to the replay output`() {
+        // Phone mounted 90° off the centreline. Applying the mount outside the filter is
+        // what lets a recording be replayed against a corrected calibration without
+        // re-recording.
+        //
+        // Note the sign: a mount yaw of +γ shifts the reported heading by **−γ**, so +90°
+        // here reads as 270°. That is not a quirk of this test — `R_D_V` maps vehicle into
+        // device and is applied on the right of `R_W_V = R_W_D · R_D_V`, so rotating the
+        // vehicle frame one way rotates the reported bow the other. `calibrateAzimuth`
+        // already relies on exactly this relationship: it adds `currentHeading − gpsHeading`
+        // to γ in order to *reduce* the heading by that amount.
+        val recording = syntheticRecording(0f, 5.0)
+        val mount = DeviceCalibration.composeZXZ(0f, 0f, 90f)
+        val rotated = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f), mountRotation = mount)
+            .run(recording.asSequence()).last()
+        val plain = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f))
+            .run(recording.asSequence()).last()
+
+        val delta = Math.toDegrees((rotated.headingRad - plain.headingRad).toDouble())
+        val wrapped = ((delta % 360) + 360) % 360
+        assertEquals(270.0, wrapped, 1.0, "mount yaw +γ must shift reported heading by −γ")
+    }
+
+    @Test
+    fun `fixes are collected but do not emit attitude samples`() {
+        val recording = syntheticRecording(0f, 1.0) +
+            FixRecord(2_000_000_000L, 59.0, 18.0, speedMps = 2.5f)
+        val runner = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f))
+        val samples = runner.run(recording.asSequence())
+        assertEquals(1, runner.fixes.size, "the fix must be captured for M4")
+        assertEquals(2.5f, runner.fixes[0].speedMps)
+        assertTrue(samples.all { it.timestampNs < 2_000_000_000L },
+            "only gyro ticks advance the filter, so no sample comes from the fix")
+    }
+
+    @Test
+    fun `the reference attitude is collected but never fed to the filter`() {
+        // A deliberately absurd Android attitude interleaved with a clean recording. If it
+        // reached the filter the answer would move; the whole value of the comparison trace
+        // is that it does not.
+        val clean = syntheticRecording(90f, 3.0)
+        val withReference = clean.flatMap { record ->
+            if (record is GyroRecord) {
+                listOf(record, RotationVectorRecord(record.timestampNs, 0.7f, 0.7f, 0f, 0.1f))
+            } else listOf(record)
+        }
+
+        val plain = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f)).run(clean.asSequence())
+        val runner = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f))
+        val withRef = runner.run(withReference.asSequence())
+
+        assertEquals(plain, withRef, "the comparison trace must not change our own solution")
+        assertEquals(clean.count { it is GyroRecord }, runner.referenceAttitudes.size,
+            "every reference sample must still be retained for comparison")
+    }
+
+    @Test
+    fun `out-of-order records are left to the filter's own guards`() {
+        // The runner must not silently sort: delivery pathology is worth seeing, and §7's
+        // time guard rejects it instead. Built directly with a genuine, non-zero gyro rate —
+        // syntheticRecording's boat is at rest, where a rejected tick and an accepted one
+        // are indistinguishable — and by moving a GyroRecord specifically, since accel and
+        // magnetometer carry no time guard at all and moving one of those would exercise
+        // nothing about ordering.
+        val records = mutableListOf<SensorRecord>(
+            AccelRecord(0L, 0f, 0f, g),
+            MagRecord(0L, 0f, 25f, -43.3f)
+        )
+        var t = 0L
+        repeat(20) {
+            records.add(GyroRecord(t, 0f, 0f, 1f)) // 1 rad/s about up
+            t += 10_000_000L
+        }
+        val moved = records.removeAt(12) // the 10th gyro tick, well before the end
+        check(moved is GyroRecord) { "test setup: expected a GyroRecord at index 12" }
+        records.add(moved) // arrives after every later, correctly-ordered tick
+
+        // kp = 0: pure gyro dead-reckoning, so a rejected tick is visibly a no-op rather
+        // than being masked by the accelerometer/magnetometer correction pulling it back.
+        val preservedOrder = ReplayRunner(MahonyAhrs(kp = 0f, ki = 0f)).run(records.asSequence())
+        val sortedFirst = ReplayRunner(MahonyAhrs(kp = 0f, ki = 0f))
+            .run(records.sortedBy { it.timestampNs }.asSequence())
+
+        assertTrue(preservedOrder.isNotEmpty())
+        assertTrue(preservedOrder.last().headingRad.isFinite(), "a late record must not produce NaN")
+        // With delivery order preserved, the moved tick arrives after the time base has
+        // already advanced past it and is rejected as non-positive dt, leaving the heading
+        // exactly where the last genuinely-accepted tick left it.
+        assertEquals(
+            preservedOrder[preservedOrder.size - 2].headingRad,
+            preservedOrder.last().headingRad,
+            1e-6f,
+            "a rejected out-of-order tick must not move the heading"
+        )
+        // Sorting first restores the moved tick to its rightful place, where it actually
+        // contributes a rotation — a different, further-integrated answer than preserving
+        // delivery order. Equal answers here would mean the runner silently sorted the input.
+        assertNotEquals(
+            sortedFirst.last().headingRad, preservedOrder.last().headingRad,
+            "sorting first must give a different answer than preserving delivery order"
+        )
+    }
+}
