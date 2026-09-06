@@ -286,6 +286,7 @@ class MahonyAhrs(
         haveMag = false
         accelerometerAccepted = false
         magnetometerAccepted = false
+        biasEstimatorRunning = false
         if (clearBias) { gyroBias[0] = 0f; gyroBias[1] = 0f; gyroBias[2] = 0f }
     }
 
