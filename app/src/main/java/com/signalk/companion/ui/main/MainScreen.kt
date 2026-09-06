@@ -16,11 +16,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -42,7 +39,6 @@ fun MainScreen(
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
     
     // Request permissions
     val permissionsState = rememberMultiplePermissionsState(
@@ -375,7 +371,6 @@ fun SensorDataCard(
             sensorData?.let { sensor ->
                 var hasOrientationData = false
                 var hasEnvironmentalData = false
-                var hasDeviceData = false
                 
                 // Navigation/Orientation Data
                 if (sensor.compassHeading != null || sensor.approxTrueHeading != null ||
@@ -600,151 +595,6 @@ fun ErrorCard(
             )
             TextButton(onClick = onDismiss) {
                 Text("Dismiss", color = MaterialTheme.colorScheme.onErrorContainer)
-            }
-        }
-    }
-}
-
-@Composable
-fun AuthenticationCard(
-    isAuthenticated: Boolean,
-    username: String?,
-    serverUrl: String,
-    isLoggingIn: Boolean = false,
-    onLogin: (String, String) -> Unit,
-    onLogout: () -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    var loginUsername by remember { mutableStateOf("") }
-    var loginPassword by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-    
-    // Close the form only when authentication succeeds
-    LaunchedEffect(isAuthenticated) {
-        if (isAuthenticated) {
-            expanded = false
-            loginPassword = "" // Clear password for security
-        }
-    }
-    
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Header row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Authentication",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = if (isAuthenticated) "✅ Authenticated as: $username" else "🔓 Not authenticated",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isAuthenticated) 
-                            MaterialTheme.colorScheme.primary 
-                        else 
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                
-                if (isAuthenticated) {
-                    OutlinedButton(onClick = onLogout) {
-                        Text("Logout")
-                    }
-                } else {
-                    Button(
-                        onClick = { expanded = !expanded },
-                        enabled = !isLoggingIn
-                    ) {
-                        Text(if (expanded) "Cancel" else "Login")
-                    }
-                }
-            }
-            
-            // Expandable login form
-            if (expanded && !isAuthenticated) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "Server: $serverUrl",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    OutlinedTextField(
-                        value = loginUsername,
-                        onValueChange = { loginUsername = it },
-                        label = { Text("Username") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    
-                    OutlinedTextField(
-                        value = loginPassword,
-                        onValueChange = { loginPassword = it },
-                        label = { Text("Password") },
-                        modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Text(
-                                    text = if (passwordVisible) "👁" else "🔒",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                        },
-                        singleLine = true
-                    )
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { expanded = false },
-                            modifier = Modifier.weight(1f),
-                            enabled = !isLoggingIn
-                        ) {
-                            Text("Cancel")
-                        }
-                        
-                        Button(
-                            onClick = {
-                                if (loginUsername.isNotBlank() && loginPassword.isNotBlank()) {
-                                    onLogin(loginUsername, loginPassword)
-                                    // Don't collapse form here - let LaunchedEffect handle it on success
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = loginUsername.isNotBlank() && loginPassword.isNotBlank() && !isLoggingIn
-                        ) {
-                            if (isLoggingIn) {
-                                Text("Logging in...")
-                            } else {
-                                Text("Login")
-                            }
-                        }
-                    }
-                }
-            } else if (!isAuthenticated) {
-                Text(
-                    text = "Optional: Login to authenticate with your SignalK server",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }
