@@ -167,11 +167,24 @@ class RawSensorSource(private val context: Context) {
         }
         listener = eventListener
 
-        listOfNotNull(accelerometer, gyroscope, magnetometer).forEach { sensor ->
+        val required = listOfNotNull(accelerometer, gyroscope, magnetometer)
+        val registered = required.map { sensor ->
             val ok = sensorManager.registerListener(
                 eventListener, sensor, samplingPeriodUs, NO_BATCHING_US, handler
             )
             Log.d(TAG, "Registered ${sensor.stringType} at ${samplingPeriodUs}us: $ok")
+            ok
+        }
+        if (!registered.all { it }) {
+            // registerListener returning false means that sensor did not actually subscribe -
+            // reporting success here would let a recording start believing it has a required
+            // stream that never delivers a single sample.
+            Log.e(TAG, "A required sensor failed to register - aborting start")
+            sensorManager.unregisterListener(eventListener)
+            handlerThread.quitSafely()
+            listener = null
+            thread = null
+            return false
         }
 
         // The reference trace is registered at a lower rate on purpose. It is never
@@ -195,7 +208,18 @@ class RawSensorSource(private val context: Context) {
     fun stop() {
         listener?.let { sensorManager.unregisterListener(it) }
         listener = null
-        thread?.quitSafely()
+        // quitSafely() only requests shutdown - it does not wait for callbacks already queued
+        // to run. Joining here means any in-flight callback has finished writing before the
+        // caller (which closes the recording right after this returns) can pull the writer
+        // out from under it.
+        thread?.let { handlerThread ->
+            handlerThread.quitSafely()
+            try {
+                handlerThread.join()
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
         thread = null
         Log.d(TAG, "Raw sensor ingestion stopped")
     }
