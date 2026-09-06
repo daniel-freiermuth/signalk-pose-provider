@@ -397,6 +397,14 @@ class SignalKStreamingService : Service() {
             return false
         }
 
+        // AttitudeEngine keeps its own mount-rotation state (Volatile, see AttitudeEngine),
+        // separate from SensorService's — without this it would start at identity and every
+        // M1 boat-frame reading would be reported in raw device coordinates instead.
+        attitudeEngine.setCalibrationAngles(
+            AppSettings.getCalibrationAlphaDeg(this),
+            AppSettings.getCalibrationBetaDeg(this),
+            AppSettings.getCalibrationGammaDeg(this)
+        )
         if (!attitudeEngine.start(record = true)) {
             Log.e(TAG, "Attitude engine refused to start - closing the empty recording")
             recordingSession.stop()
@@ -430,7 +438,14 @@ class SignalKStreamingService : Service() {
             }
         }
 
-        startForeground(NOTIFICATION_ID, createNotification("Recording raw sensor data"))
+        startForeground(
+            NOTIFICATION_ID,
+            createNotification(
+                "Recording raw sensor data",
+                stopAction = ACTION_STOP_RECORDING,
+                stopLabel = "Stop recording"
+            )
+        )
         Log.i(TAG, "Recording started")
         return true
     }
@@ -452,9 +467,13 @@ class SignalKStreamingService : Service() {
         val file = recordingSession.stop()
         Log.i(TAG, "Recording stopped: ${file?.absolutePath}")
 
-        if (_streamingState.value == StreamingState.IDLE) {
-            // Nothing else needs the service. Leave GNSS running only if streaming owns it.
+        if (_streamingState.value == StreamingState.IDLE || !sendLocation) {
+            // Leave GNSS running only if streaming is both active and actually wants it -
+            // streaming with sendLocation disabled means the recording was GNSS's only
+            // reason to be active, and leaving it running now would just drain the battery.
             locationService.stopLocationUpdates()
+        }
+        if (_streamingState.value == StreamingState.IDLE) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         } else {
@@ -519,6 +538,7 @@ class SignalKStreamingService : Service() {
 
     fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
         sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
+        attitudeEngine.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
         Log.d(TAG, "Updated calibration angles: α=${alphaDeg}°, β=${betaDeg}°, γ=${gammaDeg}°")
     }
 
@@ -552,7 +572,11 @@ class SignalKStreamingService : Service() {
         }
     }
 
-    private fun createNotification(contentText: String): Notification {
+    private fun createNotification(
+        contentText: String,
+        stopAction: String = ACTION_STOP_STREAMING,
+        stopLabel: String = "Stop"
+    ): Notification {
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent,
@@ -560,7 +584,7 @@ class SignalKStreamingService : Service() {
         )
 
         val stopIntent = Intent(this, SignalKStreamingService::class.java).apply {
-            action = ACTION_STOP_STREAMING
+            action = stopAction
         }
         val stopPendingIntent = PendingIntent.getService(
             this, 0, stopIntent,
@@ -574,7 +598,7 @@ class SignalKStreamingService : Service() {
             .setContentIntent(pendingIntent)
             .addAction(
                 android.R.drawable.ic_media_pause,
-                "Stop",
+                stopLabel,
                 stopPendingIntent
             )
             .setOngoing(true)

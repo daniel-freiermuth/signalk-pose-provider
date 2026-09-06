@@ -275,7 +275,13 @@ class MainViewModel @Inject constructor(
         // A recording needs GNSS as much as streaming does, and backgrounding the app is the
         // normal state of a phone on a boat — shutting location down here would silently
         // produce a recording with no fixes in it.
-        if (!_uiState.value.isStreaming && !_uiState.value.recording.isRecording) {
+        //
+        // Reads recordingSession.isRecording directly rather than the UI state: the service
+        // sets it the moment a recording starts, but the StateFlow collector that copies it
+        // into _uiState runs asynchronously, so backgrounding the app in that window would
+        // otherwise see stale (not-yet-updated) UI state and stop GNSS out from under a
+        // recording that has already begun.
+        if (!_uiState.value.isStreaming && !recordingSession.isRecording) {
             stopForegroundSensors()
         }
     }
