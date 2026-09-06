@@ -192,11 +192,13 @@ class MahonyAhrs(
         }
 
         val dtRaw = ((timestampNs - lastGyroNs) / NS_PER_S).toFloat()
-        lastGyroNs = timestampNs
 
-        // Non-positive dt means duplicate or out-of-order delivery. Integrating it would
-        // run the filter backwards; drop the sample but keep the new time base (§7 rule 4).
+        // Non-positive dt means duplicate or out-of-order delivery. Integrating it would run
+        // the filter backwards, so drop the sample — and leave the time base at the last
+        // *accepted* sample rather than this one, or a later valid sample would compute its
+        // dt against a rejected, out-of-order timestamp instead of the real previous tick.
         if (dtRaw <= 0f || !dtRaw.isFinite()) return
+        lastGyroNs = timestampNs
         val dt = if (dtRaw > MAX_DT_SECONDS) MAX_DT_SECONDS else dtRaw
 
         // Bias-corrected rate, i.e. our best estimate of how fast the boat is actually

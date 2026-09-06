@@ -384,6 +384,29 @@ class MahonyAhrsTest {
     }
 
     @Test
+    fun `a rejected out-of-order sample does not move the time base backward`() {
+        // Regression: lastGyroNs was updated before the dt>0 guard, so a rejected,
+        // out-of-order timestamp still became the new baseline. The next accepted sample then
+        // integrated against that stale point instead of the last sample actually accepted,
+        // silently over-integrating the rotation.
+        val f = MahonyAhrs(kp = 0f, ki = 0f)
+        val rateRadS = 10f
+        val t = 1_000_000_000L
+        f.onGyroscope(t, 0f, 0f, 0f) // establish time base
+        f.onGyroscope(t + 10_000_000L, 0f, 0f, rateRadS) // accepted: dt = 10 ms
+        f.onGyroscope(t + 5_000_000L, 0f, 0f, rateRadS) // rejected: out of order
+        f.onGyroscope(t + 20_000_000L, 0f, 0f, rateRadS) // must see dt = 10 ms, not 15 ms
+        // Two accepted 10 ms ticks at 10 rad/s = 20 ms total integrated, to port.
+        val expectedDeg = 360f - Math.toDegrees((rateRadS * 0.020).toDouble()).toFloat()
+        assertDegreesNear(
+            expectedDeg,
+            angles(f).headingRad,
+            0.2f,
+            "a rejected sample must not inflate the next sample's dt"
+        )
+    }
+
+    @Test
     fun `clamps an implausibly long gap`() {
         // A 60 s gap (Doze, suspended sensor) must not integrate 60 s of rotation.
         val f = MahonyAhrs(kp = 0f, ki = 0f)
