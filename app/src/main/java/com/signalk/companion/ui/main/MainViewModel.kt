@@ -4,7 +4,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.os.Build
 import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -528,11 +527,7 @@ class MainViewModel @Inject constructor(
             putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, currentState.sendPressure)
         }
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            applicationContext.startForegroundService(serviceIntent)
-        } else {
-            applicationContext.startService(serviceIntent)
-        }
+        applicationContext.startForegroundService(serviceIntent)
     }
 
     fun stopStreaming() {

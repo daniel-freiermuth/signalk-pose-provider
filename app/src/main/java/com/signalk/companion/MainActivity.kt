@@ -65,14 +65,10 @@ class MainActivity : ComponentActivity() {
     
     private fun requestBatteryOptimizationExemption() {
         val intent = BatteryOptimizationHelper.createBatteryOptimizationIntent(this)
-        if (intent != null) {
-            try {
-                startActivity(intent)
-            } catch (e: Exception) {
-                // Fallback to manual settings if direct request fails
-                openBatterySettings()
-            }
-        } else {
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            // Fallback to manual settings if direct request fails
             openBatterySettings()
         }
     }

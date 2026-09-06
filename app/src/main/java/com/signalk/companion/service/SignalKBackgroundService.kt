@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
@@ -51,18 +50,16 @@ class SignalKBackgroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "SignalK Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "SignalK data streaming service"
-            }
-            
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "SignalK Service",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "SignalK data streaming service"
         }
+
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.createNotificationChannel(channel)
     }
     
     private fun createNotification(): Notification {

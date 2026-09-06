@@ -3,7 +3,6 @@ package com.signalk.companion.util
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 
@@ -13,25 +12,17 @@ object BatteryOptimizationHelper {
      * Check if the app is whitelisted from battery optimization
      */
     fun isIgnoringBatteryOptimizations(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            powerManager.isIgnoringBatteryOptimizations(context.packageName)
-        } else {
-            true // No battery optimization on older versions
-        }
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return powerManager.isIgnoringBatteryOptimizations(context.packageName)
     }
     
     /**
      * Create an intent to request battery optimization whitelist
      */
-    fun createBatteryOptimizationIntent(context: Context): Intent? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Intent().apply {
-                action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-                data = Uri.parse("package:${context.packageName}")
-            }
-        } else {
-            null
+    fun createBatteryOptimizationIntent(context: Context): Intent {
+        return Intent().apply {
+            action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+            data = Uri.parse("package:${context.packageName}")
         }
     }
     
