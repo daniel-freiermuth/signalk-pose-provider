@@ -236,7 +236,16 @@ class SignalKStreamingService : Service() {
                 stopStreaming()
             }
             ACTION_START_RECORDING -> {
-                startRecording(intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L))
+                val started = startRecording(intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L))
+                // toggleRecording() calls startForegroundService() for this action, which
+                // obligates a startForeground() call within seconds or the system kills the
+                // process for breaking that contract. A failed startRecording() never makes
+                // that call; streaming (if active) already has, so only a fully idle service
+                // needs to stop itself here to avoid being the one left holding the promise.
+                if (!started && _streamingState.value == StreamingState.IDLE) {
+                    Log.w(TAG, "Recording failed to start and nothing else needs the service - stopping")
+                    stopSelfResult(startId)
+                }
             }
             ACTION_STOP_RECORDING -> {
                 stopRecording()
@@ -362,7 +371,14 @@ class SignalKStreamingService : Service() {
             _streamingState.value = StreamingState.IDLE
 
             if (recording) {
-                updateNotification("Recording raw sensor data")
+                // The notification now belongs to the recording, not streaming - its Stop
+                // action must keep dispatching ACTION_STOP_RECORDING, or the notification
+                // that started this way silently reverts to a button that cannot stop it.
+                updateNotification(
+                    "Recording raw sensor data",
+                    stopAction = ACTION_STOP_RECORDING,
+                    stopLabel = "Stop recording"
+                )
             } else {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -498,7 +514,10 @@ class SignalKStreamingService : Service() {
             
             // Handle location service changes
             val wasLocationActive = locationService.isLocationUpdatesActive()
-            val shouldLocationBeActive = sendLocation
+            // An active recording needs GNSS as much as sendLocation does - a config update
+            // that turns sendLocation off must not stop fixes out from under a recording that
+            // is still running, the same ownership rule stopRecording() applies on its side.
+            val shouldLocationBeActive = sendLocation || recordingSession.isRecording
             
             if (wasLocationActive && !shouldLocationBeActive) {
                 Log.d(TAG, "Stopping location updates (disabled in config)")
@@ -550,8 +569,12 @@ class SignalKStreamingService : Service() {
         updateNotification("Messages sent: ${_messagesSent.value}")
     }
     
-    private fun updateNotification(contentText: String) {
-        val notification = createNotification(contentText)
+    private fun updateNotification(
+        contentText: String,
+        stopAction: String = ACTION_STOP_STREAMING,
+        stopLabel: String = "Stop"
+    ) {
+        val notification = createNotification(contentText, stopAction, stopLabel)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, notification)
     }

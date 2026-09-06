@@ -580,7 +580,13 @@ class MainViewModel @Inject constructor(
         // the service can emit isStreaming=false, which would leave the button stuck in "Stop" state.
         _uiState.update { it.copy(isStreaming = false) }
 
-        cleanupServiceBinding(unbind = true)
+        // A recording may still be running after streaming stops, and the service stays alive
+        // for it (see SignalKStreamingService.stopStreaming()). Unbinding here would clear
+        // streamingService and silently drop every calibration change until the recording
+        // also stops - updateCalibrationAngles() has no other way to reach it.
+        if (!recordingSession.isRecording) {
+            cleanupServiceBinding(unbind = true)
+        }
 
         // Service will asynchronously stop sensors in its stopStreaming().
         // Restart for foreground display after the service finishes processing.
