@@ -51,9 +51,18 @@ class RecordingWriter(
     private var sinceFlush = 0
     private var closed = false
 
-    /** Write the format header. Call once, before any records. */
+    /**
+     * Write the format header. Call once, before any records.
+     *
+     * Respects [maxBytes] like everything else here: a budget too small even for the header
+     * marks the recording truncated instead of writing content the budget did not allow for.
+     */
     fun writeHeader(deviceDescription: String, wallClockMs: Long, bootTimeNs: Long) {
         val header = RecordingFormat.header(deviceDescription, wallClockMs, bootTimeNs)
+        if (bytesWritten + header.length > maxBytes) {
+            isTruncated = true
+            return
+        }
         sink.write(header)
         bytesWritten += header.length
     }
@@ -66,17 +75,24 @@ class RecordingWriter(
     fun write(record: SensorRecord) {
         if (closed || isTruncated) return
 
-        val line = RecordingFormat.format(record)
-        if (bytesWritten + line.length + 1 > maxBytes) {
+        val line = RecordingFormat.format(record) + "\n"
+        val marker = "# truncated: byte budget of $maxBytes reached\n"
+        // Reserve room for the marker itself before it is needed, so hitting the budget is
+        // never the thing that stops the recording from being able to say it was truncated -
+        // that would leave bytesWritten understating the real output. A budget too small even
+        // for the marker still stops here, just silently.
+        if (bytesWritten + line.length > maxBytes - marker.length) {
             isTruncated = true
-            sink.write("# truncated: byte budget of $maxBytes reached\n")
+            if (bytesWritten + marker.length <= maxBytes) {
+                sink.write(marker)
+                bytesWritten += marker.length
+            }
             sink.flush()
             return
         }
 
         sink.write(line)
-        sink.write("\n")
-        bytesWritten += line.length + 1
+        bytesWritten += line.length
         recordCount++
 
         if (++sinceFlush >= FLUSH_EVERY) {

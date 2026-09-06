@@ -105,8 +105,16 @@ class ReplayRunner(
      * the filter's own §7 guards handle any out-of-order or duplicated timestamps rather
      * than this runner silently sorting them away. Sorting here would hide exactly the
      * delivery pathology worth knowing about.
+     *
+     * Resets the filter and clears [fixes]/[referenceAttitudes] first, so calling this
+     * more than once on the same instance — comparing gain settings or hard-iron strategies
+     * against one recording, say — replays each time from a clean state rather than
+     * continuing from wherever the previous call left off.
      */
     fun run(records: Sequence<SensorRecord>): List<AttitudeSample> {
+        filter.reset(clearBias = true)
+        fixes.clear()
+        referenceAttitudes.clear()
         val out = mutableListOf<AttitudeSample>()
         for (record in records) {
             when (record) {

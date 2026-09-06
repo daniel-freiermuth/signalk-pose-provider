@@ -87,8 +87,11 @@ class RecordingSession(private val context: Context) {
                 throw java.io.IOException("could not create ${directory.absolutePath}")
             }
 
+            // createTempFile both picks a collision-resistant name and creates the file
+            // atomically, so two recordings starting within the same second cannot race each
+            // other into the same path and have the second one truncate the first.
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-            val target = File(directory, "$stamp$FILE_EXTENSION")
+            val target = File.createTempFile("$stamp-", FILE_EXTENSION, directory)
 
             val recordingWriter = RecordingWriter(
                 BufferedWriter(FileWriter(target), BUFFER_BYTES)
@@ -124,8 +127,30 @@ class RecordingSession(private val context: Context) {
     @Synchronized
     fun write(record: SensorRecord) {
         val active = writer ?: return
-        active.write(record)
-        if (active.recordCount % STATUS_EVERY == 0L) publishStatus(active)
+        val wasTruncated = active.isTruncated
+        try {
+            active.write(record)
+        } catch (e: java.io.IOException) {
+            // A write failure mid-sail (storage full, USB-MTP hiccup) must not keep the
+            // sensor pipeline feeding a writer that can no longer accept anything, and must
+            // not throw back into the sensor callback that called this.
+            Log.e(TAG, "Recording write failed - stopping the recording", e)
+            writer = null
+            file = null
+            try {
+                active.close()
+            } catch (closeError: java.io.IOException) {
+                Log.w(TAG, "Failed to close the recording after a write failure", closeError)
+            }
+            _status.value = Status(error = e.message ?: e.javaClass.simpleName)
+            return
+        }
+        // Publish on the usual cadence, and also the moment truncation starts - otherwise a
+        // record count that never lands on STATUS_EVERY after the budget is hit would leave
+        // the UI reporting isTruncated = false until stop() is called.
+        if (active.recordCount % STATUS_EVERY == 0L || (active.isTruncated && !wasTruncated)) {
+            publishStatus(active)
+        }
     }
 
     /** Close the recording and return the file, or null if none was open. */

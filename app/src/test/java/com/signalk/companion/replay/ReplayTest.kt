@@ -135,6 +135,25 @@ class ReplayTest {
     }
 
     @Test
+    fun `a second run on the same instance starts from a clean state`() {
+        // Tuning replays one recording repeatedly against different gains or hard-iron
+        // strategies on whatever ReplayRunner is at hand - a second run must not continue
+        // from wherever the first left off, either in the filter or in fixes/referenceAttitudes.
+        val recording = syntheticRecording(137f, 3.0) +
+            listOf(
+                FixRecord(4_000_000_000L, 59.0, 18.0, speedMps = 2.5f),
+                RotationVectorRecord(4_000_000_000L, 0.1f, 0.2f, 0.3f, 0.927f)
+            )
+        val runner = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0.1f))
+        val first = runner.run(recording.asSequence())
+        val second = runner.run(recording.asSequence())
+        assertEquals(first, second, "the same recording replayed twice must give the same trace")
+        assertEquals(1, runner.fixes.size, "fixes from a prior run must not accumulate")
+        assertEquals(1, runner.referenceAttitudes.size,
+            "reference attitudes from a prior run must not accumulate")
+    }
+
+    @Test
     fun `replay through a text round trip gives the same answer`() {
         // Guards the format against silently losing precision: replaying the parsed text
         // must match replaying the in-memory records.
@@ -232,12 +251,47 @@ class ReplayTest {
     @Test
     fun `out-of-order records are left to the filter's own guards`() {
         // The runner must not silently sort: delivery pathology is worth seeing, and §7's
-        // guards already handle it. This asserts the replay survives it without exploding.
-        val recording = syntheticRecording(45f, 2.0).toMutableList()
-        val moved = recording.removeAt(30)
-        recording.add(moved) // one record now arrives far too late
-        val samples = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f)).run(recording.asSequence())
-        assertTrue(samples.isNotEmpty())
-        assertTrue(samples.last().headingRad.isFinite(), "a late record must not produce NaN")
+        // time guard rejects it instead. Built directly with a genuine, non-zero gyro rate —
+        // syntheticRecording's boat is at rest, where a rejected tick and an accepted one
+        // are indistinguishable — and by moving a GyroRecord specifically, since accel and
+        // magnetometer carry no time guard at all and moving one of those would exercise
+        // nothing about ordering.
+        val records = mutableListOf<SensorRecord>(
+            AccelRecord(0L, 0f, 0f, g),
+            MagRecord(0L, 0f, 25f, -43.3f)
+        )
+        var t = 0L
+        repeat(20) {
+            records.add(GyroRecord(t, 0f, 0f, 1f)) // 1 rad/s about up
+            t += 10_000_000L
+        }
+        val moved = records.removeAt(12) // the 10th gyro tick, well before the end
+        check(moved is GyroRecord) { "test setup: expected a GyroRecord at index 12" }
+        records.add(moved) // arrives after every later, correctly-ordered tick
+
+        // kp = 0: pure gyro dead-reckoning, so a rejected tick is visibly a no-op rather
+        // than being masked by the accelerometer/magnetometer correction pulling it back.
+        val preservedOrder = ReplayRunner(MahonyAhrs(kp = 0f, ki = 0f)).run(records.asSequence())
+        val sortedFirst = ReplayRunner(MahonyAhrs(kp = 0f, ki = 0f))
+            .run(records.sortedBy { it.timestampNs }.asSequence())
+
+        assertTrue(preservedOrder.isNotEmpty())
+        assertTrue(preservedOrder.last().headingRad.isFinite(), "a late record must not produce NaN")
+        // With delivery order preserved, the moved tick arrives after the time base has
+        // already advanced past it and is rejected as non-positive dt, leaving the heading
+        // exactly where the last genuinely-accepted tick left it.
+        assertEquals(
+            preservedOrder[preservedOrder.size - 2].headingRad,
+            preservedOrder.last().headingRad,
+            1e-6f,
+            "a rejected out-of-order tick must not move the heading"
+        )
+        // Sorting first restores the moved tick to its rightful place, where it actually
+        // contributes a rotation — a different, further-integrated answer than preserving
+        // delivery order. Equal answers here would mean the runner silently sorted the input.
+        assertNotEquals(
+            sortedFirst.last().headingRad, preservedOrder.last().headingRad,
+            "sorting first must give a different answer than preserving delivery order"
+        )
     }
 }

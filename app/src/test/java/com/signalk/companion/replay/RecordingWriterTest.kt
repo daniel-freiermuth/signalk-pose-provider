@@ -63,6 +63,34 @@ class RecordingWriterTest {
     }
 
     @Test
+    fun `a budget of zero produces no output`() {
+        val out = StringWriter()
+        val w = RecordingWriter(out, maxBytes = 0)
+        w.writeHeader("test-device", 1L, 2L)
+        repeat(5) { w.write(sample(it.toLong())) }
+        w.close()
+
+        assertEquals(0L, w.bytesWritten, "no budget means nothing may be written, not even a marker")
+        assertEquals(0L, w.recordCount)
+        assertEquals("", out.toString())
+    }
+
+    @Test
+    fun `bytesWritten never exceeds maxBytes even counting the truncation marker`() {
+        // A tight budget used to let the marker itself push bytesWritten - and the real file -
+        // past maxBytes, understating what was actually written.
+        val out = StringWriter()
+        val w = RecordingWriter(out, maxBytes = 200)
+        repeat(1000) { w.write(sample(it.toLong())) }
+        w.close()
+
+        assertTrue(w.isTruncated)
+        assertEquals(out.toString().length.toLong(), w.bytesWritten, "bytesWritten must match the real output")
+        assertTrue(w.bytesWritten <= 200, "budget exceeded: ${w.bytesWritten}")
+        assertTrue(out.toString().contains("# truncated"), "the marker must still fit at this budget")
+    }
+
+    @Test
     fun `writing after close is a no-op rather than a crash`() {
         val out = StringWriter()
         val w = RecordingWriter(out)
