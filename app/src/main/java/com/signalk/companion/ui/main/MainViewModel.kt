@@ -67,7 +67,6 @@ class MainViewModel @Inject constructor(
     private var streamingService: SignalKStreamingService? = null
     private var bound = false
     private var serviceCollectorJob: Job? = null
-    private var authJob: Job? = null
     private var isAppInForeground = false
 
     companion object {
@@ -203,20 +202,6 @@ class MainViewModel @Inject constructor(
                 if (authState.error != null) {
                     _uiState.update { it.copy(error = authState.error) }
                 }
-            }
-        }
-    }
-    
-    fun updateServerUrl(url: String) {
-        val parsed = UrlParser.parseUrl(url)
-        _uiState.update { it.copy(serverUrl = url, parsedUrl = parsed) }
-        // Save to shared preferences
-        AppSettings.setServerUrl(applicationContext, url)
-        
-        // Warn if URL contains a path that will be ignored
-        if (parsed?.hasPath == true) {
-            _uiState.update { 
-                it.copy(error = "Warning: URL path will be ignored. SignalK uses /signalk/v1/stream")
             }
         }
     }
@@ -386,13 +371,6 @@ class MainViewModel @Inject constructor(
         } != null
     }
     
-    fun updateVesselId(vesselId: String) {
-        val trimmedId = vesselId.trim()
-        _uiState.update { it.copy(vesselId = trimmedId) }
-        // Save to shared preferences
-        AppSettings.setVesselId(applicationContext, trimmedId)
-    }
-    
     fun updateSendLocation(enabled: Boolean) {
         _uiState.update { it.copy(sendLocation = enabled) }
         // Save to shared preferences
@@ -554,20 +532,6 @@ class MainViewModel @Inject constructor(
                 delay(500)
                 startForegroundSensors()
             }
-        }
-    }
-    
-    fun login(username: String, password: String) {
-        authJob?.cancel()
-        authJob = viewModelScope.launch {
-            authenticationService.login(_uiState.value.serverUrl, username, password)
-        }
-    }
-    
-    fun logout() {
-        authJob?.cancel()
-        authJob = viewModelScope.launch {
-            authenticationService.logout()
         }
     }
     
