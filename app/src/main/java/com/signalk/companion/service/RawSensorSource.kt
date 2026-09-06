@@ -247,6 +247,9 @@ class RawSensorSource(private val context: Context) {
         // HAL's bias estimate. Both are recorded so the M2 boundary can be crossed (§4.3).
         Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED ->
             MagRecord(timestamp, values[0], values[1], values[2], values[3], values[4], values[5])
+        Sensor.TYPE_MAGNETIC_FIELD ->
+            MagRecord(timestamp, values[0], values[1], values[2])
+
         // Stored exactly as delivered: scalar-LAST, with values[3] absent on many devices.
         // The conversion into our scalar-first convention lives in RotationVectorRecord.
         Sensor.TYPE_ROTATION_VECTOR -> RotationVectorRecord(
