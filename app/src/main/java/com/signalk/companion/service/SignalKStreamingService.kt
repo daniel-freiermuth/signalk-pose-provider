@@ -415,19 +415,17 @@ class SignalKStreamingService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "SignalK Streaming",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows when SignalK data streaming is active"
-                setShowBadge(false)
-            }
-            
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "SignalK Streaming",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Shows when SignalK data streaming is active"
+            setShowBadge(false)
         }
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
     }
 
     private fun createNotification(contentText: String): Notification {
