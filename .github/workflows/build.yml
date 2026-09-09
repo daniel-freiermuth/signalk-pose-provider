@@ -51,9 +51,9 @@ jobs:
           # cannot poison it for everyone else.
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
-      - name: Install Android SDK Platform 35
-        # compileSdk = 35 in app/build.gradle.kts. ubuntu-latest currently preinstalls this
-        # platform, but nothing in this workflow declares the dependency — a future runner
+      - name: Install Android SDK Platform 36
+        # compileSdk = 36 in app/build.gradle.kts. ubuntu-latest currently preinstalls
+        # platform 35, but nothing in this workflow declares the dependency — a future runner
         # image is free to drop it and both Gradle steps below would fail without warning.
         #
         # `sdkmanager` is not on PATH on the runner image — only the cmdline-tools copy
@@ -64,7 +64,7 @@ jobs:
         # not a shell error this time but a workflow-file parse failure, so the whole
         # workflow stopped running rather than just this step failing.
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-35"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36"
 
       - name: Report the toolchain
         run: |
