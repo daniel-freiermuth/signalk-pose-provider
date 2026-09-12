@@ -1063,7 +1063,7 @@ private fun IntervalDropdown(
             enabled = enabled,
             modifier = Modifier
                 .width(100.dp)
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
             textStyle = MaterialTheme.typography.bodySmall,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && enabled) },
             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
