@@ -465,31 +465,22 @@ class SignalKTransmitter @Inject constructor(
         // Environmental sensors (conditional based on settings)
         if (sendPressure) {
             sensorData.pressure?.let { pressure ->
-                values.add(
-                    SignalKValue(
-                        path = "environment.outside.pressure",
-                        value = SignalKValues.number(pressure.toDouble()) // Already in Pa
-                    )
-                )
+                SignalKValues.finiteNumber(pressure.toDouble())?.let { v ->  // Already in Pa
+                    values.add(SignalKValue(path = "environment.outside.pressure", value = v))
+                }
             }
         }
         
         sensorData.temperature?.let { temperature ->
-            values.add(
-                SignalKValue(
-                    path = "environment.outside.temperature",
-                    value = SignalKValues.number(temperature.toDouble()) // Already in K
-                )
-            )
+            SignalKValues.finiteNumber(temperature.toDouble())?.let { v ->  // Already in K
+                values.add(SignalKValue(path = "environment.outside.temperature", value = v))
+            }
         }
         
         sensorData.relativeHumidity?.let { humidity ->
-            values.add(
-                SignalKValue(
-                    path = "environment.outside.relativeHumidity",
-                    value = SignalKValues.number(humidity.toDouble()) // Already as ratio
-                )
-            )
+            SignalKValues.finiteNumber(humidity.toDouble())?.let { v ->  // Already as ratio
+                values.add(SignalKValue(path = "environment.outside.relativeHumidity", value = v))
+            }
         }
 
         val vesselContext = context?.let { AppSettings.getSignalKContext(it) } ?: "vessels.self"
