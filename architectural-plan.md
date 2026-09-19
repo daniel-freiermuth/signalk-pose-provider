@@ -263,6 +263,33 @@ threshold is a guess with a rationale attached, and the harness exists precisely
 become measurements rather than guesses. That needs a recorded sail. The same recording
 answers the open hard-iron question below.
 
+**Deferred: tuning waits for a sail.** The 2026 season is closing before any recording
+exists, so that gap is expected to sit over a winter rather than days. This changes what M1
+may *claim*, not whether it may merge. Nothing here publishes — `AttitudeEngine` produces a
+pose and `SensorService` still owns every SignalK path — so merging an untuned M1 cannot
+regress a value on the bus. It lands as a tested component and a harness; the milestone's
+stated value, "correct roll/pitch under heel", stays unclaimed until a sail says otherwise.
+
+**A shakedown recording is worth making ashore anyway.** A car, a harbour motor-out, a night
+at the dock: not tuning data, de-risking data. It answers what synthetic tests cannot —
+whether the pipeline survives an hour at 200 Hz, whether this device offers the uncalibrated
+sensor types or takes the fallback path, what `SensorEvent.timestamp` minus
+`elapsedRealtimeNanos` actually is on it (§7 rule 5, which is why both are recorded), how
+large a file really gets, and what it costs in battery. Those failure modes are cheap to find
+in a car park and expensive to find on the first good sailing day.
+
+**What cannot be substituted ashore.** Wave-driven heel, which is what the gravity-gating
+time constant is tuned against; lever-arm acceleration at boat scale and boat rates; and γ
+measured through the boat's own magnetic environment rather than a car's. M2 is categorically
+boat-only — an ellipsoid fit is *about* the vessel's hard iron, so there is nothing to fit
+anywhere else.
+
+**Winter-workable instead.** M4 needs M1's attitude but not M1's *tuned* attitude: gravity
+removal and frame rotation are structure, not calibration. M3's gates can be written and
+tested against synthetic data plus whatever shakedown recordings exist, with thresholds left
+as the same kind of reasoned guess the filter's gains currently are. Both turn into
+measurements at the same moment — the first recorded sail.
+
 **Interim hard-iron default: the HAL's estimate.** `AttitudeEngine` defaults to
 `HardIronStrategy.HalEstimate`, i.e. it subtracts `values[3..5]`. The alternative for the M1
 window is *no* correction at all, which would be worse heading than the app ships today —
