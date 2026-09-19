@@ -195,4 +195,47 @@ class SignalKTransmitterTest {
         assertEquals(0.0, locationData.altitude!!, 0.0001)
         // A SignalK message should include all these zero values
     }
+
+    // -- Proof: environmental sensor NaN crashes JSON serialization (bug #3134) --
+
+    @Test
+    fun testNumberWithNaN_throwsOnEncode() {
+        // SignalKValues.number() wraps NaN into a JsonPrimitive without checking.
+        // kotlinx.serialization (default config) throws on NaN at encode time,
+        // taking down the entire SignalK update message.
+        val nanValue = SignalKValues.number(Double.NaN)
+        val message = SignalKMessage(
+            context = "vessels.self",
+            updates = listOf(
+                SignalKUpdate(
+                    source = SignalKSource(label = "test"),
+                    timestamp = "2025-01-01T00:00:00Z",
+                    values = listOf(
+                        SignalKValue(path = "environment.outside.pressure", value = nanValue)
+                    )
+                )
+            )
+        )
+        // Default Json config forbids NaN — this is the crash path.
+        assertThrows(IllegalArgumentException::class.java) {
+            Json.encodeToString(message)
+        }
+    }
+
+    @Test
+    fun testFiniteNumber_dropsNaN() {
+        // finiteNumber() returns null for NaN, so the path is simply omitted
+        // from the update — the intended defensive behavior.
+        assertNull(SignalKValues.finiteNumber(Double.NaN))
+        assertNull(SignalKValues.finiteNumber(Double.POSITIVE_INFINITY))
+        assertNull(SignalKValues.finiteNumber(Double.NEGATIVE_INFINITY))
+    }
+
+    @Test
+    fun testFiniteNumber_passesFiniteValues() {
+        // Normal finite values pass through unchanged.
+        assertNotNull(SignalKValues.finiteNumber(101325.0))
+        assertNotNull(SignalKValues.finiteNumber(0.0))
+        assertNotNull(SignalKValues.finiteNumber(-40.0))
+    }
 }
