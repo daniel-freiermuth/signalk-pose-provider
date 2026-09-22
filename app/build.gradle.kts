@@ -136,6 +136,10 @@ android {
     }
 
     testOptions {
+        // android.util.Log is a stub in the unit-test android.jar and throws by default.
+        // SignalKTransmitter logs on every connection path, so its tests need the stubs
+        // to be no-ops rather than landmines.
+        unitTests.isReturnDefaultValues = true
         unitTests.all {
             it.useJUnitPlatform()
         }
