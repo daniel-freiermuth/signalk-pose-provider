@@ -35,7 +35,6 @@ data class MainUiState(
     val isStreaming: Boolean = false,
     val serverUrl: String = "", // Raw user input for the URL field
     val parsedUrl: UrlParser.ParsedUrl? = null,
-    val vesselId: String = "self",
     val calibrationAlphaDeg: Float = 0f,  // ZXZ α: screen twist (charging port direction)
     val calibrationBetaDeg: Float = 0f,   // ZXZ β: tilt from horizontal [0°, 180°]
     val calibrationGammaDeg: Float = 0f,  // ZXZ γ: heading offset
@@ -53,7 +52,6 @@ data class MainUiState(
     val lastTransmissionTime: Long? = null,
     val isAuthenticated: Boolean = false,
     val username: String? = null,
-    val isLoggingIn: Boolean = false,
     /** M1 raw recording: file name, record count, byte count, truncation. */
     val recording: RecordingSession.Status = RecordingSession.Status(),
     /**
@@ -218,8 +216,7 @@ class MainViewModel @Inject constructor(
                 _uiState.update { 
                     it.copy(
                         isAuthenticated = authState.isAuthenticated,
-                        username = authState.username,
-                        isLoggingIn = authState.isLoading
+                        username = authState.username
                     )
                 }
                 
@@ -471,7 +468,6 @@ class MainViewModel @Inject constructor(
         // Load settings from shared preferences
         val savedServerUrl = AppSettings.getServerUrl(applicationContext)
         val savedParsedUrl = UrlParser.parseUrl(savedServerUrl)
-        val savedVesselId = AppSettings.getVesselId(applicationContext)
         val savedSendLocation = AppSettings.getSendLocation(applicationContext)
         val savedSendHeading = AppSettings.getSendHeading(applicationContext)
         val savedSendPressure = AppSettings.getSendPressure(applicationContext)
@@ -491,7 +487,6 @@ class MainViewModel @Inject constructor(
             it.copy(
                 serverUrl = savedServerUrl,
                 parsedUrl = savedParsedUrl,
-                vesselId = savedVesselId,
                 sendLocation = savedSendLocation,
                 sendHeading = savedSendHeading,
                 sendPressure = savedSendPressure,
