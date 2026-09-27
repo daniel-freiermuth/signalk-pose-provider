@@ -30,6 +30,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 /**
  * Drives [SignalKTransmitter] against a loopback [FakeSignalKServer] over its real OkHttp
@@ -526,6 +527,26 @@ class SignalKTransmitterTest {
         closeGate.countDown()
     }
 
+    @Test
+    fun `streaming stopped during the pre-connect login does not connect once the login completes`() {
+        storeCredentialsWithoutToken()
+        val loginGate = CountDownLatch(1)
+        server.loginGate = loginGate
+
+        // With credentials but no token, the connection attempt logs in before connecting.
+        val start = thread(name = "start-streaming") { startStreaming() }
+        awaitCondition("the pre-connect login to reach the server") { server.loginRequests.size == 2 }
+
+        transmitter.stopStreaming()
+        loginGate.countDown()
+        start.join(FakeSignalKServer.DEFAULT_TIMEOUT_MS)
+        assertFalse(start.isAlive, "startStreaming should return once the login completes")
+
+        Thread.sleep(QUIET_PERIOD_MS) // any connection it went on to open would reach the server by now
+        assertEquals(0, server.streamRequests.size, "a stopped transmitter must not open a connection")
+        assertFalse(transmitter.connectionStatus.value)
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -566,6 +587,15 @@ class SignalKTransmitterTest {
         val result = authenticationService.login(server.url, "user", "password")
         assertTrue(result.isSuccess, "fake server login should succeed: $result")
         assertEquals("token-1", authenticationService.getAuthToken())
+    }
+
+    /** Stores credentials the server rejects, leaving the transmitter to log in on connect. */
+    private fun storeCredentialsWithoutToken() = runBlocking {
+        server.loginStatus = 401
+        assertTrue(authenticationService.login(server.url, "user", "password").isFailure)
+        assertNull(authenticationService.getAuthToken())
+        assertTrue(authenticationService.hasStoredCredentials())
+        server.loginStatus = 200
     }
 
     private fun SignalKTransmitter.sendLocation(locationData: LocationData) =

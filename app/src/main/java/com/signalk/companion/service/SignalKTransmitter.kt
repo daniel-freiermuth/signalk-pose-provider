@@ -597,22 +597,42 @@ class SignalKTransmitter internal constructor(
 
         withContext(ioDispatcher) {
             try {
-                val client = OkHttpClient.Builder()
-                    .readTimeout(READ_TIMEOUT_S, TimeUnit.SECONDS)
-                    .writeTimeout(WRITE_TIMEOUT_S, TimeUnit.SECONDS)
-                    .connectTimeout(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
-                    .retryOnConnectionFailure(true)
-                    .build()
-                okHttpClient = client
-                webSocket = client.newWebSocket(buildStreamRequest(), ConnectionListener(generation))
+                openConnection(generation)
             } catch (e: IllegalArgumentException) {
                 // Request.Builder.url() rejects a malformed server URL.
-                // Transition back to DISCONNECTED on setup error
-                webSocketState.set(WebSocketState.DISCONNECTED)
+                // Transition back to DISCONNECTED on setup error, unless streaming stopped
+                // meanwhile: the state may already belong to the next session's attempt.
+                ifCurrentConnection(generation, "setup error") {
+                    webSocketState.set(WebSocketState.DISCONNECTED)
+                }
                 Log.e(TAG, "WebSocket initialization error: ${e.message}", e)
                 throw e
             }
         }
+    }
+
+    /** Opens the socket for connection attempt [generation], unless it has been superseded. */
+    private fun openConnection(generation: Long) {
+        val client = OkHttpClient.Builder()
+            .readTimeout(READ_TIMEOUT_S, TimeUnit.SECONDS)
+            .writeTimeout(WRITE_TIMEOUT_S, TimeUnit.SECONDS)
+            .connectTimeout(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+
+        // Streaming may have stopped while the login in initializeWebSocket() was suspended.
+        // Installing the client under the same check as stopStreaming()'s disowning bump
+        // means either stopStreaming() shuts this client down, or the attempt ends here.
+        // An unused client has started no threads, so dropping it leaks nothing.
+        val stillCurrent = synchronized(connectionLock) {
+            (generation == connectionGeneration).also { if (it) okHttpClient = client }
+        }
+        if (!stillCurrent) {
+            Log.d(TAG, "WebSocket connection abandoned - streaming stopped while it was starting")
+            return
+        }
+
+        webSocket = client.newWebSocket(buildStreamRequest(), ConnectionListener(generation))
     }
 
     private fun buildStreamRequest(): Request = Request.Builder()
