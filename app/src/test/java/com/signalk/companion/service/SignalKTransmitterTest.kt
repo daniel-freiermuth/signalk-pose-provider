@@ -3,6 +3,7 @@ package com.signalk.companion.service
 import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.util.UrlParser
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
@@ -27,6 +28,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 /**
  * Drives [SignalKTransmitter] against a loopback [FakeSignalKServer] over its real OkHttp
@@ -41,6 +44,7 @@ class SignalKTransmitterTest {
     private lateinit var server: FakeSignalKServer
     private lateinit var authenticationService: AuthenticationService
     private lateinit var transmitter: SignalKTransmitter
+    private lateinit var reconnectDelay: ControlledReconnectDelay
 
     /** Real threads: the transmitter blocks on loopback sockets while the test acts. */
     private val io = Executors.newCachedThreadPool().asCoroutineDispatcher()
@@ -49,9 +53,14 @@ class SignalKTransmitterTest {
     fun setUp() {
         server = FakeSignalKServer()
         authenticationService = AuthenticationService(io)
-        transmitter = SignalKTransmitter(authenticationService, io)
-        transmitter.configure(requireNotNull(UrlParser.parseUrl(server.url)))
+        reconnectDelay = ControlledReconnectDelay()
+        transmitter = newTransmitter()
     }
+
+    private fun newTransmitter() =
+        SignalKTransmitter(authenticationService, io, reconnectDelay::await).apply {
+            configure(requireNotNull(UrlParser.parseUrl(server.url)))
+        }
 
     @AfterEach
     fun tearDown() {
@@ -99,8 +108,7 @@ class SignalKTransmitterTest {
         // time, leaving startStreaming() to return before the WebSocket was assigned.
         repeat(START_CYCLES) { cycle ->
             transmitter.stopStreaming()
-            transmitter = SignalKTransmitter(authenticationService, io)
-            transmitter.configure(requireNotNull(UrlParser.parseUrl(server.url)))
+            transmitter = newTransmitter()
 
             startStreaming()
             transmitter.sendLocation(locationData())
@@ -321,18 +329,21 @@ class SignalKTransmitterTest {
     // ── Authentication-failure recovery ───────────────────────────────────────
 
     @Test
-    fun `401 upgrade failure renews the token and reconnects with it`() {
+    fun `401 upgrade failure renews the token and reconnects with it one second later`() {
         login()
         server.loginToken = "token-2"
         server.scriptStreamStatuses(401, FakeSignalKServer.STATUS_SWITCHING_PROTOCOLS)
 
         startStreaming()
 
-        awaitCondition("the reconnect that follows a successful token renewal") {
-            server.streamRequests.size >= 2
-        }
+        val reconnect = reconnectDelay.nextRequest()
+        assertEquals(1_000L, reconnect.delayMs)
         // The renewal cleared the error before scheduling that reconnect.
         assertNull(transmitter.authenticationError.value)
+        assertEquals(1, server.streamRequests.size, "nothing reconnects before the delay elapses")
+
+        reconnect.elapse()
+        awaitCondition("the scheduled reconnect") { server.streamRequests.size >= 2 }
         assertEquals("Bearer token-1", server.streamRequests[0].authorization)
         assertEquals(
             "Bearer token-2",
@@ -346,7 +357,7 @@ class SignalKTransmitterTest {
     }
 
     @Test
-    fun `403 upgrade failure with a failing renewal reports it and defers the retry`() {
+    fun `403 upgrade failure with a failing renewal reports it and retries after 30 seconds`() {
         login()
         server.loginStatus = 401 // every renewal from here on fails
         server.scriptStreamStatuses(403)
@@ -354,12 +365,11 @@ class SignalKTransmitterTest {
         startStreaming()
 
         transmitter.authenticationError.awaitValue { it == RENEWAL_FAILED_MESSAGE }
-
-        // Credentials are stored, so a retry is scheduled — but 30 s out, not the 1 s
-        // used after a successful renewal.
-        Thread.sleep(RECONNECT_QUIET_MS)
-        assertEquals(1, server.streamRequests.size, "the retry must not fire within a second")
+        // Credentials are stored, so a retry is scheduled — 30 s out, not the 1 s used
+        // after a successful renewal.
+        assertEquals(30_000L, reconnectDelay.nextRequest().delayMs)
         assertEquals(2, server.loginRequests.size, "the initial login plus exactly one renewal")
+        assertEquals(1, server.streamRequests.size)
     }
 
     @Test
@@ -378,40 +388,64 @@ class SignalKTransmitterTest {
         transmitter.stopStreaming()
         gate.countDown()
 
-        Thread.sleep(RECONNECT_QUIET_MS)
+        // Clearing the error is the step right before the reconnect decision.
+        transmitter.authenticationError.awaitValue { it == null }
+        reconnectDelay.assertNoRequest(QUIET_PERIOD_MS)
         assertEquals(1, server.streamRequests.size, "a stopped transmitter must not reconnect")
-        assertNull(transmitter.authenticationError.value, "the successful renewal still cleared the error")
         assertFalse(transmitter.connectionStatus.value)
     }
 
     @Test
-    fun `non-authentication http failure neither renews the token nor raises an auth error`() {
+    fun `non-authentication http failure retries after 10 seconds without renewing the token`() {
         login()
-        server.defaultStreamStatus = 500
+        server.scriptStreamStatuses(500)
 
         startStreaming()
-        awaitCondition("the upgrade attempt to be refused") { server.streamRequests.isNotEmpty() }
-        Thread.sleep(RECONNECT_QUIET_MS)
 
+        val reconnect = reconnectDelay.nextRequest()
+        assertEquals(10_000L, reconnect.delayMs)
         assertNull(transmitter.authenticationError.value, "HTTP 500 is not an authentication problem")
         assertEquals(1, server.loginRequests.size, "only the initial login; no renewal attempt")
-        assertEquals(1, server.streamRequests.size, "reconnection is deferred by 10 s")
+
+        reconnect.elapse()
+        transmitter.connectionStatus.awaitValue { it }
+        assertEquals(2, server.streamRequests.size, "the elapsed delay reconnects")
     }
 
     @Test
-    fun `transport failure without a response does not raise an authentication error`() {
+    fun `transport failure without a response retries after 10 seconds without an auth error`() {
         login()
         server.defaultStreamStatus = FakeSignalKServer.STATUS_CLOSE_WITHOUT_RESPONSE
 
         startStreaming()
-        awaitCondition("the upgrade attempt to be dropped") { server.streamRequests.isNotEmpty() }
-        Thread.sleep(RECONNECT_QUIET_MS)
 
+        assertEquals(10_000L, reconnectDelay.nextRequest().delayMs)
         assertNull(
             transmitter.authenticationError.value,
             "a dropped connection is not an authentication problem"
         )
         assertEquals(1, server.loginRequests.size, "only the initial login; no renewal attempt")
+    }
+
+    // ── Server-initiated close ────────────────────────────────────────────────
+
+    @Test
+    fun `server closing the stream abnormally reconnects after 5 seconds`() {
+        startStreaming()
+        transmitter.connectionStatus.awaitValue { it }
+
+        server.closeOpenStreams(1011, "server restarting")
+
+        val reconnect = reconnectDelay.nextRequest()
+        assertEquals(5_000L, reconnect.delayMs)
+        assertFalse(transmitter.connectionStatus.value)
+        assertEquals(1, server.streamRequests.size, "nothing reconnects before the delay elapses")
+
+        reconnect.elapse()
+        awaitCondition("the scheduled reconnect") { server.streamRequests.size == 2 }
+        transmitter.connectionStatus.awaitValue { it }
+        transmitter.sendLocation(locationData())
+        assertNotNull(server.awaitMessage(), "the reconnected socket should be usable")
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -487,12 +521,45 @@ class SignalKTransmitterTest {
                 value.jsonObject.getValue("path").jsonPrimitive.content to value.jsonObject.getValue("value")
             }
 
+    /**
+     * Stands in for the transmitter's reconnect delay: records every delay a failure path
+     * requests and holds it until the test lets it elapse. Held delays are cancelled with
+     * the transmitter scope, exactly like `delay`.
+     */
+    private class ControlledReconnectDelay {
+        class Pending(val delayMs: Long) {
+            val elapsed = CompletableDeferred<Unit>()
+            fun elapse() {
+                check(elapsed.complete(Unit)) { "this delay has already elapsed" }
+            }
+        }
+
+        private val requests = LinkedBlockingQueue<Pending>()
+
+        suspend fun await(delayMs: Long) {
+            val pending = Pending(delayMs)
+            requests.put(pending)
+            pending.elapsed.await()
+        }
+
+        fun nextRequest(timeoutMs: Long = FakeSignalKServer.DEFAULT_TIMEOUT_MS): Pending =
+            requests.poll(timeoutMs, TimeUnit.MILLISECONDS)
+                ?: fail("Timed out waiting for a reconnection to be scheduled")
+
+        fun assertNoRequest(quietMs: Long) {
+            assertNull(
+                requests.poll(quietMs, TimeUnit.MILLISECONDS)?.delayMs,
+                "no reconnection should have been scheduled"
+            )
+        }
+    }
+
     private companion object {
         /**
-         * Longer than the 1 s reconnect used after a successful token renewal, shorter than
-         * the 10 s and 30 s deferred retries — so "no reconnect happened" is meaningful.
+         * How long to watch for a reconnection that must not be scheduled, measured from an
+         * edge that immediately precedes the scheduling decision.
          */
-        const val RECONNECT_QUIET_MS = 1_500L
+        const val QUIET_PERIOD_MS = 500L
 
         /** Enough start cycles that the former start-up race would surface reliably. */
         const val START_CYCLES = 20
