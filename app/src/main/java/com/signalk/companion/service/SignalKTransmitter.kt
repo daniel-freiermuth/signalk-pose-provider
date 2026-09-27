@@ -48,10 +48,21 @@ import javax.inject.Singleton
  * Lifecycle: Call stopStreaming() when done to cancel all background jobs.
  */
 @Singleton
-class SignalKTransmitter @Inject constructor(
+class SignalKTransmitter internal constructor(
     private val authenticationService: AuthenticationService,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
+    private val ioDispatcher: CoroutineDispatcher,
+    /**
+     * Waits out a scheduled reconnection's delay, in milliseconds. Injectable so tests can
+     * observe which delay each failure path requests and control when it elapses.
+     */
+    private val reconnectDelay: suspend (Long) -> Unit
 ) {
+
+    @Inject
+    constructor(
+        authenticationService: AuthenticationService,
+        @IoDispatcher ioDispatcher: CoroutineDispatcher
+    ) : this(authenticationService, ioDispatcher, { delayMs -> delay(delayMs) })
 
     companion object {
         private const val TAG = "SignalKTransmitter"
@@ -262,7 +273,7 @@ class SignalKTransmitter @Inject constructor(
         // Cancel any existing reconnection attempt to avoid piling up
         reconnectionJob?.cancel()
         reconnectionJob = scope.launch {
-            delay(delayMs)
+            reconnectDelay(delayMs)
             // Only attempt if still disconnected
             if (webSocketState.get() == WebSocketState.DISCONNECTED) {
                 Log.d(TAG, "Executing scheduled WebSocket reconnection...")
@@ -614,6 +625,10 @@ class SignalKTransmitter @Inject constructor(
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             Log.d(TAG, "WebSocket closing: $code $reason")
+            // Complete the closing handshake. OkHttp does not answer a peer's close
+            // frame itself, and onClosed (which reports the peer's code and drives
+            // the reconnect below) only fires once both sides have sent theirs.
+            webSocket.close(NORMAL_CLOSURE, null)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {

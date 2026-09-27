@@ -48,6 +48,7 @@ internal class FakeSignalKServer : AutoCloseable {
     private val connections = Collections.synchronizedList(mutableListOf<Socket>())
     private val scriptedStreamStatuses = ConcurrentLinkedDeque<Int>()
     private val messages = LinkedBlockingQueue<String>()
+    private val openStreams: MutableList<OutputStream> = CopyOnWriteArrayList()
     private val handlers: MutableList<Thread> = CopyOnWriteArrayList()
 
     val port: Int get() = server.localPort
@@ -92,6 +93,20 @@ internal class FakeSignalKServer : AutoCloseable {
     /** Next text frame received from the client, or null if none arrived in time. */
     fun awaitMessage(timeoutMs: Long = DEFAULT_TIMEOUT_MS): String? =
         messages.poll(timeoutMs, TimeUnit.MILLISECONDS)
+
+    /**
+     * Sends a close frame carrying [code] on every open stream, as a server does when it
+     * ends a WebSocket session. The socket stays open until the client answers the close.
+     */
+    fun closeOpenStreams(code: Int, reason: String = "") {
+        val frame = closeFrame(code, reason)
+        openStreams.forEach { output ->
+            synchronized(output) {
+                output.write(frame)
+                output.flush()
+            }
+        }
+    }
 
     override fun close() {
         closeQuietly(server)
@@ -162,7 +177,12 @@ internal class FakeSignalKServer : AutoCloseable {
         when (val status = scriptedStreamStatuses.pollFirst() ?: defaultStreamStatus) {
             STATUS_SWITCHING_PROTOCOLS -> {
                 writeHandshake(output, request.headers[WEBSOCKET_KEY_HEADER].orEmpty())
-                readFrames(input) // holds the socket open until the client closes it
+                openStreams += output
+                try {
+                    readFrames(input) // holds the socket open until the client closes it
+                } finally {
+                    openStreams -= output
+                }
             }
             // No response at all: the client sees a transport error with a null
             // Response, which is how a dropped or refused connection looks.
@@ -291,6 +311,17 @@ internal class FakeSignalKServer : AutoCloseable {
         val bytes = ByteArray(byteCount)
         readFully(input, bytes)
         return bytes.fold(0L) { acc, b -> (acc shl 8) or (b.toLong() and 0xFF) }
+    }
+
+    private fun closeFrame(code: Int, reason: String = ""): ByteArray {
+        val reasonBytes = reason.toByteArray(Charsets.UTF_8)
+        require(reasonBytes.size <= 123) { "control frame payloads are limited to 125 bytes" }
+        return byteArrayOf(
+            (0x80 or OPCODE_CLOSE).toByte(),
+            (2 + reasonBytes.size).toByte(),
+            (code shr 8).toByte(),
+            code.toByte()
+        ) + reasonBytes
     }
 
     private fun readFully(input: InputStream, destination: ByteArray) {
