@@ -30,6 +30,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -545,6 +546,38 @@ class SignalKTransmitterTest {
         Thread.sleep(QUIET_PERIOD_MS) // any connection it went on to open would reach the server by now
         assertEquals(0, server.streamRequests.size, "a stopped transmitter must not open a connection")
         assertFalse(transmitter.connectionStatus.value)
+    }
+
+    @Test
+    fun `a connection that fails before the connecting thread records it is not used for sends`() {
+        // Hold the connecting thread until OkHttp has already reported the refused upgrade,
+        // as happens when a refusal outruns the thread that opened the socket.
+        var refusalRetry: ControlledReconnectDelay.Pending? = null
+        val holdFirstOpen = AtomicBoolean(true)
+        transmitter = SignalKTransmitter(
+            authenticationService,
+            io,
+            reconnectDelay::await
+        ) { client, request, listener ->
+            client.newWebSocket(request, listener).also {
+                if (holdFirstOpen.getAndSet(false)) refusalRetry = reconnectDelay.nextRequest()
+            }
+        }.apply { configure(requireNotNull(UrlParser.parseUrl(server.url))) }
+        server.scriptStreamStatuses(500)
+
+        startStreaming()
+        val retry = requireNotNull(refusalRetry)
+        assertEquals(10_000L, retry.delayMs)
+
+        transmitter.sendLocation(locationData())
+        assertEquals(0, transmitter.messagesSent.value, "nothing can be sent on the refused socket")
+        assertNull(transmitter.lastSentMessage.value)
+
+        retry.elapse()
+        transmitter.connectionStatus.awaitValue { it }
+        transmitter.sendLocation(locationData())
+        assertNotNull(server.awaitMessage(), "the scheduled reconnect should replace the refused socket")
+        assertEquals(1, transmitter.messagesSent.value)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
