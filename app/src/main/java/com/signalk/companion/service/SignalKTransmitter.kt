@@ -55,7 +55,13 @@ class SignalKTransmitter internal constructor(
      * Waits out a scheduled reconnection's delay, in milliseconds. Injectable so tests can
      * observe which delay each failure path requests and control when it elapses.
      */
-    private val reconnectDelay: suspend (Long) -> Unit
+    private val reconnectDelay: suspend (Long) -> Unit,
+    /**
+     * Opens a WebSocket; OkHttp may deliver its callbacks before this returns. Injectable so
+     * tests can hold the connecting thread and let those callbacks overtake it.
+     */
+    private val openWebSocket: (OkHttpClient, Request, WebSocketListener) -> WebSocket =
+        { client, request, listener -> client.newWebSocket(request, listener) }
 ) {
 
     @Inject
@@ -632,7 +638,19 @@ class SignalKTransmitter internal constructor(
             return
         }
 
-        webSocket = client.newWebSocket(buildStreamRequest(), ConnectionListener(generation))
+        val listener = ConnectionListener(generation)
+        val socket = openWebSocket(client, buildStreamRequest(), listener)
+        val installed = synchronized(connectionLock) {
+            val current = generation == connectionGeneration && !listener.ended
+            if (current) webSocket = socket
+            current
+        }
+        if (!installed) {
+            // Either streaming stopped meanwhile, or the socket already failed and its
+            // listener has scheduled the retry; this socket must not carry messages.
+            Log.d(TAG, "Discarding a WebSocket that ended or was superseded before installation")
+            socket.cancel()
+        }
     }
 
     private fun buildStreamRequest(): Request = Request.Builder()
@@ -662,6 +680,13 @@ class SignalKTransmitter internal constructor(
 
     /** Listener for connection attempt [generation]; ignored once that attempt is superseded. */
     private inner class ConnectionListener(private val generation: Long) : WebSocketListener() {
+        /**
+         * Set once this socket has closed or failed. OkHttp can report that before
+         * [openWebSocket] returns, so the socket must not be installed after it.
+         * Guarded by [connectionLock].
+         */
+        var ended = false
+
         override fun onOpen(webSocket: WebSocket, response: Response) {
             ifCurrentConnection(generation, "open") {
                 // Transition: CONNECTING -> CONNECTED
@@ -686,9 +711,7 @@ class SignalKTransmitter internal constructor(
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             ifCurrentConnection(generation, "close ($code)") {
                 // Transition: any state -> DISCONNECTED
-                webSocketState.set(WebSocketState.DISCONNECTED)
-                _connectionStatus.value = false
-                this@SignalKTransmitter.webSocket = null
+                markEnded()
                 Log.d(TAG, "WebSocket closed: $code $reason")
 
                 // Auto-reconnect for unexpected closures (not user-initiated)
@@ -705,13 +728,19 @@ class SignalKTransmitter internal constructor(
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             ifCurrentConnection(generation, "failure (${t.message})") {
                 // Transition: any state -> DISCONNECTED
-                webSocketState.set(WebSocketState.DISCONNECTED)
-                _connectionStatus.value = false
-                this@SignalKTransmitter.webSocket = null
+                markEnded()
                 Log.e(TAG, "WebSocket error: ${t.message}", t)
 
                 handleWebSocketFailure(response, generation)
             }
+        }
+
+        /** Caller holds [connectionLock] and has checked that [generation] is current. */
+        private fun markEnded() {
+            ended = true
+            webSocketState.set(WebSocketState.DISCONNECTED)
+            _connectionStatus.value = false
+            this@SignalKTransmitter.webSocket = null
         }
     }
 
