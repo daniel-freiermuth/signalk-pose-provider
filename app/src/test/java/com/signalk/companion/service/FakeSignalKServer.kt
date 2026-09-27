@@ -69,6 +69,10 @@ internal class FakeSignalKServer : AutoCloseable {
     @Volatile
     var loginGate: CountDownLatch? = null
 
+    /** When set, upgrade requests block until the test counts this latch down. */
+    @Volatile
+    var streamGate: CountDownLatch? = null
+
     private val recordedStreamRequests: MutableList<RecordedRequest> = CopyOnWriteArrayList()
     private val recordedLoginRequests: MutableList<RecordedRequest> = CopyOnWriteArrayList()
     val streamRequests: List<RecordedRequest> get() = recordedStreamRequests
@@ -154,6 +158,7 @@ internal class FakeSignalKServer : AutoCloseable {
 
     private fun answerStream(input: InputStream, output: OutputStream, request: RecordedRequest) {
         recordedStreamRequests += request
+        streamGate?.await()
         when (val status = scriptedStreamStatuses.pollFirst() ?: defaultStreamStatus) {
             STATUS_SWITCHING_PROTOCOLS -> {
                 writeHandshake(output, request.headers[WEBSOCKET_KEY_HEADER].orEmpty())
