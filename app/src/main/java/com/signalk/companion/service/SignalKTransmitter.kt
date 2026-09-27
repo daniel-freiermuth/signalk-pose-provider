@@ -154,24 +154,17 @@ class SignalKTransmitter @Inject constructor(
         transmitterScope?.cancel()
         transmitterScope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
-        var started = false
-        try {
-            // Initial DNS resolution for WebSocket. Resolve only: the connection is opened
-            // inline below, and a reconnect launched from here would race it for the CAS guard.
-            val resolved = withContext(ioDispatcher) { resolveServerAddress() }
-            if (!resolved) Log.w(TAG, "Initial DNS resolution failed; connecting anyway")
+        // Initial DNS resolution for WebSocket. Resolve only: the connection is opened
+        // inline below, and a reconnect launched from here would race it for the CAS guard.
+        val resolved = withContext(ioDispatcher) { resolveServerAddress() }
+        if (!resolved) Log.w(TAG, "Initial DNS resolution failed; connecting anyway")
 
-            // Initialize WebSocket connection
-            initializeWebSocket()
+        // Initialize WebSocket connection. connectionStatus is not touched here: only the
+        // listener knows whether the upgrade succeeded, so onOpen alone reports "connected".
+        initializeWebSocket()
 
-            // Start periodic DNS refresh for hostname resolution
-            startDnsRefreshTimer()
-
-            started = true
-        } finally {
-            // A failed or cancelled start leaves the transmitter reporting disconnected
-            _connectionStatus.value = started
-        }
+        // Start periodic DNS refresh for hostname resolution
+        startDnsRefreshTimer()
     }
 
     /**

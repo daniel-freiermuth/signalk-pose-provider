@@ -75,7 +75,6 @@ class SignalKTransmitterTest {
             server.streamRequests[0].authorization,
             "no token stored, so the upgrade must not carry an Authorization header"
         )
-        assertTrue(transmitter.connectionStatus.value)
     }
 
     @Test
@@ -112,6 +111,23 @@ class SignalKTransmitterTest {
             )
             assertEquals(cycle + 1, server.streamRequests.size, "cycle $cycle: exactly one upgrade per start")
         }
+    }
+
+    @Test
+    fun `connectionStatus reports connected only once the server accepts the upgrade`() {
+        val gate = CountDownLatch(1)
+        server.streamGate = gate
+
+        startStreaming()
+        awaitCondition("the upgrade request to reach the server") { server.streamRequests.isNotEmpty() }
+
+        assertFalse(
+            transmitter.connectionStatus.value,
+            "the server has not answered the upgrade, so the transmitter is not connected yet"
+        )
+
+        gate.countDown()
+        transmitter.connectionStatus.awaitValue { it } // fails on timeout
     }
 
     @Test
