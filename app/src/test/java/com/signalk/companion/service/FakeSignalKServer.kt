@@ -17,6 +17,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.LongAdder
 import kotlin.concurrent.thread
 
 /**
@@ -49,6 +50,7 @@ internal class FakeSignalKServer : AutoCloseable {
     private val scriptedStreamStatuses = ConcurrentLinkedDeque<Int>()
     private val messages = LinkedBlockingQueue<String>()
     private val openStreams: MutableList<OutputStream> = CopyOnWriteArrayList()
+    private val clientCloses = LongAdder()
     private val handlers: MutableList<Thread> = CopyOnWriteArrayList()
 
     val port: Int get() = server.localPort
@@ -73,6 +75,23 @@ internal class FakeSignalKServer : AutoCloseable {
     /** When set, upgrade requests block until the test counts this latch down. */
     @Volatile
     var streamGate: CountDownLatch? = null
+
+    /**
+     * When set, a client's close frame is held here until the test counts this latch down,
+     * keeping that socket's closing handshake pending while the test acts on the client.
+     */
+    @Volatile
+    var clientCloseGate: CountDownLatch? = null
+
+    /**
+     * Close code the server answers a client's close frame with, before hanging up.
+     * Null hangs up without answering, which the client sees as a transport failure.
+     */
+    @Volatile
+    var clientCloseReply: Int? = null
+
+    /** Close frames received from clients so far. */
+    val clientClosesReceived: Int get() = clientCloses.sum().toInt()
 
     private val recordedStreamRequests: MutableList<RecordedRequest> = CopyOnWriteArrayList()
     private val recordedLoginRequests: MutableList<RecordedRequest> = CopyOnWriteArrayList()
@@ -179,7 +198,7 @@ internal class FakeSignalKServer : AutoCloseable {
                 writeHandshake(output, request.headers[WEBSOCKET_KEY_HEADER].orEmpty())
                 openStreams += output
                 try {
-                    readFrames(input) // holds the socket open until the client closes it
+                    readFrames(input, output) // holds the socket open until the client closes it
                 } finally {
                     openStreams -= output
                 }
@@ -268,12 +287,15 @@ internal class FakeSignalKServer : AutoCloseable {
 
     // ── WebSocket frames ──────────────────────────────────────────────────────
 
-    private fun readFrames(input: InputStream) {
+    private fun readFrames(input: InputStream, output: OutputStream) {
         while (true) {
             val frame = readFrame(input) ?: return // the client hung up
             when (frame.opcode) {
                 OPCODE_TEXT -> messages.put(String(frame.payload, Charsets.UTF_8))
-                OPCODE_CLOSE -> return
+                OPCODE_CLOSE -> {
+                    answerClientClose(output)
+                    return
+                }
                 else -> Unit // continuation/binary/ping/pong are not exercised
             }
         }
@@ -311,6 +333,18 @@ internal class FakeSignalKServer : AutoCloseable {
         val bytes = ByteArray(byteCount)
         readFully(input, bytes)
         return bytes.fold(0L) { acc, b -> (acc shl 8) or (b.toLong() and 0xFF) }
+    }
+
+    private fun answerClientClose(output: OutputStream) {
+        clientCloses.increment()
+        clientCloseGate?.await()
+        clientCloseReply?.let { code ->
+            val frame = closeFrame(code)
+            synchronized(output) {
+                output.write(frame)
+                output.flush()
+            }
+        }
     }
 
     private fun closeFrame(code: Int, reason: String = ""): ByteArray {

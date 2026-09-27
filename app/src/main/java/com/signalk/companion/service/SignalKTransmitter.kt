@@ -115,6 +115,15 @@ class SignalKTransmitter internal constructor(
     @Volatile private var webSocket: WebSocket? = null
     private val webSocketState = AtomicReference(WebSocketState.DISCONNECTED)
 
+    /**
+     * Identifies the connection attempt that owns [webSocket], [webSocketState] and
+     * [connectionStatus]. OkHttp keeps delivering a socket's callbacks after streaming is
+     * stopped and restarted, so each listener checks this, under [connectionLock], before
+     * touching shared state; bumping it disowns every earlier socket at once.
+     */
+    private val connectionLock = Any()
+    private var connectionGeneration = 0L // guarded by connectionLock
+
     // Managed coroutine scope for all background jobs - cancelled in stopStreaming()
     private var transmitterScope: CoroutineScope? = null
     private var dnsRefreshJob: Job? = null
@@ -285,6 +294,10 @@ class SignalKTransmitter internal constructor(
     }
 
     fun stopStreaming() {
+        // Disown the current socket first: its listener can still deliver callbacks after
+        // streaming restarts, and they must not act on the next session's state.
+        synchronized(connectionLock) { connectionGeneration++ }
+
         // Cancel all background jobs by cancelling the scope
         transmitterScope?.cancel()
         transmitterScope = null
@@ -564,6 +577,7 @@ class SignalKTransmitter internal constructor(
             Log.d(TAG, "WebSocket initialization skipped - current state: ${webSocketState.get()}")
             return
         }
+        val generation = synchronized(connectionLock) { ++connectionGeneration }
 
         Log.d(TAG, "Starting WebSocket connection...")
 
@@ -590,7 +604,7 @@ class SignalKTransmitter internal constructor(
                     .retryOnConnectionFailure(true)
                     .build()
                 okHttpClient = client
-                webSocket = client.newWebSocket(buildStreamRequest(), webSocketListener)
+                webSocket = client.newWebSocket(buildStreamRequest(), ConnectionListener(generation))
             } catch (e: IllegalArgumentException) {
                 // Request.Builder.url() rejects a malformed server URL.
                 // Transition back to DISCONNECTED on setup error
@@ -611,12 +625,30 @@ class SignalKTransmitter internal constructor(
         }
         .build()
 
-    private val webSocketListener = object : WebSocketListener() {
+    /**
+     * Runs [block] under [connectionLock] if the connection attempt [generation] still owns
+     * the shared connection state; otherwise drops [event], which a superseded socket
+     * delivered after streaming stopped or reconnected.
+     */
+    private inline fun ifCurrentConnection(generation: Long, event: String, block: () -> Unit) {
+        synchronized(connectionLock) {
+            if (generation != connectionGeneration) {
+                Log.d(TAG, "Ignoring $event from a superseded WebSocket")
+                return
+            }
+            block()
+        }
+    }
+
+    /** Listener for connection attempt [generation]; ignored once that attempt is superseded. */
+    private inner class ConnectionListener(private val generation: Long) : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            // Transition: CONNECTING -> CONNECTED
-            webSocketState.set(WebSocketState.CONNECTED)
-            _connectionStatus.value = true
-            Log.d(TAG, "WebSocket connected to SignalK server")
+            ifCurrentConnection(generation, "open") {
+                // Transition: CONNECTING -> CONNECTED
+                webSocketState.set(WebSocketState.CONNECTED)
+                _connectionStatus.value = true
+                Log.d(TAG, "WebSocket connected to SignalK server")
+            }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -632,37 +664,44 @@ class SignalKTransmitter internal constructor(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            // Transition: any state -> DISCONNECTED
-            webSocketState.set(WebSocketState.DISCONNECTED)
-            _connectionStatus.value = false
-            this@SignalKTransmitter.webSocket = null
-            Log.d(TAG, "WebSocket closed: $code $reason")
+            ifCurrentConnection(generation, "close ($code)") {
+                // Transition: any state -> DISCONNECTED
+                webSocketState.set(WebSocketState.DISCONNECTED)
+                _connectionStatus.value = false
+                this@SignalKTransmitter.webSocket = null
+                Log.d(TAG, "WebSocket closed: $code $reason")
 
-            // Auto-reconnect for unexpected closures (not user-initiated)
-            if (code != NORMAL_CLOSURE) {
-                Log.w(
-                    TAG,
-                    "Unexpected WebSocket closure (code: $code), scheduling reconnection..."
-                )
-                scheduleReconnection(UNEXPECTED_CLOSURE_RECONNECT_DELAY_MS)
+                // Auto-reconnect for unexpected closures (not user-initiated)
+                if (code != NORMAL_CLOSURE) {
+                    Log.w(
+                        TAG,
+                        "Unexpected WebSocket closure (code: $code), scheduling reconnection..."
+                    )
+                    scheduleReconnection(UNEXPECTED_CLOSURE_RECONNECT_DELAY_MS)
+                }
             }
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            // Transition: any state -> DISCONNECTED
-            webSocketState.set(WebSocketState.DISCONNECTED)
-            _connectionStatus.value = false
-            this@SignalKTransmitter.webSocket = null
-            Log.e(TAG, "WebSocket error: ${t.message}", t)
+            ifCurrentConnection(generation, "failure (${t.message})") {
+                // Transition: any state -> DISCONNECTED
+                webSocketState.set(WebSocketState.DISCONNECTED)
+                _connectionStatus.value = false
+                this@SignalKTransmitter.webSocket = null
+                Log.e(TAG, "WebSocket error: ${t.message}", t)
 
-            handleWebSocketFailure(response)
+                handleWebSocketFailure(response, generation)
+            }
         }
     }
 
     /**
      * Handle WebSocket failure by checking for auth errors and scheduling reconnection.
+     *
+     * @param generation the failed connection attempt; its token renewal only reconnects
+     *   while that attempt still owns the connection state.
      */
-    private fun handleWebSocketFailure(response: Response?) {
+    private fun handleWebSocketFailure(response: Response?, generation: Long) {
         val code = response?.code
         if (code == HttpURLConnection.HTTP_UNAUTHORIZED ||
             code == HttpURLConnection.HTTP_FORBIDDEN
@@ -672,7 +711,7 @@ class SignalKTransmitter internal constructor(
             _authenticationError.value = errorMsg
 
             // Attempt automatic token renewal
-            transmitterScope?.launch { renewTokenAndReconnect() }
+            transmitterScope?.launch { renewTokenAndReconnect(generation) }
                 ?: Log.w(TAG, "Cannot attempt token renewal - transmitter scope is null")
         } else {
             _authenticationError.value = null
@@ -687,7 +726,7 @@ class SignalKTransmitter internal constructor(
         }
     }
 
-    private suspend fun renewTokenAndReconnect() {
+    private suspend fun renewTokenAndReconnect(generation: Long) {
         Log.d(TAG, "Attempting automatic token renewal...")
         // Use NonCancellable to ensure token renewal completes even if streaming stops
         val result = withContext(NonCancellable) {
@@ -696,12 +735,11 @@ class SignalKTransmitter internal constructor(
         if (result.isSuccess && result.getOrNull() != null) {
             Log.d(TAG, "Token renewed successfully")
             _authenticationError.value = null
-            // Only schedule reconnection if scope is still active
-            if (transmitterScope?.isActive == true) {
+            // Reconnect only if this failure still belongs to the running session:
+            // streaming may have stopped, or stopped and restarted, meanwhile.
+            ifCurrentConnection(generation, "token renewal") {
                 Log.d(TAG, "Scheduling reconnection...")
                 scheduleReconnection(TOKEN_RENEWED_RECONNECT_DELAY_MS)
-            } else {
-                Log.d(TAG, "Streaming stopped - skipping reconnection after token renewal")
             }
         } else {
             val failureMsg = "Automatic token renewal failed - will retry"
@@ -709,11 +747,11 @@ class SignalKTransmitter internal constructor(
             _authenticationError.value = failureMsg
             // Keep retrying as long as we have credentials: the server may
             // still be coming up (auth endpoint and WebSocket together).
-            if (authenticationService.hasStoredCredentials() &&
-                transmitterScope?.isActive == true
-            ) {
-                Log.d(TAG, "Credentials exist — scheduling reconnect retry in 30 s")
-                scheduleReconnection(TOKEN_RENEWAL_RETRY_DELAY_MS)
+            if (authenticationService.hasStoredCredentials()) {
+                ifCurrentConnection(generation, "failed token renewal") {
+                    Log.d(TAG, "Credentials exist — scheduling reconnect retry in 30 s")
+                    scheduleReconnection(TOKEN_RENEWAL_RETRY_DELAY_MS)
+                }
             }
         }
     }

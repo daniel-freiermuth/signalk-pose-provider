@@ -396,6 +396,30 @@ class SignalKTransmitterTest {
     }
 
     @Test
+    fun `token renewal completing after a restart does not schedule a reconnect for the new session`() {
+        login()
+        val gate = CountDownLatch(1)
+        server.loginGate = gate
+        server.loginToken = "token-2"
+        server.scriptStreamStatuses(401)
+
+        startStreaming()
+        awaitCondition("token renewal to reach the login endpoint") { server.loginRequests.size == 2 }
+
+        // Restart while that renewal is in flight; the new session connects on its own.
+        transmitter.stopStreaming()
+        startStreaming()
+        transmitter.connectionStatus.awaitValue { it }
+        gate.countDown()
+
+        // Clearing the error is the step right before the reconnect decision.
+        transmitter.authenticationError.awaitValue { it == null }
+        reconnectDelay.assertNoRequest(QUIET_PERIOD_MS)
+        assertEquals(2, server.streamRequests.size)
+        assertTrue(transmitter.connectionStatus.value)
+    }
+
+    @Test
     fun `non-authentication http failure retries after 10 seconds without renewing the token`() {
         login()
         server.scriptStreamStatuses(500)
@@ -448,7 +472,93 @@ class SignalKTransmitterTest {
         assertNotNull(server.awaitMessage(), "the reconnected socket should be usable")
     }
 
+    // ── Superseded connections ────────────────────────────────────────────────
+
+    @Test
+    fun `the previous session's socket failing after a restart does not disturb the new session`() {
+        // The server hangs up on the old socket without answering its close, so that socket's
+        // listener reports a transport failure while the new session is running.
+        restartThenFinishPreviousClose(serverReply = null)
+
+        reconnectDelay.assertNoRequest(QUIET_PERIOD_MS)
+        assertNewSessionIntact()
+    }
+
+    @Test
+    fun `the previous session's socket closing after a restart does not disturb the new session`() {
+        restartThenFinishPreviousClose(serverReply = 1000)
+
+        reconnectDelay.assertNoRequest(QUIET_PERIOD_MS) // also lets the old socket's onClosed land
+        assertNewSessionIntact()
+    }
+
+    @Test
+    fun `the previous session's socket opening after a restart does not mark the new session connected`() {
+        val upgradeGate = CountDownLatch(1)
+        server.streamGate = upgradeGate
+        startStreaming()
+        awaitCondition("the first upgrade request to reach the server") { server.streamRequests.size == 1 }
+
+        // Stop while that upgrade is unanswered, then restart against a refusing server.
+        transmitter.stopStreaming()
+        server.streamGate = null
+        server.scriptStreamStatuses(500)
+        startStreaming()
+        val retry = reconnectDelay.nextRequest()
+        assertEquals(10_000L, retry.delayMs)
+
+        // The server now accepts the stale upgrade. Holding the close that stopStreaming()
+        // queued on that socket keeps it open for the rest of the test.
+        val closeGate = CountDownLatch(1)
+        server.clientCloseGate = closeGate
+        upgradeGate.countDown()
+        awaitCondition("the stale socket to open") { server.clientClosesReceived == 1 }
+
+        assertFalse(
+            transmitter.connectionStatus.value,
+            "only the stopped session's socket opened; the new session is still disconnected"
+        )
+        retry.elapse()
+        awaitCondition("the new session's scheduled reconnect") { server.streamRequests.size == 3 }
+        transmitter.connectionStatus.awaitValue { it }
+        transmitter.sendLocation(locationData())
+        assertNotNull(server.awaitMessage(), "the new session's reconnected socket should be usable")
+        closeGate.countDown()
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Stops a connected session and starts the next one while the previous socket's closing
+     * handshake is still pending at the server, then lets the server finish it — answering
+     * with [serverReply], or hanging up if null. That is when the previous socket's listener
+     * delivers its last callback: after the new session is already connected.
+     */
+    private fun restartThenFinishPreviousClose(serverReply: Int?) {
+        startStreaming()
+        transmitter.connectionStatus.awaitValue { it }
+
+        val closeGate = CountDownLatch(1)
+        server.clientCloseGate = closeGate
+        server.clientCloseReply = serverReply
+        transmitter.stopStreaming()
+        awaitCondition("the previous socket's close to reach the server") {
+            server.clientClosesReceived == 1
+        }
+        server.clientCloseGate = null
+
+        startStreaming()
+        transmitter.connectionStatus.awaitValue { it }
+
+        closeGate.countDown()
+    }
+
+    private fun assertNewSessionIntact() {
+        assertTrue(transmitter.connectionStatus.value, "the new session's socket is still open")
+        transmitter.sendLocation(locationData())
+        assertNotNull(server.awaitMessage(), "the new session's socket must still carry traffic")
+        assertEquals(2, server.streamRequests.size, "the new session must not have reconnected")
+    }
 
     private fun startStreaming() = runBlocking { transmitter.startStreaming() }
 
