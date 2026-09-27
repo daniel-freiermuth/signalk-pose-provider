@@ -17,6 +17,7 @@ import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.OkHttpClient
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
@@ -578,6 +580,37 @@ class SignalKTransmitterTest {
         transmitter.sendLocation(locationData())
         assertNotNull(server.awaitMessage(), "the scheduled reconnect should replace the refused socket")
         assertEquals(1, transmitter.messagesSent.value)
+    }
+
+    @Test
+    fun `reconnects within a session leave only one http client running`() {
+        val clients = CopyOnWriteArrayList<OkHttpClient>()
+        transmitter = SignalKTransmitter(
+            authenticationService,
+            io,
+            reconnectDelay::await
+        ) { client, request, listener ->
+            clients += client
+            client.newWebSocket(request, listener)
+        }.apply { configure(requireNotNull(UrlParser.parseUrl(server.url))) }
+        server.scriptStreamStatuses(500, 500)
+
+        startStreaming()
+        reconnectDelay.nextRequest().elapse()
+        reconnectDelay.nextRequest().elapse()
+        transmitter.connectionStatus.awaitValue { it }
+        transmitter.sendLocation(locationData())
+        assertNotNull(server.awaitMessage(), "the third attempt should connect")
+        assertEquals(3, clients.size, "one client handed over per connection attempt")
+
+        val running = clients.distinct().filterNot { it.dispatcher.executorService.isShutdown }
+        assertEquals(1, running.size, "failed attempts must not leave their clients running")
+
+        transmitter.stopStreaming()
+        assertTrue(
+            clients.all { it.dispatcher.executorService.isShutdown },
+            "stopStreaming must release every client the session used"
+        )
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

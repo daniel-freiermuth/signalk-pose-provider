@@ -116,6 +116,8 @@ class SignalKTransmitter internal constructor(
     private var baseUrl: String = "" // Store the full base URL for HTTP(S) streaming
 
     // WebSocket support
+    // One client serves every connection attempt of a streaming session; stopStreaming()
+    // shuts it down. Guarded by connectionLock.
     private var okHttpClient: OkHttpClient? = null
 
     @Volatile private var webSocket: WebSocket? = null
@@ -302,7 +304,12 @@ class SignalKTransmitter internal constructor(
     fun stopStreaming() {
         // Disown the current socket first: its listener can still deliver callbacks after
         // streaming restarts, and they must not act on the next session's state.
-        synchronized(connectionLock) { connectionGeneration++ }
+        // Taking the session's client under the same lock means no attempt can install one
+        // after this point without first seeing that it has been disowned.
+        val client = synchronized(connectionLock) {
+            connectionGeneration++
+            okHttpClient.also { okHttpClient = null }
+        }
 
         // Cancel all background jobs by cancelling the scope
         transmitterScope?.cancel()
@@ -317,12 +324,11 @@ class SignalKTransmitter internal constructor(
         // Properly shut down OkHttpClient to release its thread pool and connection pool.
         // Simply dropping the reference (okHttpClient = null) leaves the Dispatcher's
         // CachedThreadPool alive for up to 60 s and leaks an OkIO Segment pool (~8 MB).
-        // After several reconnects this accumulates significantly.
-        okHttpClient?.let { client ->
-            client.dispatcher.executorService.shutdown()
-            client.connectionPool.evictAll()
+        // After several restarts this accumulates significantly.
+        client?.let {
+            it.dispatcher.executorService.shutdown()
+            it.connectionPool.evictAll()
         }
-        okHttpClient = null
         webSocketState.set(WebSocketState.DISCONNECTED)
 
         _connectionStatus.value = false
@@ -619,21 +625,18 @@ class SignalKTransmitter internal constructor(
 
     /** Opens the socket for connection attempt [generation], unless it has been superseded. */
     private fun openConnection(generation: Long) {
-        val client = OkHttpClient.Builder()
-            .readTimeout(READ_TIMEOUT_S, TimeUnit.SECONDS)
-            .writeTimeout(WRITE_TIMEOUT_S, TimeUnit.SECONDS)
-            .connectTimeout(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build()
-
         // Streaming may have stopped while the login in initializeWebSocket() was suspended.
-        // Installing the client under the same check as stopStreaming()'s disowning bump
-        // means either stopStreaming() shuts this client down, or the attempt ends here.
-        // An unused client has started no threads, so dropping it leaks nothing.
-        val stillCurrent = synchronized(connectionLock) {
-            (generation == connectionGeneration).also { if (it) okHttpClient = client }
+        // Taking the session's client under the same check as stopStreaming()'s disowning
+        // bump means either stopStreaming() shuts this client down, or the attempt ends here.
+        // Reconnects reuse the client, so a failed attempt leaves no threads behind.
+        val client = synchronized(connectionLock) {
+            if (generation == connectionGeneration) {
+                okHttpClient ?: buildHttpClient().also { okHttpClient = it }
+            } else {
+                null
+            }
         }
-        if (!stillCurrent) {
+        if (client == null) {
             Log.d(TAG, "WebSocket connection abandoned - streaming stopped while it was starting")
             return
         }
@@ -652,6 +655,13 @@ class SignalKTransmitter internal constructor(
             socket.cancel()
         }
     }
+
+    private fun buildHttpClient(): OkHttpClient = OkHttpClient.Builder()
+        .readTimeout(READ_TIMEOUT_S, TimeUnit.SECONDS)
+        .writeTimeout(WRITE_TIMEOUT_S, TimeUnit.SECONDS)
+        .connectTimeout(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
 
     private fun buildStreamRequest(): Request = Request.Builder()
         .url("$baseUrl/signalk/v1/stream")
