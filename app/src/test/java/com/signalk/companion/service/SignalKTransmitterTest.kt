@@ -64,7 +64,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `startStreaming completes the upgrade and sends no Authorization without a token`() {
-        connect()
+        startStreaming()
 
         transmitter.sendLocation(locationData())
 
@@ -80,13 +80,12 @@ class SignalKTransmitterTest {
 
     @Test
     fun `startStreaming while already connected does not open a second connection`() {
-        connect()
+        startStreaming()
         transmitter.sendLocation(locationData())
         assertNotNull(server.awaitMessage(), "first connection should be open")
 
         // The CAS guard only admits DISCONNECTED -> CONNECTING, so a second start while
         // CONNECTED must be a no-op rather than a second socket.
-        // The existing socket stays assigned across the no-op, so no readiness wait here.
         startStreaming()
         transmitter.sendLocation(locationData())
 
@@ -95,8 +94,29 @@ class SignalKTransmitterTest {
     }
 
     @Test
+    fun `startStreaming returns with a websocket that can carry a message straight away`() {
+        // Repeated on fresh transmitters: the defect this guards against was a second,
+        // concurrently launched connection attempt that won the CAS guard only some of the
+        // time, leaving startStreaming() to return before the WebSocket was assigned.
+        repeat(START_CYCLES) { cycle ->
+            transmitter.stopStreaming()
+            transmitter = SignalKTransmitter(authenticationService, io)
+            transmitter.configure(requireNotNull(UrlParser.parseUrl(server.url)))
+
+            startStreaming()
+            transmitter.sendLocation(locationData())
+
+            assertNotNull(
+                server.awaitMessage(),
+                "cycle $cycle: a send straight after startStreaming() must not be dropped"
+            )
+            assertEquals(cycle + 1, server.streamRequests.size, "cycle $cycle: exactly one upgrade per start")
+        }
+    }
+
+    @Test
     fun `stopStreaming resets the session and streaming can start again`() {
-        connect()
+        startStreaming()
         transmitter.sendLocation(locationData())
         assertNotNull(server.awaitMessage())
         assertEquals(1, transmitter.messagesSent.value)
@@ -110,7 +130,7 @@ class SignalKTransmitterTest {
         assertNull(transmitter.currentResolvedIp.value)
 
         // The state machine is back at DISCONNECTED, so a fresh connection is possible.
-        connect()
+        startStreaming()
         transmitter.sendLocation(locationData())
 
         assertNotNull(server.awaitMessage(), "restarted session should deliver messages")
@@ -131,7 +151,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `successful sends advance the transmission counters`() {
-        connect()
+        startStreaming()
 
         transmitter.sendLocation(locationData())
         val firstMessage = server.awaitMessage()
@@ -151,7 +171,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `location message keeps zero speed bearing and altitude and converts bearing to radians`() {
-        connect()
+        startStreaming()
 
         // Vessel at anchor pointing due south: every zero here is a real measurement.
         transmitter.sendLocation(
@@ -188,7 +208,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `location message omits unmeasured values and zero accuracy`() {
-        connect()
+        startStreaming()
 
         transmitter.sendLocation(
             locationData().copy(accuracy = 0.0f, speed = null, bearing = null, altitude = null)
@@ -200,7 +220,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `sendLocationData with sendLocation false transmits nothing`() {
-        connect()
+        startStreaming()
 
         runBlocking { transmitter.sendLocationData(locationData(), sendLocation = false) }
         transmitter.sendSensor(SensorData(pressure = 101_325.0f)) // ordering marker
@@ -218,7 +238,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `sensor message with sendHeading false suppresses heading variation and magnetometer accuracy`() {
-        connect()
+        startStreaming()
 
         transmitter.sendSensor(fullSensorData(), sendHeading = false)
 
@@ -234,7 +254,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `sensor message with sendPressure false suppresses pressure only`() {
-        connect()
+        startStreaming()
 
         transmitter.sendSensor(fullSensorData(), sendPressure = false)
 
@@ -250,7 +270,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `sensor message with no readings is sent with no updates`() {
-        connect()
+        startStreaming()
 
         transmitter.sendSensor(SensorData())
 
@@ -265,7 +285,7 @@ class SignalKTransmitterTest {
 
     @Test
     fun `non-finite sensor readings are dropped rather than breaking the message`() {
-        connect()
+        startStreaming()
 
         transmitter.sendSensor(
             SensorData(
@@ -304,7 +324,7 @@ class SignalKTransmitterTest {
             "the reconnect must carry the renewed token"
         )
 
-        awaitWebSocket()
+        transmitter.connectionStatus.awaitValue { it } // the reconnect's upgrade has completed
         transmitter.sendLocation(locationData())
         assertNotNull(server.awaitMessage(), "the reconnected socket should be usable")
     }
@@ -382,39 +402,6 @@ class SignalKTransmitterTest {
 
     private fun startStreaming() = runBlocking { transmitter.startStreaming() }
 
-    /** Starts streaming and waits until the transmitter owns a WebSocket it can send on. */
-    private fun connect() {
-        startStreaming()
-        awaitWebSocket()
-    }
-
-    /**
-     * Waits until the transmitter holds a live WebSocket reference.
-     *
-     * `startStreaming()` returning is not enough: its initial DNS resolution sees a
-     * disconnected transmitter and launches its own `initializeWebSocket` on the
-     * transmitter scope, racing the one `startStreaming` performs inline. Whichever wins
-     * the CAS guard is the one that assigns the WebSocket, so the other can return first
-     * and a send issued right then would be dropped.
-     *
-     * `refreshDns()` is the cheapest public probe of that reference: it no-ops while the
-     * WebSocket is null, and re-resolves once it is set — which replaces the "(initial)"
-     * resolution note with an "(unchanged)" one. That note change is the readiness edge,
-     * so this may only be called while the initial note is still in place.
-     */
-    private fun awaitWebSocket() {
-        val noteBeforeProbe = transmitter.lastDnsRefresh.value
-        assertTrue(
-            noteBeforeProbe == null || noteBeforeProbe.endsWith("(initial)"),
-            "awaitWebSocket() detects a change of the DNS note, so the note must still be " +
-                "the initial resolution, not: $noteBeforeProbe"
-        )
-        awaitCondition("the transmitter to hold an open websocket") {
-            runBlocking { transmitter.refreshDns() }
-            transmitter.lastDnsRefresh.value != noteBeforeProbe
-        }
-    }
-
     private fun login() = runBlocking {
         val result = authenticationService.login(server.url, "user", "password")
         assertTrue(result.isSuccess, "fake server login should succeed: $result")
@@ -490,6 +477,9 @@ class SignalKTransmitterTest {
          * the 10 s and 30 s deferred retries — so "no reconnect happened" is meaningful.
          */
         const val RECONNECT_QUIET_MS = 1_500L
+
+        /** Enough start cycles that the former start-up race would surface reliably. */
+        const val START_CYCLES = 20
 
         const val RENEWAL_FAILED_MESSAGE = "Automatic token renewal failed - will retry"
     }

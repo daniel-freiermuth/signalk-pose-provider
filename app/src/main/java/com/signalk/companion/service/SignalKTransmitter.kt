@@ -156,10 +156,10 @@ class SignalKTransmitter @Inject constructor(
 
         var started = false
         try {
-            // Initial DNS resolution for WebSocket
-            withContext(ioDispatcher) {
-                refreshDnsResolution()
-            }
+            // Initial DNS resolution for WebSocket. Resolve only: the connection is opened
+            // inline below, and a reconnect launched from here would race it for the CAS guard.
+            val resolved = withContext(ioDispatcher) { resolveServerAddress() }
+            if (!resolved) Log.w(TAG, "Initial DNS resolution failed; connecting anyway")
 
             // Initialize WebSocket connection
             initializeWebSocket()
@@ -174,8 +174,13 @@ class SignalKTransmitter @Inject constructor(
         }
     }
 
-    private fun refreshDnsResolution() {
-        try {
+    /**
+     * Resolves [serverAddress] and records the result for diagnostics.
+     *
+     * @return whether resolution succeeded.
+     */
+    private fun resolveServerAddress(): Boolean {
+        return try {
             val newAddress = InetAddress.getByName(serverAddress)
             val oldIp = _currentResolvedIp.value
             val newIp = newAddress.hostAddress
@@ -192,20 +197,30 @@ class SignalKTransmitter @Inject constructor(
             Log.d(TAG, message)
             _lastDnsRefresh.value = message
             _currentResolvedIp.value = newIp
-
-            // If WebSocket is disconnected, try to reconnect
-            if (!_connectionStatus.value && webSocket == null) {
-                Log.d(TAG, "WebSocket disconnected, attempting reconnection after DNS refresh")
-                transmitterScope?.launch {
-                    reconnectWebSocket("WebSocket reconnection failed")
-                } ?: Log.w(TAG, "Cannot attempt reconnection - transmitter scope is null")
-            }
+            true
         } catch (e: UnknownHostException) {
             // DNS resolution failed - but don't kill the entire streaming
             // Keep the WebSocket going, it will handle its own reconnection
             Log.e(TAG, "DNS resolution failed for $serverAddress: ${e.message}", e)
+            false
         } catch (e: SecurityException) {
             Log.e(TAG, "DNS resolution not permitted for $serverAddress: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Periodic and manual DNS refresh: re-resolves the server and, if the WebSocket is
+     * down, attempts to reconnect.
+     */
+    private fun refreshDnsResolution() {
+        if (!resolveServerAddress()) return
+
+        if (!_connectionStatus.value && webSocket == null) {
+            Log.d(TAG, "WebSocket disconnected, attempting reconnection after DNS refresh")
+            transmitterScope?.launch {
+                reconnectWebSocket("WebSocket reconnection failed")
+            } ?: Log.w(TAG, "Cannot attempt reconnection - transmitter scope is null")
         }
     }
 
