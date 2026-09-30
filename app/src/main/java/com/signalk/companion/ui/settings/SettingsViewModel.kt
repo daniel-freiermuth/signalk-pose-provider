@@ -4,7 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.signalk.companion.service.AuthenticationService
-import com.signalk.companion.util.AppSettings
+import com.signalk.companion.util.ConnectionSettings
+import com.signalk.companion.util.VesselSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -67,10 +68,10 @@ class SettingsViewModel @Inject constructor(
         if (isInitialized) return
         isInitialized = true
 
-        val savedServerUrl = AppSettings.getServerUrl(context)
-        val savedUsername = AppSettings.getUsername(context)
-        val savedPassword = AppSettings.getPassword(context)
-        val savedVesselId = AppSettings.getVesselId(context)
+        val savedServerUrl = ConnectionSettings.getServerUrl(context)
+        val savedUsername = ConnectionSettings.getUsername(context)
+        val savedPassword = ConnectionSettings.getPassword(context)
+        val savedVesselId = VesselSettings.getVesselId(context)
 
         _uiState.update {
             it.copy(
@@ -106,10 +107,10 @@ class SettingsViewModel @Inject constructor(
                 val currentState = _uiState.value
 
                 // Save all settings
-                AppSettings.setServerUrl(context, currentState.serverUrl)
-                AppSettings.setUsername(context, currentState.username)
-                AppSettings.setPassword(context, currentState.password)
-                AppSettings.setVesselId(context, currentState.vesselId)
+                ConnectionSettings.setServerUrl(context, currentState.serverUrl)
+                ConnectionSettings.setUsername(context, currentState.username)
+                ConnectionSettings.setPassword(context, currentState.password)
+                VesselSettings.setVesselId(context, currentState.vesselId)
 
                 _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
             } catch (e: Exception) {
