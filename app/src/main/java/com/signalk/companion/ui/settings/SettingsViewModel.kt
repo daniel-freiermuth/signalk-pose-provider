@@ -8,7 +8,10 @@ import com.signalk.companion.util.ConnectionSettings
 import com.signalk.companion.util.VesselSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -113,7 +116,9 @@ class SettingsViewModel @Inject constructor(
                 VesselSettings.setVesselId(context, currentState.vesselId)
 
                 _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
-            } catch (e: Exception) {
+            } catch (e: IllegalStateException) {
+                // getSharedPreferences() throws this while credential-encrypted storage is
+                // still locked (direct boot, before the first unlock).
                 _uiState.update {
                     it.copy(
                         isSaving = false,
@@ -145,7 +150,9 @@ class SettingsViewModel @Inject constructor(
                     currentState.password
                 )
             } else {
-                _uiState.update { it.copy(error = "Enter username and password to test authentication") }
+                _uiState.update {
+                    it.copy(error = "Enter username and password to test authentication")
+                }
             }
         }
     }

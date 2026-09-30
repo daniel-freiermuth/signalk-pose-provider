@@ -108,13 +108,20 @@ class RecordingSession(private val context: Context) {
             _status.value = Status(isRecording = true, fileName = target.name)
             Log.i(TAG, "Recording to ${target.absolutePath}")
             target
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start recording", e)
-            writer = null
-            file = null
-            _status.value = Status(error = e.message ?: e.javaClass.simpleName)
-            null
+        } catch (e: java.io.IOException) {
+            failStart(e)
+        } catch (e: SecurityException) {
+            // Storage access denied by the platform (e.g. a restricted profile).
+            failStart(e)
         }
+    }
+
+    private fun failStart(e: Exception): File? {
+        Log.e(TAG, "Failed to start recording", e)
+        writer = null
+        file = null
+        _status.value = Status(error = e.message ?: e.javaClass.simpleName)
+        return null
     }
 
     /**
@@ -162,7 +169,7 @@ class RecordingSession(private val context: Context) {
         writer = null
         try {
             active.close()
-        } catch (e: Exception) {
+        } catch (e: java.io.IOException) {
             Log.e(TAG, "Failed to close recording cleanly - the tail may be missing", e)
         }
         _status.value = Status(
@@ -182,7 +189,7 @@ class RecordingSession(private val context: Context) {
         val directory = File(context.getExternalFilesDir(null) ?: context.filesDir, DIRECTORY)
         return directory.listFiles { f -> f.name.endsWith(FILE_EXTENSION) }
             ?.sortedByDescending { it.lastModified() }
-            ?: emptyList()
+            .orEmpty()
     }
 
     private fun publishStatus(active: RecordingWriter) {

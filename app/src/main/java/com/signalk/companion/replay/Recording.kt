@@ -133,6 +133,31 @@ object RecordingFormat {
     const val VERSION = 1
     private const val ABSENT = "-"
 
+    // Field positions within a line; see the format table in the file KDoc.
+    private const val TAG = 0
+    private const val TIMESTAMP = 1
+
+    // A / G / M / R: a device-frame vector, then (G, M) the HAL estimate or (R) the scalar.
+    private const val X = 2
+    private const val Y = 3
+    private const val Z = 4
+    private const val AUX_X = 5
+    private const val AUX_Y = 6
+    private const val AUX_Z = 7
+    private const val ROTATION_W = 5
+    private const val VECTOR_MIN_FIELDS = Z + 1
+
+    // F: position is mandatory, everything after it may be '-' or missing.
+    private const val FIX_LATITUDE = 2
+    private const val FIX_LONGITUDE = 3
+    private const val FIX_ALTITUDE = 4
+    private const val FIX_SPEED = 5
+    private const val FIX_COURSE = 6
+    private const val FIX_HORIZONTAL_ACCURACY = 7
+    private const val FIX_SPEED_ACCURACY = 8
+    private const val FIX_COURSE_ACCURACY = 9
+    private const val FIX_MIN_FIELDS = FIX_LONGITUDE + 1
+
     fun header(deviceDescription: String, wallClockMs: Long, bootTimeNs: Long): String =
         "# signalk-pose-provider recording v$VERSION\n" +
             "# device=$deviceDescription\n" +
@@ -172,58 +197,12 @@ object RecordingFormat {
         if (trimmed.isEmpty() || trimmed.startsWith("#")) return null
         val f = trimmed.split(' ')
         return try {
-            when (f[0]) {
-                "A" -> if (f.size < 5) {
-                    null
-                } else {
-                    AccelRecord(f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat())
-                }
-                "G" -> if (f.size < 5) {
-                    null
-                } else {
-                    GyroRecord(
-                        f[1].toLong(),
-                        f[2].toFloat(),
-                        f[3].toFloat(),
-                        f[4].toFloat(),
-                        f.getOrNull(5)?.toFloat() ?: 0f,
-                        f.getOrNull(6)?.toFloat() ?: 0f,
-                        f.getOrNull(7)?.toFloat() ?: 0f
-                    )
-                }
-                "M" -> if (f.size < 5) {
-                    null
-                } else {
-                    MagRecord(
-                        f[1].toLong(),
-                        f[2].toFloat(),
-                        f[3].toFloat(),
-                        f[4].toFloat(),
-                        f.getOrNull(5)?.toFloat() ?: 0f,
-                        f.getOrNull(6)?.toFloat() ?: 0f,
-                        f.getOrNull(7)?.toFloat() ?: 0f
-                    )
-                }
-                "R" -> if (f.size < 5) {
-                    null
-                } else {
-                    RotationVectorRecord(
-                        f[1].toLong(),
-                        f[2].toFloat(),
-                        f[3].toFloat(),
-                        f[4].toFloat(),
-                        optF(f.getOrNull(5))
-                    )
-                }
-                "F" -> if (f.size < 4) {
-                    null
-                } else {
-                    FixRecord(
-                        f[1].toLong(), f[2].toDouble(), f[3].toDouble(),
-                        optD(f.getOrNull(4)), optF(f.getOrNull(5)), optF(f.getOrNull(6)),
-                        optF(f.getOrNull(7)), optF(f.getOrNull(8)), optF(f.getOrNull(9))
-                    )
-                }
+            when (f[TAG]) {
+                "A" -> parseAccel(f)
+                "G" -> parseGyro(f)
+                "M" -> parseMag(f)
+                "R" -> parseRotationVector(f)
+                "F" -> parseFix(f)
                 else -> null
             }
         } catch (e: NumberFormatException) {
@@ -232,6 +211,80 @@ object RecordingFormat {
     }
 
     fun parseAll(lines: Sequence<String>): Sequence<SensorRecord> = lines.mapNotNull(::parse)
+
+    // Per-tag parsers. Each returns null when mandatory fields are missing and lets
+    // NumberFormatException propagate to parse(), which skips the whole line.
+
+    private fun parseAccel(f: List<String>): AccelRecord? =
+        if (f.size < VECTOR_MIN_FIELDS) {
+            null
+        } else {
+            AccelRecord(f[TIMESTAMP].toLong(), f[X].toFloat(), f[Y].toFloat(), f[Z].toFloat())
+        }
+
+    private fun parseGyro(f: List<String>): GyroRecord? =
+        if (f.size < VECTOR_MIN_FIELDS) {
+            null
+        } else {
+            GyroRecord(
+                f[TIMESTAMP].toLong(),
+                f[X].toFloat(),
+                f[Y].toFloat(),
+                f[Z].toFloat(),
+                auxOrZero(f, AUX_X),
+                auxOrZero(f, AUX_Y),
+                auxOrZero(f, AUX_Z)
+            )
+        }
+
+    private fun parseMag(f: List<String>): MagRecord? =
+        if (f.size < VECTOR_MIN_FIELDS) {
+            null
+        } else {
+            MagRecord(
+                f[TIMESTAMP].toLong(),
+                f[X].toFloat(),
+                f[Y].toFloat(),
+                f[Z].toFloat(),
+                auxOrZero(f, AUX_X),
+                auxOrZero(f, AUX_Y),
+                auxOrZero(f, AUX_Z)
+            )
+        }
+
+    private fun parseRotationVector(f: List<String>): RotationVectorRecord? =
+        if (f.size < VECTOR_MIN_FIELDS) {
+            null
+        } else {
+            RotationVectorRecord(
+                f[TIMESTAMP].toLong(),
+                f[X].toFloat(),
+                f[Y].toFloat(),
+                f[Z].toFloat(),
+                optF(f.getOrNull(ROTATION_W))
+            )
+        }
+
+    private fun parseFix(f: List<String>): FixRecord? =
+        if (f.size < FIX_MIN_FIELDS) {
+            null
+        } else {
+            FixRecord(
+                timestampNs = f[TIMESTAMP].toLong(),
+                latitude = f[FIX_LATITUDE].toDouble(),
+                longitude = f[FIX_LONGITUDE].toDouble(),
+                altitude = optD(f.getOrNull(FIX_ALTITUDE)),
+                speedMps = optF(f.getOrNull(FIX_SPEED)),
+                courseDeg = optF(f.getOrNull(FIX_COURSE)),
+                horizontalAccuracyM = optF(f.getOrNull(FIX_HORIZONTAL_ACCURACY)),
+                speedAccuracyMps = optF(f.getOrNull(FIX_SPEED_ACCURACY)),
+                courseAccuracyDeg = optF(f.getOrNull(FIX_COURSE_ACCURACY))
+            )
+        }
+
+    /** A line may omit the HAL estimate; absent means "no estimate", i.e. zero. */
+    private fun auxOrZero(f: List<String>, index: Int): Float =
+        f.getOrNull(index)?.toFloat() ?: 0f
 
     private fun opt(v: Any?): String = v?.toString() ?: ABSENT
 

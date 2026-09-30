@@ -8,11 +8,6 @@ import androidx.navigation.compose.rememberNavController
 import com.signalk.companion.ui.main.MainScreen
 import com.signalk.companion.ui.settings.SettingsScreen
 
-sealed class Screen(val route: String) {
-    object Main : Screen("main")
-    object Settings : Screen("settings")
-}
-
 @Composable
 fun SignalKNavHost(
     navController: NavHostController = rememberNavController(),

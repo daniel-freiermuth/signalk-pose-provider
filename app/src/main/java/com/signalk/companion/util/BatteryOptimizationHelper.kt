@@ -1,10 +1,11 @@
 package com.signalk.companion.util
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.core.net.toUri
 
 object BatteryOptimizationHelper {
 
@@ -17,12 +18,18 @@ object BatteryOptimizationHelper {
     }
 
     /**
-     * Create an intent to request battery optimization whitelist
+     * Create an intent to request battery optimization whitelist.
+     *
+     * Lint's BatteryLife is suppressed deliberately: the app streams sensor data continuously
+     * to the boat's SignalK server from a foreground service, which Doze would throttle, and
+     * it is distributed through F-Droid, not Google Play, so Play's policy on this request
+     * does not apply.
      */
+    @SuppressLint("BatteryLife")
     fun createBatteryOptimizationIntent(context: Context): Intent {
         return Intent().apply {
             action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-            data = Uri.parse("package:${context.packageName}")
+            data = "package:${context.packageName}".toUri()
         }
     }
 
@@ -32,7 +39,7 @@ object BatteryOptimizationHelper {
     fun createAppBatterySettingsIntent(context: Context): Intent {
         return Intent().apply {
             action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
-            data = Uri.parse("package:${context.packageName}")
+            data = "package:${context.packageName}".toUri()
         }
     }
 
