@@ -17,19 +17,19 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
-    
+
     @Provides
     @Singleton
     fun provideAuthenticationService(): AuthenticationService {
         return AuthenticationService()
     }
-    
+
     @Provides
     @Singleton
     fun provideLocationService(): LocationService {
         return LocationService()
     }
-    
+
     @Provides
     @Singleton
     fun provideSensorService(
@@ -38,7 +38,7 @@ object AppModule {
     ): SensorService {
         return SensorService(context, locationService)
     }
-    
+
     @Provides
     @Singleton
     fun provideRecordingSession(@ApplicationContext context: Context): RecordingSession {

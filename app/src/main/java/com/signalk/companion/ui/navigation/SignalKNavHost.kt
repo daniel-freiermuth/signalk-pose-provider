@@ -29,7 +29,7 @@ fun SignalKNavHost(
                 }
             )
         }
-        
+
         composable(Screen.Settings.route) {
             SettingsScreen(
                 onNavigateBack = {

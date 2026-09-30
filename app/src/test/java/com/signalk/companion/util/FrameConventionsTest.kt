@@ -43,7 +43,7 @@ class FrameConventionsTest {
         val diff = abs(((expectedDeg - actualDeg + 540f) % 360f) - 180f)
         assertTrue(
             diff < 0.01f,
-            "$name: expected ${expectedDeg}°, got ${actualDeg}°"
+            "$name: expected $expectedDeg°, got $actualDeg°"
         )
     }
 
@@ -55,9 +55,9 @@ class FrameConventionsTest {
     @Test
     fun `level bow north is heading 0 pitch 0 roll 0`() {
         val R = matrixFromColumns(
-            starboard = floatArrayOf(1f, 0f, 0f),   // East
-            bow = floatArrayOf(0f, 1f, 0f),         // North
-            up = floatArrayOf(0f, 0f, 1f)           // Up
+            starboard = floatArrayOf(1f, 0f, 0f), // East
+            bow = floatArrayOf(0f, 1f, 0f), // North
+            up = floatArrayOf(0f, 0f, 1f) // Up
         )
         val a = DeviceCalibration.extractNauticalAngles(R)
         assertAngleEquals(0f, a.headingRad, "heading")
@@ -68,8 +68,8 @@ class FrameConventionsTest {
     @Test
     fun `level bow east is heading 90`() {
         val R = matrixFromColumns(
-            starboard = floatArrayOf(0f, -1f, 0f),  // South
-            bow = floatArrayOf(1f, 0f, 0f),         // East
+            starboard = floatArrayOf(0f, -1f, 0f), // South
+            bow = floatArrayOf(1f, 0f, 0f), // East
             up = floatArrayOf(0f, 0f, 1f)
         )
         val a = DeviceCalibration.extractNauticalAngles(R)
@@ -81,8 +81,8 @@ class FrameConventionsTest {
     @Test
     fun `level bow south is heading 180`() {
         val R = matrixFromColumns(
-            starboard = floatArrayOf(-1f, 0f, 0f),  // West
-            bow = floatArrayOf(0f, -1f, 0f),        // South
+            starboard = floatArrayOf(-1f, 0f, 0f), // West
+            bow = floatArrayOf(0f, -1f, 0f), // South
             up = floatArrayOf(0f, 0f, 1f)
         )
         val a = DeviceCalibration.extractNauticalAngles(R)
@@ -92,8 +92,8 @@ class FrameConventionsTest {
     @Test
     fun `level bow west is heading 270`() {
         val R = matrixFromColumns(
-            starboard = floatArrayOf(0f, 1f, 0f),   // North
-            bow = floatArrayOf(-1f, 0f, 0f),        // West
+            starboard = floatArrayOf(0f, 1f, 0f), // North
+            bow = floatArrayOf(-1f, 0f, 0f), // West
             up = floatArrayOf(0f, 0f, 1f)
         )
         val a = DeviceCalibration.extractNauticalAngles(R)
@@ -132,9 +132,11 @@ class FrameConventionsTest {
     @Test
     fun `heading increases north east south west`() {
         val headings = listOf(0f, 45f, 90f, 135f, 180f, 225f, 270f, 315f).map { h ->
-            deg(DeviceCalibration.extractNauticalAngles(
-                DeviceCalibration.buildFlatHeadingMatrix(h)
-            ).headingRad)
+            deg(
+                DeviceCalibration.extractNauticalAngles(
+                    DeviceCalibration.buildFlatHeadingMatrix(h)
+                ).headingRad
+            )
         }
         for (i in 1 until headings.size) {
             assertTrue(
@@ -207,7 +209,8 @@ class FrameConventionsTest {
         // seen from above, which by the right-hand rule is a NEGATIVE gyro rate about up.
         val gyroTurningStarboard = floatArrayOf(0f, 0f, -0.1f)
         val rot = DeviceCalibration.rateOfTurnFromGyro(
-            DeviceCalibration.IDENTITY_3X3, gyroTurningStarboard
+            DeviceCalibration.IDENTITY_3X3,
+            gyroTurningStarboard
         )
         assertTrue(rot > 0f, "turn to starboard must give POSITIVE rate of turn, got $rot")
         assertEquals(0.1f, rot, tol)
@@ -217,7 +220,8 @@ class FrameConventionsTest {
     fun `turn to port is negative rate of turn`() {
         val gyroTurningPort = floatArrayOf(0f, 0f, 0.1f)
         val rot = DeviceCalibration.rateOfTurnFromGyro(
-            DeviceCalibration.IDENTITY_3X3, gyroTurningPort
+            DeviceCalibration.IDENTITY_3X3,
+            gyroTurningPort
         )
         assertTrue(rot < 0f, "turn to port must give NEGATIVE rate of turn, got $rot")
     }
@@ -240,7 +244,9 @@ class FrameConventionsTest {
         assertTrue(rot > 0f, "turn to starboard must give POSITIVE rate of turn, got $rot")
         assertEquals(0.1f, rot, tol)
         assertEquals(
-            0f, gyro_D[2], tol,
+            0f,
+            gyro_D[2],
+            tol,
             "precondition: device Z sees nothing of this turn"
         )
     }

@@ -1,14 +1,15 @@
 package com.signalk.companion.ui.main
 
+import android.hardware.SensorManager
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,20 +17,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.signalk.companion.replay.RecordingSession
 import com.signalk.companion.service.AttitudeEngine
 import com.signalk.companion.util.DeviceCalibration
-import android.hardware.SensorManager
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.*
@@ -41,7 +40,7 @@ fun MainScreen(
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    
+
     // Request permissions
     val permissionsState = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -49,7 +48,7 @@ fun MainScreen(
             android.Manifest.permission.ACCESS_COARSE_LOCATION
         )
     )
-    
+
     // Reload settings and manage sensor lifecycle based on app visibility
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -68,14 +67,14 @@ fun MainScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    
+
     // Request permissions on first composition
     LaunchedEffect(Unit) {
         if (!permissionsState.allPermissionsGranted) {
             permissionsState.launchMultiplePermissionRequest()
         }
     }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -121,7 +120,7 @@ fun MainScreen(
                 onLocationIntervalChange = viewModel::updateLocationIntervalMs,
                 onSensorIntervalChange = viewModel::updateSensorIntervalMs
             )
-            
+
             // Control Card
             ControlCard(
                 isStreaming = uiState.isStreaming,
@@ -136,7 +135,7 @@ fun MainScreen(
                 },
                 permissionsGranted = permissionsState.allPermissionsGranted
             )
-            
+
             // Marine Configuration Card
             MarineConfigCard(
                 calibrationAlphaDeg = uiState.calibrationAlphaDeg,
@@ -149,7 +148,7 @@ fun MainScreen(
                 hasGps = uiState.locationData?.bearing != null &&
                     (uiState.locationData?.speed ?: 0f) >= DeviceCalibration.MIN_CALIBRATION_SPEED_MPS
             )
-            
+
             // Error Card
             uiState.error?.let { error ->
                 ErrorCard(
@@ -180,17 +179,18 @@ fun MainScreen(
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                         Text(
-                            text = if (accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE)
+                            text = if (accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE) {
                                 "Compass unreliable — wave your phone in a figure-8 to calibrate"
-                            else
-                                "Compass accuracy low — wave your phone in a figure-8 to calibrate",
+                            } else {
+                                "Compass accuracy low — wave your phone in a figure-8 to calibrate"
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                     }
                 }
             }
-            
+
             // Connection & Authentication Status Card
             ConnectionStatusCard(
                 isConnected = uiState.isConnected,
@@ -198,16 +198,16 @@ fun MainScreen(
                 isAuthenticated = uiState.isAuthenticated,
                 username = uiState.username
             )
-            
+
             // Sensor Availability Card
             SensorAvailabilityCard(viewModel = viewModel)
-            
+
             // Sensor Data Card
             SensorDataCard(
                 locationData = uiState.locationData,
                 sensorData = uiState.sensorData
             )
-            
+
             // Raw Recording Card (M1)
             RecordingCard(
                 recording = uiState.recording,
@@ -275,10 +275,11 @@ fun ConnectionStatusCard(
             Text(
                 text = if (isAuthenticated && username != null) "✓ $username" else "Not authenticated",
                 style = MaterialTheme.typography.bodySmall,
-                color = if (isAuthenticated)
+                color = if (isAuthenticated) {
                     MaterialTheme.colorScheme.primary
-                else
+                } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
+                }
             )
         }
     }
@@ -323,8 +324,11 @@ fun RecordingCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(
-                    imageVector = if (recording.isRecording) Icons.Default.Close
-                        else Icons.Default.PlayArrow,
+                    imageVector = if (recording.isRecording) {
+                        Icons.Default.Close
+                    } else {
+                        Icons.Default.PlayArrow
+                    },
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
@@ -411,7 +415,7 @@ fun ControlCard(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
-            
+
             if (!permissionsGranted) {
                 Text(
                     text = "Location permissions required",
@@ -419,7 +423,7 @@ fun ControlCard(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            
+
             Button(
                 onClick = onStartStop,
                 enabled = permissionsGranted || isStreaming,
@@ -454,7 +458,7 @@ fun SensorDataCard(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
-            
+
             // Location/GPS Data Section
             locationData?.let { location ->
                 Text(
@@ -467,15 +471,15 @@ fun SensorDataCard(
                 SensorDataRow("Speed over Ground", "${String.format("%.2f", location.speed)} m/s")
                 SensorDataRow("GPS Bearing", "${String.format("%.1f", location.bearing)}°")
                 SensorDataRow("GPS Accuracy", "${String.format("%.1f", location.accuracy)} m")
-                
+
                 location.altitude.let { alt ->
                     SensorDataRow("Altitude", "${String.format("%.1f", alt)} m")
                 }
-                
+
                 location.satellites?.let { sats ->
                     SensorDataRow("Satellites", "$sats")
                 }
-                
+
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             } ?: run {
                 Text(
@@ -485,23 +489,24 @@ fun SensorDataCard(
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }
-            
+
             // Device Sensors Section
             sensorData?.let { sensor ->
                 var hasOrientationData = false
                 var hasEnvironmentalData = false
-                
+
                 // Navigation/Orientation Data
                 if (sensor.compassHeading != null || sensor.approxTrueHeading != null ||
                     sensor.roll != null || sensor.pitch != null ||
-                    sensor.rateOfTurn != null) {
+                    sensor.rateOfTurn != null
+                ) {
                     hasOrientationData = true
                     Text(
                         text = "Device Orientation",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium
                     )
-                    
+
                     sensor.compassHeading?.let { heading ->
                         SensorDataRow("Compass Heading", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")
                     }
@@ -512,10 +517,10 @@ fun SensorDataCard(
                     }
                     sensor.magnetometerAccuracy?.let { acc ->
                         val (label, color) = when (acc) {
-                            SensorManager.SENSOR_STATUS_ACCURACY_HIGH   -> "High" to MaterialTheme.colorScheme.primary
+                            SensorManager.SENSOR_STATUS_ACCURACY_HIGH -> "High" to MaterialTheme.colorScheme.primary
                             SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM -> "Medium" to MaterialTheme.colorScheme.secondary
-                            SensorManager.SENSOR_STATUS_ACCURACY_LOW    -> "Low" to MaterialTheme.colorScheme.error
-                            else                                          -> "Unreliable" to MaterialTheme.colorScheme.error
+                            SensorManager.SENSOR_STATUS_ACCURACY_LOW -> "Low" to MaterialTheme.colorScheme.error
+                            else -> "Unreliable" to MaterialTheme.colorScheme.error
                         }
                         Row(
                             modifier = Modifier
@@ -546,10 +551,11 @@ fun SensorDataCard(
                         SensorDataRow("Rate of Turn (+stbd)", "${String.format("%.2f", Math.toDegrees(rate.toDouble()))}°/s")
                     }
                 }
-                
+
                 // Environmental Data
-                if (sensor.pressure != null || sensor.temperature != null || 
-                    sensor.relativeHumidity != null) {
+                if (sensor.pressure != null || sensor.temperature != null ||
+                    sensor.relativeHumidity != null
+                ) {
                     if (hasOrientationData) HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     hasEnvironmentalData = true
                     Text(
@@ -557,7 +563,7 @@ fun SensorDataCard(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium
                     )
-                    
+
                     sensor.pressure?.let { pressure ->
                         SensorDataRow("Barometric Pressure", "${String.format("%.2f", pressure / 100)} hPa")
                     }
@@ -568,7 +574,7 @@ fun SensorDataCard(
                         SensorDataRow("Humidity", "${String.format("%.1f", humidity * 100)}%")
                     }
                 }
-                
+
                 if (!hasOrientationData && !hasEnvironmentalData) {
                     Text(
                         text = "No device sensors available or active",
@@ -612,7 +618,7 @@ fun LiveTransmissionCard(
     lastTransmissionTime: Long?
 ) {
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()) }
-    
+
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -625,7 +631,7 @@ fun LiveTransmissionCard(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
-            
+
             // Transmission stats
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -640,7 +646,7 @@ fun LiveTransmissionCard(
                     )
                 }
             }
-            
+
             // Last sent JSON message
             lastSentMessage?.let { message ->
                 Text(
@@ -648,7 +654,7 @@ fun LiveTransmissionCard(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium
                 )
-                
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -700,13 +706,13 @@ fun ErrorCard(
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
-            
+
             Text(
                 text = error,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
-            
+
             Text(
                 text = "• Check server address (hostnames like 'signalk.local' are supported)\n• Ensure network connectivity\n• Verify SignalK server is running",
                 style = MaterialTheme.typography.bodySmall,
@@ -722,7 +728,7 @@ fun ErrorCard(
 @Composable
 fun SensorAvailabilityCard(viewModel: MainViewModel) {
     val availableSensors = remember { viewModel.getAvailableSensors() }
-    
+
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -735,13 +741,13 @@ fun SensorAvailabilityCard(viewModel: MainViewModel) {
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
-            
+
             Text(
                 text = "Available sensors on this device:",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
+
             // Create rows for sensor availability
             val sensorDisplayNames = mapOf(
                 "magnetometer" to "Magnetometer (Compass)",
@@ -751,14 +757,14 @@ fun SensorAvailabilityCard(viewModel: MainViewModel) {
                 "temperature" to "Ambient Temperature",
                 "humidity" to "Relative Humidity"
             )
-            
+
             sensorDisplayNames.forEach { (key, displayName) ->
                 SensorAvailabilityRow(
                     sensorName = displayName,
                     isAvailable = availableSensors[key] ?: false
                 )
             }
-            
+
             if (availableSensors.values.any { it }) {
                 Text(
                     text = "✓ Available sensors will be included in SignalK data stream",
@@ -798,7 +804,6 @@ fun SensorAvailabilityRow(sensorName: String, isAvailable: Boolean) {
         )
     }
 }
-
 
 @Composable
 fun MarineConfigCard(
@@ -939,19 +944,19 @@ private fun CalibrationDial(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        
-        // Value display  
+
+        // Value display
         Text(
             text = "${formatAngle(value)}°",
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
-        
+
         // Extract colors outside Canvas lambda
         val outlineColor = MaterialTheme.colorScheme.outline
         val primaryColor = MaterialTheme.colorScheme.primary
-        
+
         // Circular dial — clickable and draggable to adjust
         Canvas(
             modifier = Modifier
@@ -964,7 +969,7 @@ private fun CalibrationDial(
                         // atan2 gives -π to π, convert to 0-360°
                         var angleDeg = Math.toDegrees(angleRad.toDouble()).toFloat()
                         if (angleDeg < 0) angleDeg += 360
-                        
+
                         // Map 0-360° to the min-max range
                         val normalized = angleDeg / 360f
                         val newValue = min + normalized * (max - min)
@@ -977,7 +982,7 @@ private fun CalibrationDial(
             val centerX = size.width / 2
             val centerY = size.height / 2
             val circleRadius = size.minDimension / 2 - 4.dp.toPx()
-            
+
             // Draw outer circle
             drawCircle(
                 color = outlineColor,
@@ -985,21 +990,21 @@ private fun CalibrationDial(
                 center = androidx.compose.ui.geometry.Offset(centerX, centerY),
                 style = Stroke(width = 2.dp.toPx())
             )
-            
+
             // Draw angle indicator
             val normalizedValue = (value - min) / (max - min)
             val angleRad = Math.toRadians(normalizedValue * 360.0)
             val indicatorRadius = circleRadius - 10.dp.toPx()
             val endX = centerX + (indicatorRadius * cos(angleRad)).toFloat()
             val endY = centerY + (indicatorRadius * sin(angleRad)).toFloat()
-            
+
             drawLine(
                 color = primaryColor,
                 start = androidx.compose.ui.geometry.Offset(centerX, centerY),
                 end = androidx.compose.ui.geometry.Offset(endX, endY),
                 strokeWidth = 3.dp.toPx()
             )
-            
+
             // Draw cardinal point markers
             val markerRadius = circleRadius
             listOf(0.0, 90.0, 180.0, 270.0).forEach { angle ->
@@ -1066,13 +1071,13 @@ fun DataTransmissionCard(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
-            
+
             Text(
                 text = "Choose which data types to transmit to SignalK server:",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
+
             // Location checkbox + interval
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1102,7 +1107,7 @@ fun DataTransmissionCard(
                     enabled = sendLocation
                 )
             }
-            
+
             // Heading checkbox + interval
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1132,7 +1137,7 @@ fun DataTransmissionCard(
                     enabled = sendHeading
                 )
             }
-            
+
             // Pressure checkbox
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1169,7 +1174,7 @@ private fun IntervalDropdown(
     enabled: Boolean,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val label = options.find { it.first == selected }?.second ?: "${selected} ms"
+    val label = options.find { it.first == selected }?.second ?: "$selected ms"
 
     ExposedDropdownMenuBox(
         expanded = expanded && enabled,

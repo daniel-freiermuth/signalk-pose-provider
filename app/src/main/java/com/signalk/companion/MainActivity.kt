@@ -1,7 +1,6 @@
 package com.signalk.companion
 
 import android.app.AlertDialog
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,8 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.signalk.companion.ui.theme.SignalKCompanionTheme
 import com.signalk.companion.ui.navigation.SignalKNavHost
+import com.signalk.companion.ui.theme.SignalKCompanionTheme
 import com.signalk.companion.util.BatteryOptimizationHelper
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -19,15 +18,15 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         // Enable edge-to-edge display
         enableEdgeToEdge()
-        
+
         // Check battery optimization status after a short delay to let the UI load
         window.decorView.post {
             checkBatteryOptimization()
         }
-        
+
         setContent {
             SignalKCompanionTheme {
                 Surface(
@@ -39,17 +38,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    
+
     private fun checkBatteryOptimization() {
         if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)) {
             showBatteryOptimizationDialog()
         }
     }
-    
+
     private fun showBatteryOptimizationDialog() {
         AlertDialog.Builder(this)
             .setTitle("Background Operation Required")
-            .setMessage("For reliable marine navigation, this app needs to run continuously in the background. Please disable battery optimization to ensure uninterrupted GPS tracking and data transmission.")
+            .setMessage(
+                "For reliable marine navigation, this app needs to run continuously in the background. Please disable battery optimization to ensure uninterrupted GPS tracking and data transmission."
+            )
             .setPositiveButton("Disable Optimization") { _, _ ->
                 requestBatteryOptimizationExemption()
             }
@@ -62,7 +63,7 @@ class MainActivity : ComponentActivity() {
             .setCancelable(true)
             .show()
     }
-    
+
     private fun requestBatteryOptimizationExemption() {
         val intent = BatteryOptimizationHelper.createBatteryOptimizationIntent(this)
         try {
@@ -72,7 +73,7 @@ class MainActivity : ComponentActivity() {
             openBatterySettings()
         }
     }
-    
+
     private fun openBatterySettings() {
         try {
             val intent = BatteryOptimizationHelper.createAppBatterySettingsIntent(this)
@@ -82,11 +83,11 @@ class MainActivity : ComponentActivity() {
             showBatteryInstructions()
         }
     }
-    
+
     private fun showBatteryInstructions() {
         val instructions = BatteryOptimizationHelper.getBackgroundOptimizationInstructions()
         val message = instructions.joinToString("\n\n")
-        
+
         AlertDialog.Builder(this)
             .setTitle("Manual Battery Optimization Setup")
             .setMessage(message)

@@ -71,9 +71,9 @@ object DeviceCalibration {
 
         // R = Rz * Ry * Rx, expanded (row-major)
         return floatArrayOf(
-            cz * cy,                   cz * sy * sx - sz * cx,    cz * sy * cx + sz * sx,
-            sz * cy,                   sz * sy * sx + cz * cx,    sz * sy * cx - cz * sx,
-            -sy,                       cy * sx,                   cy * cx
+            cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+            sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+            -sy, cy * sx, cy * cx
         )
     }
 
@@ -88,7 +88,7 @@ object DeviceCalibration {
      */
     fun decomposeZYX(R: FloatArray): Triple<Float, Float, Float> {
         // Row-major: R[row*3 + col]
-        val r20 = R[6]  // -sin(ry)
+        val r20 = R[6] // -sin(ry)
 
         val ry: Float
         val rz: Float
@@ -96,8 +96,8 @@ object DeviceCalibration {
 
         if (abs(r20) < 0.99999f) {
             ry = asin(-r20)
-            rz = atan2(R[3], R[0])   // atan2(sz*cy, cz*cy)
-            rx = atan2(R[7], R[8])   // atan2(cy*sx, cy*cx)
+            rz = atan2(R[3], R[0]) // atan2(sz*cy, cz*cy)
+            rx = atan2(R[7], R[8]) // atan2(cy*sx, cy*cx)
         } else {
             // Gimbal lock: ry ≈ ±90°
             ry = if (r20 < 0) (PI / 2).toFloat() else (-PI / 2).toFloat()
@@ -136,9 +136,9 @@ object DeviceCalibration {
 
         // R = Rz(α) · Rx(β) · Rz(γ), expanded (row-major)
         return floatArrayOf(
-            ca * cg - sa * cb * sg,   -ca * sg - sa * cb * cg,   sa * sb,
-            sa * cg + ca * cb * sg,   -sa * sg + ca * cb * cg,  -ca * sb,
-            sb * sg,                   sb * cg,                   cb
+            ca * cg - sa * cb * sg, -ca * sg - sa * cb * cg, sa * sb,
+            sa * cg + ca * cb * sg, -sa * sg + ca * cb * cg, -ca * sb,
+            sb * sg, sb * cg, cb
         )
     }
 
@@ -150,7 +150,7 @@ object DeviceCalibration {
      * We set γ = 0 and absorb the combined rotation into α.
      */
     fun decomposeZXZ(R: FloatArray): Triple<Float, Float, Float> {
-        val cosB = R[8].coerceIn(-1f, 1f)  // R[8] = cos(β)
+        val cosB = R[8].coerceIn(-1f, 1f) // R[8] = cos(β)
         val beta: Float
         val alpha: Float
         val gamma: Float
@@ -158,8 +158,8 @@ object DeviceCalibration {
         if (1f - abs(cosB) > 1e-5f) {
             // Non-degenerate: sin(β) ≠ 0
             beta = acos(cosB)
-            alpha = atan2(R[2], -R[5])  // atan2(sα·sβ, cα·sβ) → atan2(sα, cα) since sβ > 0
-            gamma = atan2(R[6], R[7])   // atan2(sβ·sγ, sβ·cγ) → atan2(sγ, cγ) since sβ > 0
+            alpha = atan2(R[2], -R[5]) // atan2(sα·sβ, cα·sβ) → atan2(sα, cα) since sβ > 0
+            gamma = atan2(R[6], R[7]) // atan2(sβ·sγ, sβ·cγ) → atan2(sγ, cγ) since sβ > 0
         } else {
             // Gimbal lock: β ≈ 0° or β ≈ 180°
             // β=0: R = Rz(α+γ), β=180: R = Rz(α−γ) · diag(1,−1,−1)
@@ -206,9 +206,9 @@ object DeviceCalibration {
 
     /** Vehicle attitude as nautical angles, radians. See [extractNauticalAngles]. */
     data class NauticalAngles(
-        val headingRad: Float,   // [0, 2π), 0 = North, increasing clockwise
-        val pitchRad: Float,     // [−π/2, π/2], positive = bow up
-        val rollRad: Float       // (−π, π], positive = starboard down
+        val headingRad: Float, // [0, 2π), 0 = North, increasing clockwise
+        val pitchRad: Float, // [−π/2, π/2], positive = bow up
+        val rollRad: Float // (−π, π], positive = starboard down
     )
 
     /**
@@ -340,9 +340,9 @@ object DeviceCalibration {
         //
         // Row-major: R[row*3 + col]
         return floatArrayOf(
-             ct,  st, 0f,   // row 0: world-X components of vehicle axes
-            -st,  ct, 0f,   // row 1: world-Y components of vehicle axes
-             0f,  0f, 1f    // row 2: world-Z components of vehicle axes
+            ct, st, 0f, // row 0: world-X components of vehicle axes
+            -st, ct, 0f, // row 1: world-Y components of vehicle axes
+            0f, 0f, 1f // row 2: world-Z components of vehicle axes
         )
     }
 
@@ -366,7 +366,7 @@ object DeviceCalibration {
      *   (which would lose information at gimbal lock β≈0).
      */
     fun calibrateTilt(R_W_D: FloatArray, gammaDeg: Float): Triple<Float, Float, FloatArray> {
-        val dz2 = R_W_D[8].coerceIn(-1f, 1f)  // cos(β)
+        val dz2 = R_W_D[8].coerceIn(-1f, 1f) // cos(β)
         val betaRad = acos(dz2)
         val alphaRad = if (abs(sin(betaRad)) > 1e-5f) {
             atan2(R_W_D[6].toDouble(), -R_W_D[7].toDouble()).toFloat()

@@ -35,7 +35,9 @@ sealed interface SensorRecord {
 /** Specific force in device coordinates, m/s². Reads +g along up at rest (§4.1). */
 data class AccelRecord(
     override val timestampNs: Long,
-    val x: Float, val y: Float, val z: Float
+    val x: Float,
+    val y: Float,
+    val z: Float
 ) : SensorRecord
 
 /**
@@ -45,8 +47,12 @@ data class AccelRecord(
  */
 data class GyroRecord(
     override val timestampNs: Long,
-    val x: Float, val y: Float, val z: Float,
-    val driftX: Float = 0f, val driftY: Float = 0f, val driftZ: Float = 0f
+    val x: Float,
+    val y: Float,
+    val z: Float,
+    val driftX: Float = 0f,
+    val driftY: Float = 0f,
+    val driftZ: Float = 0f
 ) : SensorRecord
 
 /**
@@ -59,8 +65,12 @@ data class GyroRecord(
  */
 data class MagRecord(
     override val timestampNs: Long,
-    val x: Float, val y: Float, val z: Float,
-    val biasX: Float = 0f, val biasY: Float = 0f, val biasZ: Float = 0f
+    val x: Float,
+    val y: Float,
+    val z: Float,
+    val biasX: Float = 0f,
+    val biasY: Float = 0f,
+    val biasZ: Float = 0f
 ) : SensorRecord
 
 /**
@@ -77,7 +87,9 @@ data class MagRecord(
  */
 data class RotationVectorRecord(
     override val timestampNs: Long,
-    val x: Float, val y: Float, val z: Float,
+    val x: Float,
+    val y: Float,
+    val z: Float,
     /** Absent on many devices; reconstructed by [toQuaternion]. */
     val w: Float? = null
 ) : SensorRecord {
@@ -106,7 +118,8 @@ data class RotationVectorRecord(
 /** A GNSS fix, timestamped on the sensor clock so M4 can align it with IMU propagation. */
 data class FixRecord(
     override val timestampNs: Long,
-    val latitude: Double, val longitude: Double,
+    val latitude: Double,
+    val longitude: Double,
     val altitude: Double? = null,
     val speedMps: Float? = null,
     val courseDeg: Float? = null,
@@ -129,18 +142,22 @@ object RecordingFormat {
     /** One record as a line, without the trailing newline. */
     fun format(record: SensorRecord): String = when (record) {
         is AccelRecord -> "A ${record.timestampNs} ${record.x} ${record.y} ${record.z}"
-        is GyroRecord -> "G ${record.timestampNs} ${record.x} ${record.y} ${record.z} " +
-            "${record.driftX} ${record.driftY} ${record.driftZ}"
-        is MagRecord -> "M ${record.timestampNs} ${record.x} ${record.y} ${record.z} " +
-            "${record.biasX} ${record.biasY} ${record.biasZ}"
+        is GyroRecord ->
+            "G ${record.timestampNs} ${record.x} ${record.y} ${record.z} " +
+                "${record.driftX} ${record.driftY} ${record.driftZ}"
+        is MagRecord ->
+            "M ${record.timestampNs} ${record.x} ${record.y} ${record.z} " +
+                "${record.biasX} ${record.biasY} ${record.biasZ}"
         // Scalar last, and '-' rather than a reconstructed value when the device omitted it:
         // a recording states what the sensor said, and "absent" is information.
-        is RotationVectorRecord -> "R ${record.timestampNs} ${record.x} ${record.y} " +
-            "${record.z} ${opt(record.w)}"
-        is FixRecord -> "F ${record.timestampNs} ${record.latitude} ${record.longitude} " +
-            "${opt(record.altitude)} ${opt(record.speedMps)} ${opt(record.courseDeg)} " +
-            "${opt(record.horizontalAccuracyM)} ${opt(record.speedAccuracyMps)} " +
-            opt(record.courseAccuracyDeg)
+        is RotationVectorRecord ->
+            "R ${record.timestampNs} ${record.x} ${record.y} " +
+                "${record.z} ${opt(record.w)}"
+        is FixRecord ->
+            "F ${record.timestampNs} ${record.latitude} ${record.longitude} " +
+                "${opt(record.altitude)} ${opt(record.speedMps)} ${opt(record.courseDeg)} " +
+                "${opt(record.horizontalAccuracyM)} ${opt(record.speedAccuracyMps)} " +
+                opt(record.courseAccuracyDeg)
     }
 
     /**
@@ -156,29 +173,57 @@ object RecordingFormat {
         val f = trimmed.split(' ')
         return try {
             when (f[0]) {
-                "A" -> if (f.size < 5) null else
+                "A" -> if (f.size < 5) {
+                    null
+                } else {
                     AccelRecord(f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat())
-                "G" -> if (f.size < 5) null else GyroRecord(
-                    f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(),
-                    f.getOrNull(5)?.toFloat() ?: 0f,
-                    f.getOrNull(6)?.toFloat() ?: 0f,
-                    f.getOrNull(7)?.toFloat() ?: 0f
-                )
-                "M" -> if (f.size < 5) null else MagRecord(
-                    f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(),
-                    f.getOrNull(5)?.toFloat() ?: 0f,
-                    f.getOrNull(6)?.toFloat() ?: 0f,
-                    f.getOrNull(7)?.toFloat() ?: 0f
-                )
-                "R" -> if (f.size < 5) null else RotationVectorRecord(
-                    f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(),
-                    optF(f.getOrNull(5))
-                )
-                "F" -> if (f.size < 4) null else FixRecord(
-                    f[1].toLong(), f[2].toDouble(), f[3].toDouble(),
-                    optD(f.getOrNull(4)), optF(f.getOrNull(5)), optF(f.getOrNull(6)),
-                    optF(f.getOrNull(7)), optF(f.getOrNull(8)), optF(f.getOrNull(9))
-                )
+                }
+                "G" -> if (f.size < 5) {
+                    null
+                } else {
+                    GyroRecord(
+                        f[1].toLong(),
+                        f[2].toFloat(),
+                        f[3].toFloat(),
+                        f[4].toFloat(),
+                        f.getOrNull(5)?.toFloat() ?: 0f,
+                        f.getOrNull(6)?.toFloat() ?: 0f,
+                        f.getOrNull(7)?.toFloat() ?: 0f
+                    )
+                }
+                "M" -> if (f.size < 5) {
+                    null
+                } else {
+                    MagRecord(
+                        f[1].toLong(),
+                        f[2].toFloat(),
+                        f[3].toFloat(),
+                        f[4].toFloat(),
+                        f.getOrNull(5)?.toFloat() ?: 0f,
+                        f.getOrNull(6)?.toFloat() ?: 0f,
+                        f.getOrNull(7)?.toFloat() ?: 0f
+                    )
+                }
+                "R" -> if (f.size < 5) {
+                    null
+                } else {
+                    RotationVectorRecord(
+                        f[1].toLong(),
+                        f[2].toFloat(),
+                        f[3].toFloat(),
+                        f[4].toFloat(),
+                        optF(f.getOrNull(5))
+                    )
+                }
+                "F" -> if (f.size < 4) {
+                    null
+                } else {
+                    FixRecord(
+                        f[1].toLong(), f[2].toDouble(), f[3].toDouble(),
+                        optD(f.getOrNull(4)), optF(f.getOrNull(5)), optF(f.getOrNull(6)),
+                        optF(f.getOrNull(7)), optF(f.getOrNull(8)), optF(f.getOrNull(9))
+                    )
+                }
                 else -> null
             }
         } catch (e: NumberFormatException) {
@@ -189,6 +234,7 @@ object RecordingFormat {
     fun parseAll(lines: Sequence<String>): Sequence<SensorRecord> = lines.mapNotNull(::parse)
 
     private fun opt(v: Any?): String = v?.toString() ?: ABSENT
+
     // Throwing rather than *OrNull conversions: "-" means the sensor did not report the
     // field, and that absence is information the replay acts on (a missing rotation-vector
     // scalar gets reconstructed from the unit-norm constraint). Letting a malformed token

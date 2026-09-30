@@ -19,12 +19,12 @@ import javax.inject.Singleton
 
 @Singleton
 class AuthenticationService @Inject constructor() {
-    
+
     private val _authState = MutableStateFlow(AuthState())
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
-    
+
     private val json = Json { ignoreUnknownKeys = true }
-    
+
     private fun setAuthError(errorMessage: String) {
         _authState.update { currentState ->
             currentState.copy(
@@ -35,11 +35,11 @@ class AuthenticationService @Inject constructor() {
             )
         }
     }
-    
+
     suspend fun login(serverUrl: String, username: String, password: String): Result<LoginResponse> {
         return try {
             _authState.update { it.copy(isLoading = true, error = null) }
-            
+
             // Use IO dispatcher for network operations
             withContext(Dispatchers.IO) {
                 val parsedUrl = UrlParser.parseUrl(serverUrl)
@@ -50,18 +50,20 @@ class AuthenticationService @Inject constructor() {
 
                 // Store credentials immediately so tryRefreshToken() can retry
                 // even if the network call below fails (e.g. server down at startup).
-                _authState.update { it.copy(
-                    serverUrl = parsedUrl.toUrlString(),
-                    username = username,
-                    password = password
-                ) }
+                _authState.update {
+                    it.copy(
+                        serverUrl = parsedUrl.toUrlString(),
+                        username = username,
+                        password = password
+                    )
+                }
 
                 val loginUrl = "${parsedUrl.toUrlString()}/signalk/v1/auth/login"
                 val loginRequest = LoginRequest(username, password)
-                
+
                 val url = URL(loginUrl)
                 val connection = url.openConnection() as HttpURLConnection
-                
+
                 connection.apply {
                     requestMethod = "POST"
                     setRequestProperty("Content-Type", "application/json")
@@ -70,35 +72,37 @@ class AuthenticationService @Inject constructor() {
                     connectTimeout = 10000
                     readTimeout = 10000
                 }
-                
+
                 // Send login request
                 val requestBody = json.encodeToString(loginRequest)
                 OutputStreamWriter(connection.outputStream).use { writer ->
                     writer.write(requestBody)
                     writer.flush()
                 }
-                
+
                 val responseCode = connection.responseCode
                 val responseBody = if (responseCode == 200) {
                     connection.inputStream.bufferedReader().use { it.readText() }
                 } else {
                     connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
                 }
-                
+
                 when (responseCode) {
                     200 -> {
                         val loginResponse = json.decodeFromString<LoginResponse>(responseBody)
-                        
-                        _authState.update { it.copy(
-                            isAuthenticated = true,
-                            token = loginResponse.token,
-                            username = username,
-                            password = password,  // Store temporarily for re-authentication
-                            serverUrl = parsedUrl.toUrlString(),
-                            isLoading = false,
-                            error = null
-                        ) }
-                        
+
+                        _authState.update {
+                            it.copy(
+                                isAuthenticated = true,
+                                token = loginResponse.token,
+                                username = username,
+                                password = password, // Store temporarily for re-authentication
+                                serverUrl = parsedUrl.toUrlString(),
+                                isLoading = false,
+                                error = null
+                            )
+                        }
+
                         Result.success(loginResponse)
                     }
                     401 -> {
@@ -137,31 +141,31 @@ class AuthenticationService @Inject constructor() {
             Result.failure(e)
         }
     }
-    
+
     suspend fun logout(): Result<Unit> {
         return try {
             val currentState = _authState.value
             val serverUrl = currentState.serverUrl
             val token = currentState.token
-            
+
             if (serverUrl != null && token != null) {
                 withContext(Dispatchers.IO) {
                     val logoutUrl = "${serverUrl.removeSuffix("/")}/signalk/v1/auth/logout"
                     val url = URL(logoutUrl)
                     val connection = url.openConnection() as HttpURLConnection
-                    
+
                     connection.apply {
                         requestMethod = "PUT"
                         setRequestProperty("Authorization", "Bearer $token")
                         connectTimeout = 5000
                         readTimeout = 5000
                     }
-                    
+
                     // We don't really care about the response for logout
                     connection.responseCode
                 }
             }
-            
+
             // Always clear local auth state
             _authState.update { AuthState() }
             Result.success(Unit)
@@ -171,11 +175,11 @@ class AuthenticationService @Inject constructor() {
             Result.success(Unit)
         }
     }
-    
+
     fun getAuthToken(): String? {
         return _authState.value.token
     }
-    
+
     fun hasStoredCredentials(): Boolean {
         val s = _authState.value
         return s.serverUrl != null && s.username != null && s.password != null
@@ -184,14 +188,14 @@ class AuthenticationService @Inject constructor() {
     suspend fun tryRefreshToken(): Result<String?> {
         return try {
             val currentState = _authState.value
-            
+
             // Re-authenticate with stored credentials to get a fresh token.
             // We do NOT require isAuthenticated — credentials may exist from a prior
             // login attempt that failed due to the server being temporarily unreachable.
-            if (currentState.serverUrl != null && 
+            if (currentState.serverUrl != null &&
                 currentState.username != null &&
-                currentState.password != null) {
-                
+                currentState.password != null
+            ) {
                 // Re-login using stored credentials
                 val loginResult = login(currentState.serverUrl, currentState.username, currentState.password)
                 if (loginResult.isSuccess) {
@@ -209,7 +213,7 @@ class AuthenticationService @Inject constructor() {
             Result.failure(e)
         }
     }
-    
+
     fun clearError() {
         _authState.update { it.copy(error = null) }
     }

@@ -222,7 +222,9 @@ class AttitudeEngine @Inject constructor(
         // published rate is the boat turning rather than the sensor drifting.
         val bias = filter.gyroBias
         val corrected = floatArrayOf(
-            lastGyro[0] - bias[0], lastGyro[1] - bias[1], lastGyro[2] - bias[2]
+            lastGyro[0] - bias[0],
+            lastGyro[1] - bias[1],
+            lastGyro[2] - bias[2]
         )
 
         val reference = referenceAttitude?.let {

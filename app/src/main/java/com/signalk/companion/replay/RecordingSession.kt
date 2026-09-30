@@ -81,7 +81,8 @@ class RecordingSession(private val context: Context) {
 
         return try {
             val directory = File(
-                context.getExternalFilesDir(null) ?: context.filesDir, DIRECTORY
+                context.getExternalFilesDir(null) ?: context.filesDir,
+                DIRECTORY
             )
             if (!directory.exists() && !directory.mkdirs()) {
                 throw java.io.IOException("could not create ${directory.absolutePath}")

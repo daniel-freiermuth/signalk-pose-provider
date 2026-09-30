@@ -19,7 +19,7 @@ class SensorServiceTest {
             temperature = 293.15f, // 20°C in Kelvin
             relativeHumidity = 0.6f // 60%
         )
-        
+
         assertNotNull(sensorData)
         assertEquals(1.57f, sensorData.compassHeading!!, 0.01f)
         assertEquals(101325.0f, sensorData.pressure!!, 0.1f)
@@ -30,7 +30,7 @@ class SensorServiceTest {
     @Test
     fun `sensor data with null values`() {
         val sensorData = SensorData()
-        
+
         assertNull(sensorData.compassHeading)
         assertNull(sensorData.pressure)
         assertNull(sensorData.temperature)
@@ -41,12 +41,13 @@ class SensorServiceTest {
     fun `sensor data timestamp is recent`() {
         val sensorData = SensorData()
         val currentTime = System.currentTimeMillis()
-        
+
         // Timestamp should be within reasonable range (last 1 second)
         assertTrue(
-            sensorData.timestamp > currentTime - 1000 && 
-            sensorData.timestamp <= currentTime,
-            "Timestamp should be recent")
+            sensorData.timestamp > currentTime - 1000 &&
+                sensorData.timestamp <= currentTime,
+            "Timestamp should be recent"
+        )
     }
 
     @Test
@@ -55,7 +56,7 @@ class SensorServiceTest {
             pressure = 101325.0f,
             temperature = 293.15f
         )
-        
+
         assertNotNull(sensorData.pressure)
         assertNotNull(sensorData.temperature)
         assertNull(sensorData.compassHeading)
@@ -64,16 +65,16 @@ class SensorServiceTest {
     @Test
     fun `sensor data update rate validation`() {
         // Test that update intervals map to correct values
-        val fastUpdate = 500 // 0.5 seconds  
+        val fastUpdate = 500 // 0.5 seconds
         val normalUpdate = 1000 // 1 second
         val slowUpdate = 2000 // 2 seconds
         val verySlowUpdate = 5000 // 5 seconds
-        
+
         // These should be different intervals
         assertNotEquals(fastUpdate, normalUpdate)
-        assertNotEquals(normalUpdate, slowUpdate) 
+        assertNotEquals(normalUpdate, slowUpdate)
         assertNotEquals(slowUpdate, verySlowUpdate)
-        
+
         // Verify they're in ascending order
         assertTrue(fastUpdate < normalUpdate, "Fast should be less than normal")
         assertTrue(normalUpdate < slowUpdate, "Normal should be less than slow")

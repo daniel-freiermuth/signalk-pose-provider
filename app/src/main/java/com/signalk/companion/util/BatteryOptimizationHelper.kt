@@ -7,7 +7,7 @@ import android.os.PowerManager
 import android.provider.Settings
 
 object BatteryOptimizationHelper {
-    
+
     /**
      * Check if the app is whitelisted from battery optimization
      */
@@ -15,7 +15,7 @@ object BatteryOptimizationHelper {
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
         return powerManager.isIgnoringBatteryOptimizations(context.packageName)
     }
-    
+
     /**
      * Create an intent to request battery optimization whitelist
      */
@@ -25,7 +25,7 @@ object BatteryOptimizationHelper {
             data = Uri.parse("package:${context.packageName}")
         }
     }
-    
+
     /**
      * Create an intent to open app-specific battery optimization settings
      */
@@ -35,7 +35,7 @@ object BatteryOptimizationHelper {
             data = Uri.parse("package:${context.packageName}")
         }
     }
-    
+
     /**
      * Get user-friendly instructions for ensuring background operation
      */

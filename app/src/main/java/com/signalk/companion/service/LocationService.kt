@@ -213,7 +213,10 @@ class LocationService @Inject constructor() {
                 val actualInterval = if (lastLocationTime > 0) currentTime - lastLocationTime else 0
                 lastLocationTime = currentTime
 
-                Log.d(TAG, "GNSS fix received. Actual interval: ${actualInterval}ms (configured: ${currentIntervalMs}ms)")
+                Log.d(
+                    TAG,
+                    "GNSS fix received. Actual interval: ${actualInterval}ms (configured: ${currentIntervalMs}ms)"
+                )
                 _locationUpdates.value = location.toLocationData()
             }
 

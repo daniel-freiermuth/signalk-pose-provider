@@ -2,8 +2,8 @@ package com.signalk.companion.util
 
 import android.content.Context
 import android.content.SharedPreferences
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.mockito.Mockito.*
 
@@ -18,7 +18,7 @@ class AppSettingsTest {
         mockContext = mock(Context::class.java)
         mockSharedPreferences = mock(SharedPreferences::class.java)
         mockEditor = mock(SharedPreferences.Editor::class.java)
-        
+
         `when`(mockContext.getSharedPreferences(anyString(), anyInt())).thenReturn(mockSharedPreferences)
         `when`(mockSharedPreferences.edit()).thenReturn(mockEditor)
         `when`(mockEditor.putString(anyString(), anyString())).thenReturn(mockEditor)
@@ -91,7 +91,7 @@ class AppSettingsTest {
     @Test
     fun testSetVesselId_convertsBlankToDefault() {
         `when`(mockSharedPreferences.getString(anyString(), anyString())).thenReturn("self")
-        
+
         AppSettings.setVesselId(mockContext, "")
         verify(mockEditor).putString(anyString(), eq("self"))
     }
