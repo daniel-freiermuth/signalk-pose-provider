@@ -8,7 +8,7 @@ config:
   validation: true
 
 build:
-  # Any finding outside the baseline fails the build.
+  # Any finding fails the build; there is no baseline.
   maxIssues: 0
 
 coroutines:
