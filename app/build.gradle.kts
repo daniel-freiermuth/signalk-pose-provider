@@ -4,6 +4,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -121,11 +122,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        // A deprecation warning today is a compile error on the next dependency bump.
-        allWarningsAsErrors = true
-    }
     lint {
         abortOnError = true
         warningsAsErrors = true
@@ -159,6 +155,14 @@ android {
         unitTests.all {
             it.useJUnitPlatform()
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+        // A deprecation warning today is a compile error on the next dependency bump.
+        allWarningsAsErrors = true
     }
 }
 
