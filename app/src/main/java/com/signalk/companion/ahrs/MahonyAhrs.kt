@@ -102,6 +102,9 @@ class MahonyAhrs(
          */
         const val MAX_DT_SECONDS = 0.5f
 
+        /** Below this norm a vector has no usable direction (see [normalize]). */
+        private const val MIN_VECTOR_NORM = 1e-6f
+
         private const val NS_PER_S = 1_000_000_000.0
     }
 
@@ -176,38 +179,45 @@ class MahonyAhrs(
      */
     fun onGyroscope(timestampNs: Long, wx: Float, wy: Float, wz: Float) {
         if (!wx.isFinite() || !wy.isFinite() || !wz.isFinite()) return
-
-        if (!isInitialised) {
-            lastGyroNs = timestampNs
-            isInitialised = true
-            // Seed algebraically rather than starting at identity and letting the loop walk
-            // there. Starting at identity means the estimate must cross the whole error, and
-            // near a 180° initial error the correction term — a cross product of two nearly
-            // opposed vectors — is close to zero, so the filter sits on that unstable point
-            // for minutes before falling off it. Measured: still at 0° after 90 s when truth
-            // was 180°. Seeding removes the transient outright.
-            //
-            // Only when both references are trusted. A caller that has zeroed a gain is
-            // saying that sensor is not to be believed — seeding from it anyway would smuggle
-            // a distrusted measurement in through the back door, and would do it at full
-            // weight rather than through a gain.
-            //
-            // The rate gate matters as much as the gain here: the first gyro sample can land
-            // mid-tack, where lever-arm acceleration at the phone reads a perfectly plausible
-            // |a| ≈ g while pointing nowhere near down (P7). seedFromMeasurements() checks
-            // only the magnitude, so without this the correction path would reject exactly
-            // the sample the seed accepted.
-            val bx = wx - gyroBias[0]
-            val by = wy - gyroBias[1]
-            val bz = wz - gyroBias[2]
-            if (accelGain > 0f && magGain > 0f &&
-                accelerometerGate(sqrt(bx * bx + by * by + bz * bz))
-            ) {
-                seedFromMeasurements()
-            }
-            return // First sample establishes the time base only; no dt exists yet.
+        if (isInitialised) {
+            propagate(timestampNs, wx, wy, wz)
+        } else {
+            initialise(timestampNs, wx, wy, wz)
         }
+    }
 
+    /** First gyro sample: establishes the time base only, since no dt exists yet. */
+    private fun initialise(timestampNs: Long, wx: Float, wy: Float, wz: Float) {
+        lastGyroNs = timestampNs
+        isInitialised = true
+        // Seed algebraically rather than starting at identity and letting the loop walk
+        // there. Starting at identity means the estimate must cross the whole error, and
+        // near a 180° initial error the correction term — a cross product of two nearly
+        // opposed vectors — is close to zero, so the filter sits on that unstable point
+        // for minutes before falling off it. Measured: still at 0° after 90 s when truth
+        // was 180°. Seeding removes the transient outright.
+        //
+        // Only when both references are trusted. A caller that has zeroed a gain is
+        // saying that sensor is not to be believed — seeding from it anyway would smuggle
+        // a distrusted measurement in through the back door, and would do it at full
+        // weight rather than through a gain.
+        //
+        // The rate gate matters as much as the gain here: the first gyro sample can land
+        // mid-tack, where lever-arm acceleration at the phone reads a perfectly plausible
+        // |a| ≈ g while pointing nowhere near down (P7). seedFromMeasurements() checks
+        // only the magnitude, so without this the correction path would reject exactly
+        // the sample the seed accepted.
+        val bx = wx - gyroBias[0]
+        val by = wy - gyroBias[1]
+        val bz = wz - gyroBias[2]
+        if (accelGain > 0f && magGain > 0f &&
+            accelerometerGate(sqrt(bx * bx + by * by + bz * bz))
+        ) {
+            seedFromMeasurements()
+        }
+    }
+
+    private fun propagate(timestampNs: Long, wx: Float, wy: Float, wz: Float) {
         val dtRaw = ((timestampNs - lastGyroNs) / NS_PER_S).toFloat()
 
         // Non-positive dt means duplicate or out-of-order delivery. Integrating it would run
@@ -241,7 +251,7 @@ class MahonyAhrs(
 
         // q̇ = ½ q ⊗ (0, ω), first-order integration then renormalise (§3.2).
         val q = attitude
-        val half = 0.5f * dt
+        val half = dt / 2f
         val dq = q * Quaternion(0f, ox, oy, oz)
         attitude = Quaternion(
             q.w + dq.w * half,
@@ -268,20 +278,30 @@ class MahonyAhrs(
      *   (field parallel to gravity, which would leave heading undetermined).
      */
     fun seedFromMeasurements(): Boolean {
-        if (!haveAccel || !haveMag) return false
+        val seed = triadAttitude() ?: return false
+        attitude = seed.alignedWith(attitude)
+        return true
+    }
 
+    /** The TRIAD attitude, or null when a measurement is missing, untrusted or degenerate. */
+    private fun triadAttitude(): Quaternion? {
         // Seeding from a slam or a wave impact would hand the filter a confidently wrong
         // attitude, which is worse than starting at identity and iterating: it looks settled
         // immediately. This is only the magnitude half of the correction's gate — the rate
         // half needs a gyro sample, which this has no access to, so callers that have one
         // apply accelerometerGate() themselves (see onGyroscope).
-        if (abs(norm(accel) - GRAVITY) > accelTolerance) return false
+        if (!haveAccel || !haveMag || abs(norm(accel) - GRAVITY) > accelTolerance) return null
 
-        val up = normalize(accel) ?: return false
-        val field = normalize(mag) ?: return false
+        val up = normalize(accel)
+        val field = normalize(mag)
+        // Body-frame image of world West; degenerate if field ∥ gravity.
+        val west = if (up != null && field != null) normalize(cross(up, field)) else null
+        return if (up != null && west != null) triad(up, west) else null
+    }
 
-        // Body-frame images of world West and world South.
-        val west = normalize(cross(up, field)) ?: return false // degenerate if field ∥ gravity
+    /** `R_W_V` from body-frame images of world Up and world West, as a quaternion. */
+    private fun triad(up: FloatArray, west: FloatArray): Quaternion {
+        // Body-frame image of world South.
         val south = cross(up, west)
 
         // R_W_V = M_W · M_Bᵀ, where each M holds [up, west, south] as columns. In ENU those
@@ -292,8 +312,7 @@ class MahonyAhrs(
             -south[0], -south[1], -south[2],
             up[0], up[1], up[2]
         )
-        attitude = Quaternion.fromRotationMatrix(r).alignedWith(attitude)
-        return true
+        return Quaternion.fromRotationMatrix(r)
     }
 
     /** Reset to a known attitude, e.g. when restarting after a long gap. */
@@ -345,7 +364,7 @@ class MahonyAhrs(
 
         if (haveMag && magGain > 0f) {
             val magnitude = norm(mag)
-            if (magnitude > 1e-6f) {
+            if (magnitude > MIN_VECTOR_NORM) {
                 val m = floatArrayOf(mag[0] / magnitude, mag[1] / magnitude, mag[2] / magnitude)
                 // Reference direction: take the measured field into the world frame with the
                 // current estimate, then flatten its horizontal part onto +Y (North). ENU —
@@ -394,7 +413,7 @@ class MahonyAhrs(
     /** Unit vector, or null when the input is degenerate — never a NaN-filled array. */
     private fun normalize(v: FloatArray): FloatArray? {
         val n = norm(v)
-        if (n < 1e-6f || !n.isFinite()) return null
+        if (n < MIN_VECTOR_NORM || !n.isFinite()) return null
         return floatArrayOf(v[0] / n, v[1] / n, v[2] / n)
     }
 
