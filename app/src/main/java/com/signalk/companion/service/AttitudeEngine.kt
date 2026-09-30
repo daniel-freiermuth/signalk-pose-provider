@@ -13,6 +13,7 @@ import com.signalk.companion.replay.RecordingSession
 import com.signalk.companion.replay.RotationVectorRecord
 import com.signalk.companion.replay.SensorRecord
 import com.signalk.companion.util.DeviceCalibration
+import com.signalk.companion.util.Matrix3
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -136,17 +137,28 @@ class AttitudeEngine @Inject constructor(
 
         val raw = RawSensorSource(context)
         availability = raw.availability
-        if (!raw.availability.isUsable) {
+        val started = if (raw.availability.isUsable) {
+            startSource(raw, samplingPeriodUs, record)
+        } else {
             Log.e(TAG, "Cannot start attitude engine: ${raw.availability}")
-            return false
+            false
         }
 
+        if (started) {
+            source = raw
+            Log.i(TAG, "Attitude engine started (recording=$record, hardIron=$hardIron)")
+        }
+        return started
+    }
+
+    /** Reset the filter and sensor-thread state, then start [raw] feeding [consume]. */
+    private fun startSource(raw: RawSensorSource, samplingPeriodUs: Int, record: Boolean): Boolean {
         filter.reset(clearBias = true)
         lastEmitNs = 0L
         referenceAttitude = null
         clockNoted = false
 
-        val started = raw.start(samplingPeriodUs) { sensorRecord ->
+        return raw.start(samplingPeriodUs) { sensorRecord ->
             if (!clockNoted) {
                 raw.noteClockBase(sensorRecord.timestampNs)
                 clockNoted = true
@@ -154,11 +166,6 @@ class AttitudeEngine @Inject constructor(
             if (record) recordingSession.write(sensorRecord)
             consume(sensorRecord)
         }
-        if (!started) return false
-
-        source = raw
-        Log.i(TAG, "Attitude engine started (recording=$record, hardIron=$hardIron)")
-        return true
     }
 
     fun stop() {
@@ -215,7 +222,7 @@ class AttitudeEngine @Inject constructor(
         lastEmitNs = timestampNs
 
         val mount = mountRotation
-        val vehicle = DeviceCalibration.multiply3x3(filter.attitude.toRotationMatrix(), mount)
+        val vehicle = Matrix3.multiply(filter.attitude.toRotationMatrix(), mount)
         val angles = DeviceCalibration.extractNauticalAngles(vehicle)
 
         // Rate of turn uses the bias-corrected rate: the estimator's whole job is that the
@@ -229,7 +236,7 @@ class AttitudeEngine @Inject constructor(
 
         val reference = referenceAttitude?.let {
             DeviceCalibration.extractNauticalAngles(
-                DeviceCalibration.multiply3x3(it.toRotationMatrix(), mount)
+                Matrix3.multiply(it.toRotationMatrix(), mount)
             ).headingRad
         }
 

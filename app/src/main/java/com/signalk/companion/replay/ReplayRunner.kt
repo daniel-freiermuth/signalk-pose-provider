@@ -3,6 +3,7 @@ package com.signalk.companion.replay
 import com.signalk.companion.ahrs.MahonyAhrs
 import com.signalk.companion.ahrs.Quaternion
 import com.signalk.companion.util.DeviceCalibration
+import com.signalk.companion.util.Matrix3
 
 /**
  * How a replay should treat the magnetometer's hard-iron bias.
@@ -154,7 +155,7 @@ class ReplayRunner(
 
     private fun sample(timestampNs: Long): AttitudeSample {
         val deviceAttitude = filter.attitude
-        val vehicle = DeviceCalibration.multiply3x3(deviceAttitude.toRotationMatrix(), mountRotation)
+        val vehicle = Matrix3.multiply(deviceAttitude.toRotationMatrix(), mountRotation)
         val angles = DeviceCalibration.extractNauticalAngles(vehicle)
         return AttitudeSample(
             timestampNs = timestampNs,

@@ -1,5 +1,6 @@
 package com.signalk.companion.ahrs
 
+import com.signalk.companion.util.at
 import kotlin.math.sqrt
 
 /**
@@ -20,6 +21,15 @@ data class Quaternion(val w: Float, val x: Float, val y: Float, val z: Float) {
     companion object {
         val IDENTITY = Quaternion(1f, 0f, 0f, 0f)
 
+        /** Below this norm a quaternion is not a rotation; see [normalized]. */
+        private const val MIN_NORM = 1e-12f
+
+        /**
+         * Shepperd's `s = 2·√(1 ± …)` equals 4× the pivot component; this factor recovers
+         * the pivot from `s`.
+         */
+        private const val PIVOT_PER_S = 0.25f
+
         /**
          * Quaternion from a row-major rotation matrix (Shepperd's method).
          *
@@ -28,23 +38,32 @@ data class Quaternion(val w: Float, val x: Float, val y: Float, val z: Float) {
          * the orientations a boat reaches by turning round.
          */
         fun fromRotationMatrix(r: FloatArray): Quaternion {
-            val trace = r[0] + r[4] + r[8]
+            val m00 = r.at(0, 0)
+            val m01 = r.at(0, 1)
+            val m02 = r.at(0, 2)
+            val m10 = r.at(1, 0)
+            val m11 = r.at(1, 1)
+            val m12 = r.at(1, 2)
+            val m20 = r.at(2, 0)
+            val m21 = r.at(2, 1)
+            val m22 = r.at(2, 2)
+            val trace = m00 + m11 + m22
             return when {
                 trace > 0f -> {
                     val s = sqrt(trace + 1f) * 2f
-                    Quaternion(0.25f * s, (r[7] - r[5]) / s, (r[2] - r[6]) / s, (r[3] - r[1]) / s)
+                    Quaternion(PIVOT_PER_S * s, (m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s)
                 }
-                r[0] > r[4] && r[0] > r[8] -> {
-                    val s = sqrt(1f + r[0] - r[4] - r[8]) * 2f
-                    Quaternion((r[7] - r[5]) / s, 0.25f * s, (r[1] + r[3]) / s, (r[2] + r[6]) / s)
+                m00 > m11 && m00 > m22 -> {
+                    val s = sqrt(1f + m00 - m11 - m22) * 2f
+                    Quaternion((m21 - m12) / s, PIVOT_PER_S * s, (m01 + m10) / s, (m02 + m20) / s)
                 }
-                r[4] > r[8] -> {
-                    val s = sqrt(1f + r[4] - r[0] - r[8]) * 2f
-                    Quaternion((r[2] - r[6]) / s, (r[1] + r[3]) / s, 0.25f * s, (r[5] + r[7]) / s)
+                m11 > m22 -> {
+                    val s = sqrt(1f + m11 - m00 - m22) * 2f
+                    Quaternion((m02 - m20) / s, (m01 + m10) / s, PIVOT_PER_S * s, (m12 + m21) / s)
                 }
                 else -> {
-                    val s = sqrt(1f + r[8] - r[0] - r[4]) * 2f
-                    Quaternion((r[3] - r[1]) / s, (r[2] + r[6]) / s, (r[5] + r[7]) / s, 0.25f * s)
+                    val s = sqrt(1f + m22 - m00 - m11) * 2f
+                    Quaternion((m10 - m01) / s, (m02 + m20) / s, (m12 + m21) / s, PIVOT_PER_S * s)
                 }
             }.normalized()
         }
@@ -64,11 +83,11 @@ data class Quaternion(val w: Float, val x: Float, val y: Float, val z: Float) {
     fun normalized(): Quaternion {
         val n = norm()
         // A zero-norm quaternion is not a rotation; fall back rather than emit NaN.
-        if (n < 1e-12f || !n.isFinite()) return IDENTITY
+        if (n < MIN_NORM || !n.isFinite()) return IDENTITY
         return Quaternion(w / n, x / n, y / n, z / n)
     }
 
-    fun conjugate(): Quaternion = Quaternion(w, -x, -y, -z)
+    private fun conjugate(): Quaternion = Quaternion(w, -x, -y, -z)
 
     /**
      * The same rotation, sign-aligned to [previous] so a sequence stays continuous.
