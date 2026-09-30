@@ -3,8 +3,8 @@ package com.signalk.companion.service
 import android.content.Context
 import android.util.Log
 import com.signalk.companion.data.model.*
-import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.UrlParser
+import com.signalk.companion.util.VesselSettings
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -370,7 +370,7 @@ class SignalKTransmitter @Inject constructor(
             values = values
         )
 
-        val vesselContext = context?.let { AppSettings.getSignalKContext(it) } ?: "vessels.self"
+        val vesselContext = context?.let { VesselSettings.getSignalKContext(it) } ?: "vessels.self"
 
         return SignalKMessage(
             context = vesselContext,
@@ -492,7 +492,7 @@ class SignalKTransmitter @Inject constructor(
             )
         }
 
-        val vesselContext = context?.let { AppSettings.getSignalKContext(it) } ?: "vessels.self"
+        val vesselContext = context?.let { VesselSettings.getSignalKContext(it) } ?: "vessels.self"
 
         if (values.isEmpty()) {
             return SignalKMessage(

@@ -17,9 +17,13 @@ import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SensorService
 import com.signalk.companion.service.SignalKStreamingService
 import com.signalk.companion.service.SignalKTransmitter
-import com.signalk.companion.util.AppSettings
+import com.signalk.companion.util.CalibrationSettings
+import com.signalk.companion.util.ConnectionSettings
 import com.signalk.companion.util.DeviceCalibration
+import com.signalk.companion.util.StreamingSettings
+import com.signalk.companion.util.TransmissionSettings
 import com.signalk.companion.util.UrlParser
+import com.signalk.companion.util.VesselSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -236,7 +240,7 @@ class MainViewModel @Inject constructor(
         _uiState.update {
             it.copy(calibrationAlphaDeg = alphaDeg, calibrationBetaDeg = betaDeg, calibrationGammaDeg = gammaDeg)
         }
-        AppSettings.setCalibrationAngles(applicationContext, alphaDeg, betaDeg, gammaDeg)
+        CalibrationSettings.setCalibrationAngles(applicationContext, alphaDeg, betaDeg, gammaDeg)
         sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
         streamingService?.updateCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
     }
@@ -419,7 +423,7 @@ class MainViewModel @Inject constructor(
     fun updateSendLocation(enabled: Boolean) {
         _uiState.update { it.copy(sendLocation = enabled) }
         // Save to shared preferences
-        AppSettings.setSendLocation(applicationContext, enabled)
+        TransmissionSettings.setSendLocation(applicationContext, enabled)
         // Update running service if active
         sendConfigUpdateToService()
     }
@@ -427,7 +431,7 @@ class MainViewModel @Inject constructor(
     fun updateSendHeading(enabled: Boolean) {
         _uiState.update { it.copy(sendHeading = enabled) }
         // Save to shared preferences
-        AppSettings.setSendHeading(applicationContext, enabled)
+        TransmissionSettings.setSendHeading(applicationContext, enabled)
         // Update running service if active
         sendConfigUpdateToService()
     }
@@ -435,20 +439,20 @@ class MainViewModel @Inject constructor(
     fun updateSendPressure(enabled: Boolean) {
         _uiState.update { it.copy(sendPressure = enabled) }
         // Save to shared preferences
-        AppSettings.setSendPressure(applicationContext, enabled)
+        TransmissionSettings.setSendPressure(applicationContext, enabled)
         // Update running service if active
         sendConfigUpdateToService()
     }
 
     fun updateLocationIntervalMs(intervalMs: Long) {
         _uiState.update { it.copy(locationIntervalMs = intervalMs) }
-        AppSettings.setLocationIntervalMs(applicationContext, intervalMs)
+        StreamingSettings.setLocationIntervalMs(applicationContext, intervalMs)
         sendConfigUpdateToService()
     }
 
     fun updateSensorIntervalMs(intervalMs: Long) {
         _uiState.update { it.copy(sensorIntervalMs = intervalMs) }
-        AppSettings.setSensorIntervalMs(applicationContext, intervalMs)
+        StreamingSettings.setSensorIntervalMs(applicationContext, intervalMs)
         sendConfigUpdateToService()
     }
 
@@ -474,20 +478,20 @@ class MainViewModel @Inject constructor(
      */
     fun initializeSettings() {
         // Load settings from shared preferences
-        val savedServerUrl = AppSettings.getServerUrl(applicationContext)
+        val savedServerUrl = ConnectionSettings.getServerUrl(applicationContext)
         val savedParsedUrl = UrlParser.parseUrl(savedServerUrl)
-        val savedVesselId = AppSettings.getVesselId(applicationContext)
-        val savedSendLocation = AppSettings.getSendLocation(applicationContext)
-        val savedSendHeading = AppSettings.getSendHeading(applicationContext)
-        val savedSendPressure = AppSettings.getSendPressure(applicationContext)
-        val savedLocationIntervalMs = AppSettings.getLocationIntervalMs(applicationContext)
-        val savedSensorIntervalMs = AppSettings.getSensorIntervalMs(applicationContext)
-        val savedUsername = AppSettings.getUsername(applicationContext)
+        val savedVesselId = VesselSettings.getVesselId(applicationContext)
+        val savedSendLocation = TransmissionSettings.getSendLocation(applicationContext)
+        val savedSendHeading = TransmissionSettings.getSendHeading(applicationContext)
+        val savedSendPressure = TransmissionSettings.getSendPressure(applicationContext)
+        val savedLocationIntervalMs = StreamingSettings.getLocationIntervalMs(applicationContext)
+        val savedSensorIntervalMs = StreamingSettings.getSensorIntervalMs(applicationContext)
+        val savedUsername = ConnectionSettings.getUsername(applicationContext)
 
         // Load calibration angles
-        val savedAlpha = AppSettings.getCalibrationAlphaDeg(applicationContext)
-        val savedBeta = AppSettings.getCalibrationBetaDeg(applicationContext)
-        val savedGamma = AppSettings.getCalibrationGammaDeg(applicationContext)
+        val savedAlpha = CalibrationSettings.getCalibrationAlphaDeg(applicationContext)
+        val savedBeta = CalibrationSettings.getCalibrationBetaDeg(applicationContext)
+        val savedGamma = CalibrationSettings.getCalibrationGammaDeg(applicationContext)
 
         // Apply calibration to sensor service
         sensorService.setCalibrationAngles(savedAlpha, savedBeta, savedGamma)
@@ -511,10 +515,10 @@ class MainViewModel @Inject constructor(
 
         // Auto-login if credentials are stored (only on first initialization)
         if (!settingsInitialized &&
-            AppSettings.hasCredentials(applicationContext) &&
+            ConnectionSettings.hasCredentials(applicationContext) &&
             savedServerUrl.isNotBlank()
         ) {
-            val savedPassword = AppSettings.getPassword(applicationContext)
+            val savedPassword = ConnectionSettings.getPassword(applicationContext)
             viewModelScope.launch {
                 authenticationService.login(savedServerUrl, savedUsername, savedPassword)
             }
@@ -527,7 +531,10 @@ class MainViewModel @Inject constructor(
         val currentState = _uiState.value
         if (currentState.parsedUrl == null) {
             _uiState.update {
-                it.copy(error = "Invalid server URL: ${currentState.serverUrl}. Please use http://, https://, ws://, or wss:// protocol.")
+                it.copy(
+                    error = "Invalid server URL: ${currentState.serverUrl}. " +
+                        "Please use http://, https://, ws://, or wss:// protocol."
+                )
             }
             return
         }

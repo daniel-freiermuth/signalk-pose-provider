@@ -17,8 +17,11 @@ import com.signalk.companion.R
 import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.replay.FixRecord
 import com.signalk.companion.replay.RecordingSession
-import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.BatteryOptimizationHelper
+import com.signalk.companion.util.CalibrationSettings
+import com.signalk.companion.util.ConnectionSettings
+import com.signalk.companion.util.StreamingSettings
+import com.signalk.companion.util.TransmissionSettings
 import com.signalk.companion.util.UrlParser
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -201,23 +204,23 @@ class SignalKStreamingService : Service() {
         if (intent == null) {
             // OS killed and restarted the service (START_STICKY). Resume streaming only if
             // we were actively streaming when killed; otherwise just stop cleanly.
-            if (AppSettings.getWasStreaming(this)) {
+            if (StreamingSettings.getWasStreaming(this)) {
                 Log.w(TAG, "Service restarted by OS after kill — resuming streaming from saved config")
-                val serverUrl = AppSettings.getServerUrl(this)
+                val serverUrl = ConnectionSettings.getServerUrl(this)
                 val parsedUrl = UrlParser.parseUrl(serverUrl)
                 if (parsedUrl != null) {
                     startStreaming(
                         parsedUrl = parsedUrl,
-                        locationRate = AppSettings.getLocationIntervalMs(this),
-                        sensorRate = AppSettings.getSensorIntervalMs(this).toInt(),
-                        sendLocation = AppSettings.getSendLocation(this),
-                        sendHeading = AppSettings.getSendHeading(this),
-                        sendPressure = AppSettings.getSendPressure(this),
+                        locationRate = StreamingSettings.getLocationIntervalMs(this),
+                        sensorRate = StreamingSettings.getSensorIntervalMs(this).toInt(),
+                        sendLocation = TransmissionSettings.getSendLocation(this),
+                        sendHeading = TransmissionSettings.getSendHeading(this),
+                        sendPressure = TransmissionSettings.getSendPressure(this),
                         startId = startId
                     )
                 } else {
                     Log.e(TAG, "Cannot resume: saved server URL '$serverUrl' is invalid — stopping")
-                    AppSettings.setWasStreaming(this, false)
+                    StreamingSettings.setWasStreaming(this, false)
                     stopSelf()
                 }
             } else {
@@ -287,7 +290,7 @@ class SignalKStreamingService : Service() {
         }
 
         // START_STICKY: the OS will restart this service after an unexpected kill.
-        // If it was actively streaming (tracked via AppSettings.wasStreaming), the null-intent
+        // If it was actively streaming (tracked via StreamingSettings.getWasStreaming), the null-intent
         // branch above will resume it. If not streaming, it will call stopSelf() immediately.
         return START_STICKY
     }
@@ -314,7 +317,11 @@ class SignalKStreamingService : Service() {
         this.sendHeading = sendHeading
         this.sendPressure = sendPressure
 
-        Log.d(TAG, "Starting SignalK streaming to ${parsedUrl.toUrlString()} (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")
+        Log.d(
+            TAG,
+            "Starting SignalK streaming to ${parsedUrl.toUrlString()} " +
+                "(location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)"
+        )
 
         // Check battery optimization status
         val batteryOptimized = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)
@@ -372,7 +379,7 @@ class SignalKStreamingService : Service() {
                 startTransmissionJob()
 
                 // Persist streaming state so the service can resume after an OS kill
-                AppSettings.setWasStreaming(this@SignalKStreamingService, true)
+                StreamingSettings.setWasStreaming(this@SignalKStreamingService, true)
 
                 // Start foreground service with notification
                 val notification = createNotification("Streaming to SignalK server")
@@ -397,7 +404,7 @@ class SignalKStreamingService : Service() {
                 // that reports IDLE still transmitting, and leave wasStreaming set for the
                 // next OS restart to resume a session that never actually started. Undo the
                 // whole partial start, not the flag that describes it.
-                AppSettings.setWasStreaming(this@SignalKStreamingService, false)
+                StreamingSettings.setWasStreaming(this@SignalKStreamingService, false)
                 transmissionJob?.cancel()
                 transmissionJob = null
                 try {
@@ -433,7 +440,7 @@ class SignalKStreamingService : Service() {
 
         // Clear the persistence flag before anything else so an unexpected death
         // during the shutdown sequence doesn't cause a spurious resume.
-        AppSettings.setWasStreaming(this, false)
+        StreamingSettings.setWasStreaming(this, false)
 
         // Cancel data forwarding immediately — no more transmissions once stopping
         transmissionJob?.cancel()
@@ -510,9 +517,9 @@ class SignalKStreamingService : Service() {
         // separate from SensorService's — without this it would start at identity and every
         // M1 boat-frame reading would be reported in raw device coordinates instead.
         attitudeEngine.setCalibrationAngles(
-            AppSettings.getCalibrationAlphaDeg(this),
-            AppSettings.getCalibrationBetaDeg(this),
-            AppSettings.getCalibrationGammaDeg(this)
+            CalibrationSettings.getCalibrationAlphaDeg(this),
+            CalibrationSettings.getCalibrationBetaDeg(this),
+            CalibrationSettings.getCalibrationGammaDeg(this)
         )
         if (!attitudeEngine.start(record = true)) {
             Log.e(TAG, "Attitude engine refused to start - closing the empty recording")
@@ -637,7 +644,10 @@ class SignalKStreamingService : Service() {
             return
         }
 
-        Log.d(TAG, "Updating streaming configuration (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")
+        Log.d(
+            TAG,
+            "Updating streaming configuration (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)"
+        )
 
         serviceScope.launch {
             // Update stored configuration
