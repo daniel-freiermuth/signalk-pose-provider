@@ -17,6 +17,15 @@ coroutines:
     # coroutine running — the failure mode `catch (e: Exception)` hides.
     active: true
 
+complexity:
+  TooManyFunctions:
+    # Count the public surface only. Private helpers are how LongMethod and
+    # CyclomaticComplexMethod findings get fixed; counting them too would make those
+    # rules and this one push in opposite directions. Overrides are dictated by the
+    # supertype (Service, SensorEventListener, ...).
+    ignorePrivate: true
+    ignoreOverridden: true
+
 exceptions:
   TooGenericExceptionCaught:
     active: true
