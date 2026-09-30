@@ -70,7 +70,10 @@ class RawSensorSource(private val context: Context) {
         /** 200 Hz. Above the wave and rig band with margin; see P3. */
         const val DEFAULT_SAMPLING_PERIOD_US = 5_000
 
-        /** 25 Hz for the comparison trace — enough to resolve boat motion, see [start]. */
+        /**
+         * 25 Hz for the comparison trace — enough to resolve boat motion, see
+         * [registerReference].
+         */
         const val REFERENCE_SAMPLING_PERIOD_US = 40_000
 
         /**
@@ -79,6 +82,15 @@ class RawSensorSource(private val context: Context) {
          * window, which is the one thing a live instrument cannot trade away.
          */
         private const val NO_BATCHING_US = 0
+
+        private const val MICROS_PER_SECOND = 1_000_000
+
+        // Positions in SensorEvent.values past the x/y/z triple: the HAL's bias estimate for
+        // the uncalibrated types, the optional scalar component for the rotation vector.
+        private const val ESTIMATE_X = 3
+        private const val ESTIMATE_Y = 4
+        private const val ESTIMATE_Z = 5
+        private const val ROTATION_VECTOR_W = 3
     }
 
     private val sensorManager =
@@ -142,7 +154,8 @@ class RawSensorSource(private val context: Context) {
         if (!availability.isFullyRaw) {
             Log.w(
                 TAG,
-                "Falling back to calibrated sensors (gyroUncal=${availability.gyroscopeUncalibrated}, " +
+                "Falling back to calibrated sensors " +
+                    "(gyroUncal=${availability.gyroscopeUncalibrated}, " +
                     "magUncal=${availability.magnetometerUncalibrated}) - recordings will note this"
             )
         }
@@ -167,6 +180,27 @@ class RawSensorSource(private val context: Context) {
         }
         listener = eventListener
 
+        val started = registerRequired(eventListener, samplingPeriodUs, handler)
+        if (started) {
+            if (recordReferenceAttitude) registerReference(eventListener, handler)
+            clockOffsetNs = 0L
+            Log.i(TAG, "Raw sensor ingestion started at ${MICROS_PER_SECOND / samplingPeriodUs} Hz")
+        } else {
+            // registerListener returning false means that sensor did not actually subscribe -
+            // reporting success here would let a recording start believing it has a required
+            // stream that never delivers a single sample.
+            Log.e(TAG, "A required sensor failed to register - aborting start")
+            shutdown(eventListener, handlerThread)
+        }
+        return started
+    }
+
+    /** Register the filter's three inputs; true only if every one actually subscribed. */
+    private fun registerRequired(
+        eventListener: SensorEventListener,
+        samplingPeriodUs: Int,
+        handler: Handler
+    ): Boolean {
         val required = listOfNotNull(accelerometer, gyroscope, magnetometer)
         val registered = required.map { sensor ->
             val ok = sensorManager.registerListener(
@@ -179,31 +213,22 @@ class RawSensorSource(private val context: Context) {
             Log.d(TAG, "Registered ${sensor.stringType} at ${samplingPeriodUs}us: $ok")
             ok
         }
-        if (!registered.all { it }) {
-            // registerListener returning false means that sensor did not actually subscribe -
-            // reporting success here would let a recording start believing it has a required
-            // stream that never delivers a single sample.
-            Log.e(TAG, "A required sensor failed to register - aborting start")
-            shutdown(eventListener, handlerThread)
-            return false
-        }
+        return registered.all { it }
+    }
 
-        // The reference trace is registered at a lower rate on purpose. It is never
-        // integrated, only compared, so it needs to resolve boat motion rather than the
-        // filter's step size — and at 200 Hz it would be a third of the recording's bulk
-        // for no extra answer.
-        if (recordReferenceAttitude) {
-            rotationVector?.let { sensor ->
-                val ok = sensorManager.registerListener(
-                    eventListener, sensor, REFERENCE_SAMPLING_PERIOD_US, NO_BATCHING_US, handler
-                )
-                Log.d(TAG, "Registered ${sensor.stringType} (comparison only): $ok")
-            } ?: Log.d(TAG, "No TYPE_ROTATION_VECTOR - recording without a comparison trace")
-        }
-
-        clockOffsetNs = 0L
-        Log.i(TAG, "Raw sensor ingestion started at ${1_000_000 / samplingPeriodUs} Hz")
-        return true
+    /**
+     * The reference trace is registered at a lower rate on purpose. It is never
+     * integrated, only compared, so it needs to resolve boat motion rather than the
+     * filter's step size — and at 200 Hz it would be a third of the recording's bulk
+     * for no extra answer.
+     */
+    private fun registerReference(eventListener: SensorEventListener, handler: Handler) {
+        rotationVector?.let { sensor ->
+            val ok = sensorManager.registerListener(
+                eventListener, sensor, REFERENCE_SAMPLING_PERIOD_US, NO_BATCHING_US, handler
+            )
+            Log.d(TAG, "Registered ${sensor.stringType} (comparison only): $ok")
+        } ?: Log.d(TAG, "No TYPE_ROTATION_VECTOR - recording without a comparison trace")
     }
 
     fun stop() {
@@ -250,14 +275,30 @@ class RawSensorSource(private val context: Context) {
         // values[0..2] are the rate WITHOUT drift compensation; values[3..5] are the HAL's
         // drift estimate. Both are recorded (§4.2).
         Sensor.TYPE_GYROSCOPE_UNCALIBRATED ->
-            GyroRecord(timestamp, values[0], values[1], values[2], values[3], values[4], values[5])
+            GyroRecord(
+                timestamp,
+                values[0],
+                values[1],
+                values[2],
+                values[ESTIMATE_X],
+                values[ESTIMATE_Y],
+                values[ESTIMATE_Z]
+            )
         Sensor.TYPE_GYROSCOPE ->
             GyroRecord(timestamp, values[0], values[1], values[2])
 
         // values[0..2] are the field WITHOUT hard-iron correction; values[3..5] are the
         // HAL's bias estimate. Both are recorded so the M2 boundary can be crossed (§4.3).
         Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED ->
-            MagRecord(timestamp, values[0], values[1], values[2], values[3], values[4], values[5])
+            MagRecord(
+                timestamp,
+                values[0],
+                values[1],
+                values[2],
+                values[ESTIMATE_X],
+                values[ESTIMATE_Y],
+                values[ESTIMATE_Z]
+            )
         Sensor.TYPE_MAGNETIC_FIELD ->
             MagRecord(timestamp, values[0], values[1], values[2])
 
@@ -268,7 +309,7 @@ class RawSensorSource(private val context: Context) {
             values[0],
             values[1],
             values[2],
-            values.getOrNull(3)
+            values.getOrNull(ROTATION_VECTOR_W)
         )
 
         else -> null

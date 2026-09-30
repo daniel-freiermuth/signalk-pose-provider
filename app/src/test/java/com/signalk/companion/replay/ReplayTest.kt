@@ -2,7 +2,10 @@ package com.signalk.companion.replay
 
 import com.signalk.companion.ahrs.MahonyAhrs
 import com.signalk.companion.util.DeviceCalibration
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.abs
 import kotlin.math.cos

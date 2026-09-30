@@ -3,6 +3,7 @@ package com.signalk.companion.util
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
 import java.net.URI
+import java.net.URISyntaxException
 
 /**
  * Utility class for parsing SignalK server URLs.
@@ -24,15 +25,22 @@ object UrlParser {
         fun toUrlString(): String {
             val protocol = if (isHttps) "https" else "http"
             val portPart = when {
-                port == 80 && !isHttps -> ""
-                port == 443 && isHttps -> ""
+                port == HTTP_DEFAULT_PORT && !isHttps -> ""
+                port == HTTPS_DEFAULT_PORT && isHttps -> ""
                 else -> ":$port"
             }
             return "$protocol://$hostname$portPart"
         }
     }
 
+    private const val HTTP_DEFAULT_PORT = 80
+    private const val HTTPS_DEFAULT_PORT = 443
+
     private val ALLOWED_SCHEMES = setOf("http", "https", "ws", "wss")
+    private val SECURE_SCHEMES = setOf("https", "wss")
+
+    /** Matches a hierarchical scheme prefix such as `http://` at the start of the input. */
+    private val SCHEME_PREFIX = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*")
 
     /**
      * Parses a URL string and extracts hostname, port, and protocol information.
@@ -54,50 +62,46 @@ object UrlParser {
      * @return ParsedUrl containing hostname, port, and HTTPS flag, or null if parsing fails
      */
     fun parseUrl(url: String): ParsedUrl? {
-        return try {
-            // Check if URL already has a scheme (must have "://" to be a hierarchical scheme)
-            // Using just ":" would incorrectly treat "localhost:3000" as having scheme "localhost"
-            val hasScheme = url.matches(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))
-            val urlWithScheme = if (hasScheme) url else "http://$url"
+        // Check if URL already has a scheme (must have "://" to be a hierarchical scheme)
+        // Using just ":" would incorrectly treat "localhost:3000" as having scheme "localhost"
+        val urlWithScheme = if (url.matches(SCHEME_PREFIX)) url else "http://$url"
+        val uri = parseUri(urlWithScheme) ?: return null
 
-            // Parse using standard URI parser
-            val uri = URI(urlWithScheme)
+        val scheme = uri.scheme?.lowercase()
+        val hostname = uri.host
+        // Reject opaque URIs (like mailto:, urn:, tel:, etc.) - we only accept hierarchical
+        // URIs (with ://) - as well as unsupported schemes and URIs without a host.
+        return if (uri.isOpaque || scheme !in ALLOWED_SCHEMES || hostname.isNullOrEmpty()) {
+            null
+        } else {
+            toParsedUrl(uri, hostname, isHttps = scheme in SECURE_SCHEMES)
+        }
+    }
 
-            // Reject opaque URIs (like mailto:, urn:, tel:, etc.)
-            // We only accept hierarchical URIs (with ://)
-            if (uri.isOpaque) {
-                return null
-            }
-
-            // Validate scheme
-            val scheme = uri.scheme?.lowercase() ?: return null
-            if (scheme !in ALLOWED_SCHEMES) {
-                return null
-            }
-
-            // Extract hostname
-            val hostname = uri.host ?: return null
-            if (hostname.isEmpty()) {
-                return null
-            }
-
-            // Determine if secure
-            val isHttps = scheme in setOf("https", "wss")
-
-            // Extract port or use default
-            val port = if (uri.port != -1) {
-                uri.port
-            } else {
-                if (isHttps) 443 else 80
-            }
-
-            // Check if URL contains a path (will be ignored for SignalK connection)
-            val path = uri.path ?: ""
-            val hasPath = path.isNotEmpty() && path != "/"
-
-            ParsedUrl(hostname, port, isHttps, hasPath)
-        } catch (e: Exception) {
+    /**
+     * Parse with the standard URI parser; null when the input is not a syntactically valid
+     * URI. Malformed user input is an expected outcome here, and [parseUrl]'s contract is to
+     * answer it with null, so the exception carries nothing the caller needs.
+     */
+    private fun parseUri(urlWithScheme: String): URI? =
+        try {
+            URI(urlWithScheme)
+        } catch (expected: URISyntaxException) {
             null
         }
+
+    private fun toParsedUrl(uri: URI, hostname: String, isHttps: Boolean): ParsedUrl {
+        // Extract port or use default
+        val port = when {
+            uri.port != -1 -> uri.port
+            isHttps -> HTTPS_DEFAULT_PORT
+            else -> HTTP_DEFAULT_PORT
+        }
+
+        // Check if URL contains a path (will be ignored for SignalK connection)
+        val path = uri.path.orEmpty()
+        val hasPath = path.isNotEmpty() && path != "/"
+
+        return ParsedUrl(hostname, port, isHttps, hasPath)
     }
 }

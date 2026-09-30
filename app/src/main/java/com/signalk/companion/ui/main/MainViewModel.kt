@@ -1,5 +1,6 @@
 package com.signalk.companion.ui.main
 
+import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -19,7 +20,6 @@ import com.signalk.companion.service.SignalKStreamingService
 import com.signalk.companion.service.SignalKTransmitter
 import com.signalk.companion.util.CalibrationSettings
 import com.signalk.companion.util.ConnectionSettings
-import com.signalk.companion.util.DeviceCalibration
 import com.signalk.companion.util.StreamingSettings
 import com.signalk.companion.util.TransmissionSettings
 import com.signalk.companion.util.UrlParser
@@ -29,9 +29,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 data class MainUiState(
@@ -67,6 +69,12 @@ data class MainUiState(
     val attitude: AttitudeEngine.State? = null
 )
 
+// LongParameterList: the constructor is the Hilt injection point for the main screen. Each
+// parameter is a distinct app-scoped singleton the screen observes or drives; bundling some of
+// them into a holder only to lower the count would add an indirection that means nothing.
+// Placed on the class because ktlint requires constructor annotations with arguments to sit
+// on separate lines; no function in the class comes close to the limit.
+@Suppress("LongParameterList")
 @HiltViewModel
 class MainViewModel @Inject constructor(
     @ApplicationContext private val applicationContext: Context,
@@ -78,6 +86,10 @@ class MainViewModel @Inject constructor(
     private val attitudeEngine: AttitudeEngine
 ) : ViewModel() {
 
+    // A reference to the bound local service, not a leaked Context: it is set only between
+    // onServiceConnected and onServiceDisconnected/unbindService (cleanupServiceBinding, also
+    // run from onCleared), and a bound service cannot be destroyed while this binding holds it.
+    @SuppressLint("StaticFieldLeak")
     private var streamingService: SignalKStreamingService? = null
     private var bound = false
     private var serviceCollectorJob: Job? = null
@@ -85,6 +97,9 @@ class MainViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "MainViewModel"
+
+        /** Grace period for the service to release the sensors before the UI restarts them. */
+        private const val SENSOR_RESTART_DELAY_MS = 500L
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -144,8 +159,8 @@ class MainViewModel @Inject constructor(
 
     /**
      * Cleans up service binding state. Call when disconnecting from the service.
-     * @param unbind If true, unbinds from the service. Set to false when called from onServiceDisconnected
-     *               since the system has already unbound us.
+     * @param unbind If true, unbinds from the service. Set to false when called from
+     *               onServiceDisconnected since the system has already unbound us.
      */
     private fun cleanupServiceBinding(unbind: Boolean) {
         serviceCollectorJob?.cancel()
@@ -160,6 +175,20 @@ class MainViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+
+    /** Mount calibration, applied to the local sensors and to a running streaming service. */
+    val calibration = CalibrationController(
+        applicationContext,
+        viewModelScope,
+        _uiState,
+        sensorService,
+        locationService
+    ) { alphaDeg, betaDeg, gammaDeg ->
+        streamingService?.updateCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
+    }
+
+    /** What is transmitted to the SignalK server, and how often. */
+    val transmissionOptions = TransmissionOptionsController(applicationContext, _uiState)
 
     init {
         // Configure sensor service with default (identity) calibration
@@ -235,16 +264,6 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
-        Log.d(TAG, "updateCalibrationAngles: α=$alphaDeg, β=$betaDeg, γ=$gammaDeg")
-        _uiState.update {
-            it.copy(calibrationAlphaDeg = alphaDeg, calibrationBetaDeg = betaDeg, calibrationGammaDeg = gammaDeg)
-        }
-        CalibrationSettings.setCalibrationAngles(applicationContext, alphaDeg, betaDeg, gammaDeg)
-        sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
-        streamingService?.updateCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
-    }
-
     // --- App foreground lifecycle ---
 
     /**
@@ -302,171 +321,6 @@ class MainViewModel @Inject constructor(
         // still running, and nothing on this path ever restarts it.
         if (!recordingSession.isRecording) {
             locationService.stopLocationUpdates()
-        }
-    }
-
-    /**
-     * Full calibration: use current sensor reading + GPS heading to compute all three angles.
-     * If no GPS heading is available, only calibrates pitch and roll.
-     */
-    fun calibrateAll() {
-        viewModelScope.launch {
-            Log.d(
-                TAG,
-                "calibrateAll: starting, sensorsActive=${sensorService.isSensorUpdatesActive()}, hasRotation=${sensorService.hasValidRotationMatrix()}"
-            )
-            if (!ensureSensorData()) {
-                Log.w(TAG, "calibrateAll: sensor data not available within timeout")
-                _uiState.update { it.copy(error = "Calibration failed: no sensor data available") }
-                return@launch
-            }
-            val R_W_D = sensorService.getCurrentRotationMatrix()
-            Log.d(TAG, "calibrateAll: R_W_D=[${R_W_D.joinToString()}]")
-            val location = locationService.locationUpdates.value
-            val bearing = location?.bearing
-            val speed = location?.speed
-            Log.d(TAG, "calibrateAll: bearing=$bearing, speed=$speed")
-
-            if (bearing != null && speed != null && speed >= DeviceCalibration.MIN_CALIBRATION_SPEED_MPS) {
-                val R_W_V = DeviceCalibration.buildFlatHeadingMatrix(bearing)
-                val R_D_V = DeviceCalibration.computeCalibration(R_W_D, R_W_V)
-                val (alpha, beta, gamma) = DeviceCalibration.decomposeZXZ(R_D_V)
-                Log.d(TAG, "calibrateAll: GPS path → α=$alpha, β=$beta, γ=$gamma")
-                updateCalibrationAngles(alpha, beta, gamma)
-            } else {
-                Log.d(TAG, "calibrateAll: no GPS heading, falling back to twist/tilt only")
-                calibrateTiltInternal()
-            }
-        }
-    }
-
-    /**
-     * Calibrate only the azimuth (horizontal heading) using GPS heading.
-     * Preserves existing tilt calibration, even if the vehicle is tilted by waves/wind.
-     */
-    fun calibrateAzimuth() {
-        viewModelScope.launch {
-            if (!ensureSensorData()) {
-                Log.w(TAG, "calibrateAzimuth: sensor data not available within timeout")
-                _uiState.update { it.copy(error = "Calibration failed: no sensor data available") }
-                return@launch
-            }
-            val R_W_D = sensorService.getCurrentRotationMatrix()
-            val location = locationService.locationUpdates.value
-            val bearing = location?.bearing
-            val speed = location?.speed
-            Log.d(TAG, "calibrateAzimuth: bearing=$bearing, speed=$speed")
-            if (bearing == null || speed == null || speed < DeviceCalibration.MIN_CALIBRATION_SPEED_MPS) {
-                Log.w(TAG, "calibrateAzimuth: below ${DeviceCalibration.MIN_CALIBRATION_SPEED_KN} kn or no GPS course")
-                // Fail loudly. The heading reference is GPS *course*, which only equals
-                // heading at speed; silently doing nothing leaves the user believing a
-                // calibration happened. See DeviceCalibration.MIN_CALIBRATION_SPEED_KN.
-                _uiState.update {
-                    it.copy(
-                        error = "Needs at least ${DeviceCalibration.MIN_CALIBRATION_SPEED_KN} kn " +
-                            "steady speed — heading is taken from GPS course, which only " +
-                            "matches heading when moving well."
-                    )
-                }
-                return@launch
-            }
-
-            val (newGamma, _) = DeviceCalibration.calibrateAzimuth(
-                R_W_D,
-                _uiState.value.calibrationAlphaDeg,
-                _uiState.value.calibrationBetaDeg,
-                _uiState.value.calibrationGammaDeg,
-                bearing
-            )
-            Log.d(TAG, "calibrateAzimuth: γ=$newGamma (was γ=${_uiState.value.calibrationGammaDeg})")
-            updateCalibrationAngles(_uiState.value.calibrationAlphaDeg, _uiState.value.calibrationBetaDeg, newGamma)
-        }
-    }
-
-    /**
-     * Calibrate twist and tilt only. Assumes the vehicle is currently flat.
-     * Keeps existing heading offset (γ) unchanged.
-     */
-    fun calibrateTilt() {
-        viewModelScope.launch {
-            if (!ensureSensorData()) {
-                Log.w(TAG, "calibrateTilt: sensor data not available within timeout")
-                _uiState.update { it.copy(error = "Calibration failed: no sensor data available") }
-                return@launch
-            }
-            calibrateTiltInternal()
-        }
-    }
-
-    private fun calibrateTiltInternal() {
-        val R_W_D = sensorService.getCurrentRotationMatrix()
-        val existingGamma = _uiState.value.calibrationGammaDeg
-        Log.d(TAG, "calibrateTiltInternal: R_W_D=[${R_W_D.joinToString()}]")
-        val (newAlpha, newBeta, _) = DeviceCalibration.calibrateTilt(R_W_D, existingGamma)
-        Log.d(TAG, "calibrateTiltInternal: α=$newAlpha, β=$newBeta, γ=$existingGamma")
-        updateCalibrationAngles(newAlpha, newBeta, existingGamma)
-    }
-
-    /**
-     * Waits for sensors to produce a valid rotation matrix.
-     * Sensors should already be running (started in onAppForeground).
-     */
-    private suspend fun ensureSensorData(): Boolean {
-        return withTimeoutOrNull(2000L) {
-            while (!sensorService.hasValidRotationMatrix()) {
-                delay(50)
-            }
-            true
-        } != null
-    }
-
-    fun updateSendLocation(enabled: Boolean) {
-        _uiState.update { it.copy(sendLocation = enabled) }
-        // Save to shared preferences
-        TransmissionSettings.setSendLocation(applicationContext, enabled)
-        // Update running service if active
-        sendConfigUpdateToService()
-    }
-
-    fun updateSendHeading(enabled: Boolean) {
-        _uiState.update { it.copy(sendHeading = enabled) }
-        // Save to shared preferences
-        TransmissionSettings.setSendHeading(applicationContext, enabled)
-        // Update running service if active
-        sendConfigUpdateToService()
-    }
-
-    fun updateSendPressure(enabled: Boolean) {
-        _uiState.update { it.copy(sendPressure = enabled) }
-        // Save to shared preferences
-        TransmissionSettings.setSendPressure(applicationContext, enabled)
-        // Update running service if active
-        sendConfigUpdateToService()
-    }
-
-    fun updateLocationIntervalMs(intervalMs: Long) {
-        _uiState.update { it.copy(locationIntervalMs = intervalMs) }
-        StreamingSettings.setLocationIntervalMs(applicationContext, intervalMs)
-        sendConfigUpdateToService()
-    }
-
-    fun updateSensorIntervalMs(intervalMs: Long) {
-        _uiState.update { it.copy(sensorIntervalMs = intervalMs) }
-        StreamingSettings.setSensorIntervalMs(applicationContext, intervalMs)
-        sendConfigUpdateToService()
-    }
-
-    private fun sendConfigUpdateToService() {
-        if (_uiState.value.isStreaming) {
-            val intent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
-                action = SignalKStreamingService.ACTION_UPDATE_CONFIG
-                putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, _uiState.value.locationIntervalMs)
-                putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, _uiState.value.sensorIntervalMs.toInt())
-                putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, _uiState.value.sendLocation)
-                putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, _uiState.value.sendHeading)
-                putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, _uiState.value.sendPressure)
-            }
-            applicationContext.startService(intent)
         }
     }
 
@@ -552,8 +406,14 @@ class MainViewModel @Inject constructor(
         val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
             action = SignalKStreamingService.ACTION_START_STREAMING
             putExtra(SignalKStreamingService.EXTRA_PARSED_URL, currentState.parsedUrl)
-            putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, currentState.locationIntervalMs)
-            putExtra(SignalKStreamingService.EXTRA_SENSOR_RATE, currentState.sensorIntervalMs.toInt())
+            putExtra(
+                SignalKStreamingService.EXTRA_LOCATION_RATE,
+                currentState.locationIntervalMs
+            )
+            putExtra(
+                SignalKStreamingService.EXTRA_SENSOR_RATE,
+                currentState.sensorIntervalMs.toInt()
+            )
             putExtra(SignalKStreamingService.EXTRA_SEND_LOCATION, currentState.sendLocation)
             putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, currentState.sendHeading)
             putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, currentState.sendPressure)
@@ -569,7 +429,8 @@ class MainViewModel @Inject constructor(
         applicationContext.startService(serviceIntent)
 
         // Update state eagerly: cleanupServiceBinding cancels the service collector before
-        // the service can emit isStreaming=false, which would leave the button stuck in "Stop" state.
+        // the service can emit isStreaming=false, which would leave the button stuck in
+        // "Stop" state.
         _uiState.update { it.copy(isStreaming = false) }
 
         // A recording may still be running after streaming stops, and the service stays alive
@@ -584,7 +445,7 @@ class MainViewModel @Inject constructor(
         // Restart for foreground display after the service finishes processing.
         if (isAppInForeground) {
             viewModelScope.launch {
-                delay(500)
+                delay(SENSOR_RESTART_DELAY_MS)
                 startForegroundSensors()
             }
         }
@@ -611,7 +472,10 @@ class MainViewModel @Inject constructor(
 
         val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
             this.action = action
-            putExtra(SignalKStreamingService.EXTRA_LOCATION_RATE, _uiState.value.locationIntervalMs)
+            putExtra(
+                SignalKStreamingService.EXTRA_LOCATION_RATE,
+                _uiState.value.locationIntervalMs
+            )
         }
 
         // Starting needs foreground promotion; stopping does not. The SDK_INT >= O half of
@@ -622,9 +486,6 @@ class MainViewModel @Inject constructor(
             applicationContext.startService(serviceIntent)
         }
     }
-
-    /** Recording files on the device, newest first — for a "what have I got?" readout. */
-    fun listRecordings(): List<java.io.File> = recordingSession.list()
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }

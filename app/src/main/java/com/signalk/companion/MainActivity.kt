@@ -1,7 +1,9 @@
 package com.signalk.companion
 
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -49,7 +51,9 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this)
             .setTitle("Background Operation Required")
             .setMessage(
-                "For reliable marine navigation, this app needs to run continuously in the background. Please disable battery optimization to ensure uninterrupted GPS tracking and data transmission."
+                "For reliable marine navigation, this app needs to run continuously in the " +
+                    "background. Please disable battery optimization to ensure uninterrupted " +
+                    "GPS tracking and data transmission."
             )
             .setPositiveButton("Disable Optimization") { _, _ ->
                 requestBatteryOptimizationExemption()
@@ -68,8 +72,10 @@ class MainActivity : ComponentActivity() {
         val intent = BatteryOptimizationHelper.createBatteryOptimizationIntent(this)
         try {
             startActivity(intent)
-        } catch (e: Exception) {
-            // Fallback to manual settings if direct request fails
+        } catch (e: ActivityNotFoundException) {
+            // Some OEM builds ship without the direct exemption dialog; fall back to the
+            // app's settings page.
+            Log.w(TAG, "Battery optimization request unavailable, opening app settings", e)
             openBatterySettings()
         }
     }
@@ -78,8 +84,9 @@ class MainActivity : ComponentActivity() {
         try {
             val intent = BatteryOptimizationHelper.createAppBatterySettingsIntent(this)
             startActivity(intent)
-        } catch (e: Exception) {
+        } catch (e: ActivityNotFoundException) {
             // If even this fails, show instructions
+            Log.w(TAG, "App settings unavailable, showing manual instructions", e)
             showBatteryInstructions()
         }
     }
@@ -95,5 +102,9 @@ class MainActivity : ComponentActivity() {
                 dialog.dismiss()
             }
             .show()
+    }
+
+    private companion object {
+        const val TAG = "MainActivity"
     }
 }

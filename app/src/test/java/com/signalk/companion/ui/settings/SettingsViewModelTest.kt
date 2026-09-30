@@ -13,10 +13,19 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.*
+import org.mockito.Mockito.anyInt
+import org.mockito.Mockito.anyString
+import org.mockito.Mockito.eq
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.`when`
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
@@ -71,8 +80,10 @@ class SettingsViewModelTest {
         viewModel.saveSettings(context)
         advanceUntilIdle()
 
-        // Simulate save error
-        `when`(sharedPreferences.edit()).thenThrow(RuntimeException("Storage error"))
+        // Simulate save error: what getSharedPreferences() throws while credential-encrypted
+        // storage is still locked
+        `when`(context.getSharedPreferences(anyString(), anyInt()))
+            .thenThrow(IllegalStateException("Storage locked"))
         viewModel.saveSettings(context)
         advanceUntilIdle()
 
