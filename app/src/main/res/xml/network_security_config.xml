@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
     <!--
         Allow cleartext HTTP globally. SignalK servers (on a boat LAN or
         running locally) typically serve plain HTTP without TLS.
         Android blocks cleartext by default since API 28, so we opt in here.
         This app communicates exclusively with servers on private/local networks
         chosen by the user, so there is no public-internet cleartext risk.
+        Deliberate, hence lint InsecureBaseConfiguration is ignored here.
     -->
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration" />
 </network-security-config>
