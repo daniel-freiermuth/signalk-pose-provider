@@ -13,6 +13,7 @@ plugins {
     id("dagger.hilt.android.plugin")
     id("kotlin-parcelize")
     id("kotlinx-serialization")
+    id("io.gitlab.arturbosch.detekt")
 }
 
 // Exclude profileinstaller for reproducible builds (transitively pulled by lifecycle/activity)
@@ -122,6 +123,25 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // A deprecation warning today is a compile error on the next dependency bump.
+        allWarningsAsErrors = true
+    }
+    lint {
+        abortOnError = true
+        warningsAsErrors = true
+        checkDependencies = false
+        // Pre-existing findings, recorded so the gate applies to new code. Regenerate with
+        // `./gradlew updateLintBaseline` only when deliberately accepting a finding.
+        baseline = file("lint-baseline.xml")
+        // These report "a newer version exists" and so change verdict with the calendar,
+        // not with the code: a green commit would turn red on the day a library ships.
+        // Dependency freshness is tracked separately from the correctness gate.
+        disable += setOf(
+            "GradleDependency",
+            "NewerVersionAvailable",
+            "AndroidGradlePluginVersion",
+            "OldTargetApi",
+        )
     }
     buildFeatures {
         compose = true
@@ -144,6 +164,15 @@ android {
 
 composeCompiler {
     includeSourceInformation = false
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(rootProject.file("config/detekt/detekt.yml"))
+    // Pre-existing findings; new code must be clean. Regenerate with
+    // `./gradlew detektBaselineDebug detektBaselineDebugUnitTest` only when deliberately
+    // accepting a finding.
+    baseline = file("detekt-baseline.xml")
 }
 
 dependencies {
@@ -197,4 +226,7 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // Static analysis: ktlint's formatting rules, run and baselined through detekt.
+    detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.8")
 }

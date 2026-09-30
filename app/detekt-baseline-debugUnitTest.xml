@@ -1,0 +1,174 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$( R_W_D_distorted, alpha1, beta1, gamma1, 0f )</ID>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$( R_W_D_sea, afterTiltAlpha, afterTiltBeta, 0f, gpsHeading )</ID>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$( R_W_V_dock, DeviceCalibration.transpose3x3(realMounting) )</ID>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$( R_W_V_sea, DeviceCalibration.transpose3x3(realMounting) )</ID>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$( R_W_V_true, DeviceCalibration.transpose3x3(mounting) )</ID>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$( R_W_V_wavy, DeviceCalibration.transpose3x3(mounting) )</ID>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$( waveTilt, DeviceCalibration.buildFlatHeadingMatrix(gpsHeading) )</ID>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$(R_W_D_wavy, existingAlpha, existingBeta, existingGamma, 90f)</ID>
+    <ID>ArgumentListWrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$(ryChanged || rxChanged, "ZYX heading correction should leak into non-RZ angles")</ID>
+    <ID>ArgumentListWrapping:FrameConventionsTest.kt$FrameConventionsTest$( 0f, gyro_D[2], tol, "precondition: device Z sees nothing of this turn" )</ID>
+    <ID>ArgumentListWrapping:FrameConventionsTest.kt$FrameConventionsTest$( DeviceCalibration.IDENTITY_3X3, gyroTurningPort )</ID>
+    <ID>ArgumentListWrapping:FrameConventionsTest.kt$FrameConventionsTest$( DeviceCalibration.IDENTITY_3X3, gyroTurningStarboard )</ID>
+    <ID>ArgumentListWrapping:MahonyAhrsTest.kt$MahonyAhrsTest$( bias[i], f.gyroBias[i], 0.005f, "bias axis $i should converge to the injected value" )</ID>
+    <ID>ArgumentListWrapping:MahonyAhrsTest.kt$MahonyAhrsTest$(1f, Quaternion.IDENTITY.cosAngleTo(f.attitude), 1e-6f, "the first gyro sample must not rotate anything")</ID>
+    <ID>ArgumentListWrapping:MahonyAhrsTest.kt$MahonyAhrsTest$(1f, Quaternion.IDENTITY.cosAngleTo(f.attitude), 1e-6f, "with no reference sensors yet, the filter must start at identity")</ID>
+    <ID>ArgumentListWrapping:MainUiStateTest.kt$MainUiStateTest$("192.168.1.1", uiState.parsedUrl?.hostname, "Hostname should be extracted correctly from URL with path")</ID>
+    <ID>ArgumentListWrapping:MainUiStateTest.kt$MainUiStateTest$("192.168.1.1", uiState.parsedUrl?.hostname, "Hostname should be extracted correctly from URL without protocol but with path")</ID>
+    <ID>ArgumentListWrapping:ReplayTest.kt$ReplayTest$( c * v[0] + s * v[1], -s * v[0] + c * v[1], v[2] )</ID>
+    <ID>ArgumentListWrapping:ReplayTest.kt$ReplayTest$( sortedFirst.last().headingRad, preservedOrder.last().headingRad, "sorting first must give a different answer than preserving delivery order" )</ID>
+    <ID>ArgumentListWrapping:ReplayTest.kt$ReplayTest$(0.0, Math.toDegrees(corrected.headingRad.toDouble()), 0.5, "subtracting the known bias must recover true heading")</ID>
+    <ID>ArgumentListWrapping:ReplayTest.kt$ReplayTest$(1, runner.referenceAttitudes.size, "reference attitudes from a prior run must not accumulate")</ID>
+    <ID>ArgumentListWrapping:ReplayTest.kt$ReplayTest$(clean.count { it is GyroRecord }, runner.referenceAttitudes.size, "every reference sample must still be retained for comparison")</ID>
+    <ID>ArgumentListWrapping:ReplayTest.kt$ReplayTest$(samples.all { it.timestampNs &lt; 2_000_000_000L }, "only gyro ticks advance the filter, so no sample comes from the fix")</ID>
+    <ID>ArgumentListWrapping:ReplayTest.kt$ReplayTest$(uncorrectedErr &gt; 5.0, "ignoring a 10 µT hard iron must visibly skew heading, got ${uncorrectedErr}°")</ID>
+    <ID>ArgumentListWrapping:SensorServiceTest.kt$SensorServiceTest$( sensorData.timestamp &gt; currentTime - 1000 &amp;&amp; sensorData.timestamp &lt;= currentTime, "Timestamp should be recent")</ID>
+    <ID>ArgumentListWrapping:SettingsViewModelTest.kt$SettingsViewModelTest$( errorAfterAuthUpdate!!.contains("Failed to save settings"), "Error should still mention save failure")</ID>
+    <ID>ArgumentListWrapping:SettingsViewModelTest.kt$SettingsViewModelTest$( errorAfterSave!!.contains("Failed to save settings"), "Error should mention save failure")</ID>
+    <ID>ArgumentListWrapping:SettingsViewModelTest.kt$SettingsViewModelTest$("Server URL is required", viewModel.uiState.value.error, "Should have validation error")</ID>
+    <ID>ArgumentListWrapping:SettingsViewModelTest.kt$SettingsViewModelTest$(authError, viewModel.uiState.value.error, "Auth error should replace local error")</ID>
+    <ID>ArgumentListWrapping:SettingsViewModelTest.kt$SettingsViewModelTest$(errorAfterAuthUpdate, "Local error should not be cleared by auth state update with null error")</ID>
+    <ID>ArgumentListWrapping:SettingsViewModelTest.kt$SettingsViewModelTest$(viewModel.uiState.value.isAuthenticated, "Should not be authenticated initially")</ID>
+    <ID>ArgumentListWrapping:SettingsViewModelTest.kt$SettingsViewModelTest$(viewModel.uiState.value.isLoggingIn, "Should not be logging in initially")</ID>
+    <ID>ArgumentListWrapping:UrlParserTest.kt$UrlParserTest$("192.168.1.1", result?.hostname, "Hostname should be extracted correctly from URL without protocol but with path")</ID>
+    <ID>Filename:SignalKServiceTest.kt$com.signalk.companion.service.SignalKServiceTest.kt</ID>
+    <ID>FinalNewline:UrlParserTest.kt$com.signalk.companion.util.UrlParserTest.kt</ID>
+    <ID>ImportOrdering:AppSettingsTest.kt$import android.content.Context import android.content.SharedPreferences import org.junit.jupiter.api.Test import org.junit.jupiter.api.BeforeEach import org.junit.jupiter.api.assertThrows import org.mockito.Mockito.*</ID>
+    <ID>ImportOrdering:DeviceCalibrationTest.kt$import org.junit.jupiter.api.Test import org.junit.jupiter.api.Assertions.assertArrayEquals import org.junit.jupiter.api.Assertions.assertEquals import org.junit.jupiter.api.Assertions.assertNotEquals import org.junit.jupiter.api.Assertions.assertTrue import kotlin.math.*</ID>
+    <ID>ImportOrdering:MainUiStateTest.kt$import com.signalk.companion.util.UrlParser import org.junit.jupiter.api.Test import org.junit.jupiter.api.Assertions.assertEquals import org.junit.jupiter.api.Assertions.assertNull import org.junit.jupiter.api.Assertions.assertTrue</ID>
+    <ID>ImportOrdering:SignalKServiceTest.kt$import com.signalk.companion.data.model.LocationData import kotlinx.serialization.encodeToString import kotlinx.serialization.json.Json import org.junit.jupiter.api.Test import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>ImportOrdering:SignalKTransmitterTest.kt$import com.signalk.companion.data.model.LocationData import com.signalk.companion.data.model.* import kotlinx.serialization.encodeToString import kotlinx.serialization.json.Json import org.junit.jupiter.api.Test import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>ImportOrdering:UrlParserTest.kt$import org.junit.jupiter.api.Test import org.junit.jupiter.api.Assertions.assertEquals import org.junit.jupiter.api.Assertions.assertNotNull import org.junit.jupiter.api.Assertions.assertNull import org.junit.jupiter.api.Assertions.assertTrue import org.junit.jupiter.api.Assertions.assertFalse</ID>
+    <ID>Indentation:DeviceCalibrationTest.kt$DeviceCalibrationTest$ </ID>
+    <ID>Indentation:SensorServiceTest.kt$SensorServiceTest$ </ID>
+    <ID>MatchingDeclarationName:SignalKServiceTest.kt$SignalKDataTest</ID>
+    <ID>MaxLineLength:DeviceCalibrationTest.kt$DeviceCalibrationTest$val (_, updated) = DeviceCalibration.calibrateAzimuth(R_W_D_wavy, existingAlpha, existingBeta, existingGamma, 90f)</ID>
+    <ID>MaximumLineLength:DeviceCalibrationTest.kt$DeviceCalibrationTest$ </ID>
+    <ID>ModifierListSpacing:SignalKTransmitterTest.kt$SignalKTransmitterTest$@Test</ID>
+    <ID>MultiLineIfElse:ReplayTest.kt$ReplayTest$listOf(record)</ID>
+    <ID>NewLineAtEndOfFile:UrlParserTest.kt$com.signalk.companion.util.UrlParserTest.kt</ID>
+    <ID>NoMultipleSpaces:DeviceCalibrationTest.kt$DeviceCalibrationTest$ </ID>
+    <ID>NoMultipleSpaces:FrameConventionsTest.kt$FrameConventionsTest$ </ID>
+    <ID>NoMultipleSpaces:SignalKTransmitterTest.kt$SignalKTransmitterTest$ </ID>
+    <ID>NoMultipleSpaces:UrlParserTest.kt$UrlParserTest$ </ID>
+    <ID>NoTrailingSpaces:AppSettingsTest.kt$AppSettingsTest$ </ID>
+    <ID>NoTrailingSpaces:DeviceCalibrationTest.kt$DeviceCalibrationTest$// R_W_V * v_vehicle = v_world. </ID>
+    <ID>NoTrailingSpaces:MainUiStateTest.kt$MainUiStateTest$ </ID>
+    <ID>NoTrailingSpaces:SensorServiceTest.kt$SensorServiceTest$ </ID>
+    <ID>NoTrailingSpaces:SensorServiceTest.kt$SensorServiceTest$// 0.5 seconds </ID>
+    <ID>NoTrailingSpaces:SettingsViewModelTest.kt$SettingsViewModelTest$ </ID>
+    <ID>NoTrailingSpaces:SignalKServiceTest.kt$SignalKDataTest$ </ID>
+    <ID>NoTrailingSpaces:SignalKTransmitterTest.kt$SignalKTransmitterTest$ </ID>
+    <ID>NoTrailingSpaces:UrlParserTest.kt$UrlParserTest$ </ID>
+    <ID>NoUnusedImports:DeviceCalibrationTest.kt$com.signalk.companion.util.DeviceCalibrationTest.kt</ID>
+    <ID>NoUnusedImports:SignalKServiceTest.kt$com.signalk.companion.service.SignalKServiceTest.kt</ID>
+    <ID>NoWildcardImports:AppSettingsTest.kt$import org.mockito.Mockito.*</ID>
+    <ID>NoWildcardImports:AuthenticationServiceTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>NoWildcardImports:DeviceCalibrationTest.kt$import kotlin.math.*</ID>
+    <ID>NoWildcardImports:FrameConventionsTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>NoWildcardImports:MahonyAhrsTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>NoWildcardImports:RecordingWriterTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>NoWildcardImports:ReplayTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>NoWildcardImports:SensorServiceTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>NoWildcardImports:SettingsViewModelTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>NoWildcardImports:SettingsViewModelTest.kt$import org.mockito.Mockito.*</ID>
+    <ID>NoWildcardImports:SignalKServiceTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>NoWildcardImports:SignalKTransmitterTest.kt$import com.signalk.companion.data.model.*</ID>
+    <ID>NoWildcardImports:SignalKTransmitterTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>SpacingBetweenDeclarationsWithComments:ReplayTest.kt$ReplayTest$// Rotate world vectors into the body frame for a level boat on this heading.</ID>
+    <ID>StringTemplate:FrameConventionsTest.kt$FrameConventionsTest$${actualDeg}</ID>
+    <ID>StringTemplate:FrameConventionsTest.kt$FrameConventionsTest$${expectedDeg}</ID>
+    <ID>StringTemplate:MahonyAhrsTest.kt$MahonyAhrsTest$${actual}</ID>
+    <ID>StringTemplate:MahonyAhrsTest.kt$MahonyAhrsTest$${expected}</ID>
+    <ID>StringTemplate:MahonyAhrsTest.kt$MahonyAhrsTest$${tolDeg}</ID>
+    <ID>StringTemplate:ReplayTest.kt$ReplayTest$${uncorrectedErr}</ID>
+    <ID>UnusedPrivateProperty:SignalKServiceTest.kt$SignalKDataTest$val expectedJson = """ { "context": "vessels.self", "updates": [] } """.trimIndent()</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$private val EPSILON = 1e-5f</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.composeZYX(0f, 0f, -90f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.composeZYX(0f, 0f, 0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.composeZYX(180f, 0f, -90f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.composeZYX(180f, 90f, 0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.composeZYX(90f, 0f, 0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.composeZYX(90f, 30f, 0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.composeZYX(90f, 90f, 0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.composeZYX(rzDeg, ryDeg, rxDeg)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V = DeviceCalibration.computeCalibration(R_W_D, R_W_V)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V_3 = DeviceCalibration.composeZYX(0f, 0f, -90f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_D_V_5 = DeviceCalibration.composeZYX(90f, 90f, 0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_V_D = DeviceCalibration.transpose3x3(R_D_V)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_V_D = DeviceCalibration.transpose3x3(knownMounting)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D = DeviceCalibration.composeZYX(0f, 15f, -5f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D = DeviceCalibration.composeZYX(45f, 10f, 5f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D = DeviceCalibration.multiply3x3( R_W_V_true, DeviceCalibration.transpose3x3(mounting) )</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D = DeviceCalibration.multiply3x3(R_W_V, DeviceCalibration.transpose3x3(mounting))</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D = DeviceCalibration.multiply3x3(R_W_V, R_V_D)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D = DeviceCalibration.multiply3x3(R_W_V_true, DeviceCalibration.transpose3x3(mounting))</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D = DeviceCalibration.transpose3x3(R_D_V) // vehicle heading north, flat</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D = DeviceCalibration.transpose3x3(realMounting)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D_distorted = DeviceCalibration.multiply3x3(magError, R_W_D_true)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D_dock = DeviceCalibration.multiply3x3( R_W_V_dock, DeviceCalibration.transpose3x3(realMounting) )</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D_sea = DeviceCalibration.multiply3x3( R_W_V_sea, DeviceCalibration.transpose3x3(realMounting) )</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D_true = DeviceCalibration.transpose3x3(mounting)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_D_wavy = DeviceCalibration.multiply3x3( R_W_V_wavy, DeviceCalibration.transpose3x3(mounting) )</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = DeviceCalibration.IDENTITY_3X3.copyOf()</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = DeviceCalibration.buildFlatHeadingMatrix(0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = DeviceCalibration.buildFlatHeadingMatrix(180f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = DeviceCalibration.buildFlatHeadingMatrix(30f) // vehicle heading 30°</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = DeviceCalibration.buildFlatHeadingMatrix(90f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = DeviceCalibration.composeZYX(120f, 15f, -5f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = DeviceCalibration.multiply3x3(R_W_D, R_D_V)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = DeviceCalibration.multiply3x3(R_W_D_distorted, afterAzimuth)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V = R_W_D.copyOf()</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_actual = DeviceCalibration.IDENTITY_3X3.copyOf()</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_after = DeviceCalibration.multiply3x3(R_W_D, updated)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_after = DeviceCalibration.multiply3x3(R_W_D_wavy, updated)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_before = DeviceCalibration.multiply3x3(R_W_D_wavy, mounting)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_desired = DeviceCalibration.buildFlatHeadingMatrix(0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_dock = DeviceCalibration.buildFlatHeadingMatrix(0f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_final = DeviceCalibration.multiply3x3(R_W_D_sea, afterAzimuth)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_flat = DeviceCalibration.buildFlatHeadingMatrix(90f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_recovered = DeviceCalibration.multiply3x3(R_W_D, R_D_V)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_sea = DeviceCalibration.multiply3x3( waveTilt, DeviceCalibration.buildFlatHeadingMatrix(90f) )</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_sea = DeviceCalibration.multiply3x3( waveTilt, DeviceCalibration.buildFlatHeadingMatrix(gpsHeading) )</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_step1 = DeviceCalibration.multiply3x3(R_W_D_dock, afterTilt)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_true = DeviceCalibration.buildFlatHeadingMatrix(0f) // heading north</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_true = DeviceCalibration.buildFlatHeadingMatrix(270f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_true = DeviceCalibration.buildFlatHeadingMatrix(90f)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val R_W_V_wavy = DeviceCalibration.multiply3x3(waveTilt, R_W_V_flat)</ID>
+    <ID>VariableNaming:DeviceCalibrationTest.kt$DeviceCalibrationTest$val Rz_neg90 = DeviceCalibration.buildFlatHeadingMatrix(-90f)</ID>
+    <ID>VariableNaming:FrameConventionsTest.kt$FrameConventionsTest$val R = matrixFromColumns( starboard = floatArrayOf(-1f, 0f, 0f), // West bow = floatArrayOf(0f, -1f, 0f), // South up = floatArrayOf(0f, 0f, 1f) )</ID>
+    <ID>VariableNaming:FrameConventionsTest.kt$FrameConventionsTest$val R = matrixFromColumns( starboard = floatArrayOf(0f, -1f, 0f), // South bow = floatArrayOf(1f, 0f, 0f), // East up = floatArrayOf(0f, 0f, 1f) )</ID>
+    <ID>VariableNaming:FrameConventionsTest.kt$FrameConventionsTest$val R = matrixFromColumns( starboard = floatArrayOf(0f, 1f, 0f), // North bow = floatArrayOf(-1f, 0f, 0f), // West up = floatArrayOf(0f, 0f, 1f) )</ID>
+    <ID>VariableNaming:FrameConventionsTest.kt$FrameConventionsTest$val R = matrixFromColumns( starboard = floatArrayOf(1f, 0f, 0f), // East bow = floatArrayOf(0f, 1f, 0f), // North up = floatArrayOf(0f, 0f, 1f) // Up )</ID>
+    <ID>VariableNaming:FrameConventionsTest.kt$FrameConventionsTest$val R = matrixFromColumns( starboard = floatArrayOf(1f, 0f, 0f), bow = floatArrayOf(0f, cosd(10.0), sind(10.0)), up = floatArrayOf(0f, -sind(10.0), cosd(10.0)) )</ID>
+    <ID>VariableNaming:FrameConventionsTest.kt$FrameConventionsTest$val R = matrixFromColumns( starboard = floatArrayOf(cosd(20.0), 0f, -sind(20.0)), bow = floatArrayOf(0f, 1f, 0f), up = floatArrayOf(sind(20.0), 0f, cosd(20.0)) )</ID>
+    <ID>VariableNaming:FrameConventionsTest.kt$FrameConventionsTest$val gyro_D = floatArrayOf(0f, 0.1f, 0f)</ID>
+    <ID>WildcardImport:AppSettingsTest.kt$import org.mockito.Mockito.*</ID>
+    <ID>WildcardImport:AuthenticationServiceTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>WildcardImport:DeviceCalibrationTest.kt$import kotlin.math.*</ID>
+    <ID>WildcardImport:FrameConventionsTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>WildcardImport:MahonyAhrsTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>WildcardImport:RecordingWriterTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>WildcardImport:ReplayTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>WildcardImport:SensorServiceTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>WildcardImport:SettingsViewModelTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>WildcardImport:SettingsViewModelTest.kt$import org.mockito.Mockito.*</ID>
+    <ID>WildcardImport:SignalKServiceTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>WildcardImport:SignalKTransmitterTest.kt$import com.signalk.companion.data.model.*</ID>
+    <ID>WildcardImport:SignalKTransmitterTest.kt$import org.junit.jupiter.api.Assertions.*</ID>
+    <ID>Wrapping:DeviceCalibrationTest.kt$DeviceCalibrationTest$(</ID>
+    <ID>Wrapping:FrameConventionsTest.kt$FrameConventionsTest$(</ID>
+    <ID>Wrapping:MahonyAhrsTest.kt$MahonyAhrsTest$(</ID>
+    <ID>Wrapping:MahonyAhrsTest.kt$MahonyAhrsTest$;</ID>
+    <ID>Wrapping:MainUiStateTest.kt$MainUiStateTest$(</ID>
+    <ID>Wrapping:ReplayTest.kt$ReplayTest$(</ID>
+    <ID>Wrapping:ReplayTest.kt$ReplayTest$;</ID>
+    <ID>Wrapping:SensorServiceTest.kt$SensorServiceTest$(</ID>
+    <ID>Wrapping:SettingsViewModelTest.kt$SettingsViewModelTest$(</ID>
+    <ID>Wrapping:UrlParserTest.kt$UrlParserTest$(</ID>
+  </CurrentIssues>
+</SmellBaseline>

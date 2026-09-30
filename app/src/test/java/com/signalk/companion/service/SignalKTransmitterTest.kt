@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
 class SignalKTransmitterTest {
+
+    private val prettyJson = Json { prettyPrint = true }
     
     @Test
     fun testLocationDataSerialization() {
@@ -87,7 +89,7 @@ class SignalKTransmitterTest {
             updates = listOf(update)
         )
         
-        val json = Json { prettyPrint = true }.encodeToString(message)
+        val json = prettyJson.encodeToString(message)
         
         // Basic verification
         assertNotNull(json)
