@@ -195,6 +195,10 @@ adb install ./app/build/outputs/apk/release/app-release.apk
 # Run tests
 ./gradlew test
 
+# Static analysis, as CI runs it (formatting, detekt, Android Lint; fails on anything
+# not in app/detekt-baseline-*.xml / app/lint-baseline.xml)
+./gradlew detektDebug detektDebugUnitTest lintDebug
+
 # Clean build directory
 ./gradlew clean
 
