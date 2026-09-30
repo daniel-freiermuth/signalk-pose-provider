@@ -5,9 +5,9 @@ import android.util.Log
 import com.signalk.companion.data.model.*
 import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.UrlParser
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -21,117 +21,117 @@ import javax.inject.Singleton
 
 /**
  * Transmits SignalK messages over WebSocket.
- * 
+ *
  * Lifecycle: Call stopStreaming() when done to cancel all background jobs.
  */
 @Singleton
 class SignalKTransmitter @Inject constructor(
     private val authenticationService: AuthenticationService
 ) {
-    
+
     companion object {
         private const val TAG = "SignalKTransmitter"
-
     }
-    
+
     /**
      * WebSocket connection state machine.
      * State transitions are atomic via AtomicReference.compareAndSet.
      */
     private enum class WebSocketState {
-        DISCONNECTED,  // No connection, ready to connect
-        CONNECTING,    // Connection attempt in progress
-        CONNECTED      // WebSocket is open and functional
+        DISCONNECTED, // No connection, ready to connect
+        CONNECTING, // Connection attempt in progress
+        CONNECTED // WebSocket is open and functional
     }
-    
+
     private var context: Context? = null
     private var serverAddress: String = ""
     private var serverPort: Int = 3000
-    private var baseUrl: String = ""  // Store the full base URL for HTTP(S) streaming
-    
+    private var baseUrl: String = "" // Store the full base URL for HTTP(S) streaming
+
     // WebSocket support
     private var okHttpClient: OkHttpClient? = null
+
     @Volatile private var webSocket: WebSocket? = null
     private val webSocketState = AtomicReference(WebSocketState.DISCONNECTED)
-    
+
     // Managed coroutine scope for all background jobs - cancelled in stopStreaming()
     private var transmitterScope: CoroutineScope? = null
     private var dnsRefreshJob: Job? = null
     private var reconnectionJob: Job? = null
-    
+
     // DNS refresh interval (5 minutes) - good balance between responsiveness and network load
     private val DNS_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
-    
+
     private val _connectionStatus = MutableStateFlow(false)
     val connectionStatus: StateFlow<Boolean> = _connectionStatus
-    
+
     private val _authenticationError = MutableStateFlow<String?>(null)
     val authenticationError: StateFlow<String?> = _authenticationError
-    
+
     private val _lastSentMessage = MutableStateFlow<String?>(null)
     val lastSentMessage: StateFlow<String?> = _lastSentMessage
-    
+
     private val _messagesSent = MutableStateFlow(0)
     val messagesSent: StateFlow<Int> = _messagesSent
-    
+
     private val _lastTransmissionTime = MutableStateFlow<Long?>(null)
     val lastTransmissionTime: StateFlow<Long?> = _lastTransmissionTime
-    
+
     private val _lastDnsRefresh = MutableStateFlow<String?>(null)
     val lastDnsRefresh: StateFlow<String?> = _lastDnsRefresh
-    
+
     private val _currentResolvedIp = MutableStateFlow<String?>(null)
     val currentResolvedIp: StateFlow<String?> = _currentResolvedIp
-    
+
     private val dateFormat = java.time.format.DateTimeFormatter
         .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
         .withZone(java.time.ZoneOffset.UTC)
-    
+
     fun configure(parsedUrl: UrlParser.ParsedUrl) {
         serverAddress = parsedUrl.hostname
         serverPort = parsedUrl.port
-        
+
         // Build WebSocket URL - auto-detect ws:// or wss:// based on original URL protocol
         val wsProtocol = if (parsedUrl.isHttps) "wss" else "ws"
         baseUrl = "$wsProtocol://${parsedUrl.hostname}:${parsedUrl.port}"
-        
+
         _connectionStatus.value = false
     }
-    
+
     fun setContext(context: Context) {
         this.context = context
     }
-    
+
     suspend fun startStreaming() {
         // Create a fresh scope for this streaming session
         transmitterScope?.cancel()
         transmitterScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        
+
         try {
             // Initial DNS resolution for WebSocket
             withContext(Dispatchers.IO) {
                 refreshDnsResolution()
             }
-            
+
             // Initialize WebSocket connection
             initializeWebSocket()
-            
+
             // Start periodic DNS refresh for hostname resolution
             startDnsRefreshTimer()
-            
+
             _connectionStatus.value = true
         } catch (e: Exception) {
             _connectionStatus.value = false
             throw e
         }
     }
-    
+
     private fun refreshDnsResolution() {
         try {
             val newAddress = InetAddress.getByName(serverAddress)
             val oldIp = _currentResolvedIp.value
             val newIp = newAddress.hostAddress
-            
+
             // Track whether IP changed for diagnostic purposes
             val ipChanged = oldIp != null && oldIp != newIp
             val message = if (ipChanged) {
@@ -144,7 +144,7 @@ class SignalKTransmitter @Inject constructor(
             Log.d(TAG, message)
             _lastDnsRefresh.value = message
             _currentResolvedIp.value = newIp
-            
+
             // If WebSocket is disconnected, try to reconnect
             if (!_connectionStatus.value && webSocket == null) {
                 Log.d(TAG, "WebSocket disconnected, attempting reconnection after DNS refresh")
@@ -162,16 +162,16 @@ class SignalKTransmitter @Inject constructor(
             // Keep the WebSocket going, it will handle its own reconnection
         }
     }
-    
+
     private fun startDnsRefreshTimer() {
         val scope = transmitterScope ?: run {
             Log.w(TAG, "Cannot start DNS refresh timer - transmitter scope is null")
             return
         }
-        
+
         // Cancel any existing refresh timer
         dnsRefreshJob?.cancel()
-        
+
         // Start new refresh timer.
         // Use isActive (not `webSocket != null`) so the loop keeps running while
         // streaming, including during temporary disconnects while reconnecting.
@@ -189,13 +189,13 @@ class SignalKTransmitter @Inject constructor(
             }
         }
     }
-    
+
     private fun scheduleReconnection(delayMs: Long) {
         val scope = transmitterScope ?: run {
             Log.w(TAG, "Cannot schedule reconnection - transmitter scope is null (streaming stopped?)")
             return
         }
-        
+
         // Cancel any existing reconnection attempt to avoid piling up
         reconnectionJob?.cancel()
         reconnectionJob = scope.launch {
@@ -214,7 +214,7 @@ class SignalKTransmitter @Inject constructor(
             }
         }
     }
-    
+
     fun stopStreaming() {
         // Cancel all background jobs by cancelling the scope
         transmitterScope?.cancel()
@@ -236,7 +236,7 @@ class SignalKTransmitter @Inject constructor(
         }
         okHttpClient = null
         webSocketState.set(WebSocketState.DISCONNECTED)
-        
+
         _connectionStatus.value = false
         _lastSentMessage.value = null
         _messagesSent.value = 0
@@ -244,7 +244,7 @@ class SignalKTransmitter @Inject constructor(
         _lastDnsRefresh.value = null
         _currentResolvedIp.value = null
     }
-    
+
     // Manual DNS refresh - can be called from UI if user reports connectivity issues
     suspend fun refreshDns() {
         if (webSocket != null) {
@@ -253,33 +253,33 @@ class SignalKTransmitter @Inject constructor(
             }
         }
     }
-    
+
     // Clear authentication error - can be called from UI after user acknowledges the error
     fun clearAuthenticationError() {
         _authenticationError.value = null
     }
-    
+
     suspend fun sendLocationData(locationData: LocationData, sendLocation: Boolean = true) {
         if (sendLocation) {
             val signalKMessage = createLocationMessage(locationData)
             sendMessage(signalKMessage)
         }
     }
-    
+
     suspend fun sendSensorData(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true) {
         val signalKMessage = createSensorMessage(sensorData, sendHeading, sendPressure)
         sendMessage(signalKMessage)
     }
-    
+
     private fun createLocationMessage(locationData: LocationData): SignalKMessage {
         val timestamp = dateFormat.format(java.time.Instant.ofEpochMilli(locationData.timestamp))
         val source = SignalKSource(
             label = "SignalK Pose Provider",
             src = "signalk-nav-provider"
         )
-        
+
         val values = mutableListOf<SignalKValue>()
-        
+
         // Position with quality indicators
         values.add(
             SignalKValue(
@@ -290,7 +290,7 @@ class SignalKTransmitter @Inject constructor(
                 )
             )
         )
-        
+
         // Add position accuracy as separate quality indicator
         if (locationData.accuracy > 0) {
             values.add(
@@ -300,7 +300,7 @@ class SignalKTransmitter @Inject constructor(
                 )
             )
         }
-        
+
         // Speed over ground with accuracy
         // Use null check instead of > 0 to allow valid zero speed (stationary)
         if (locationData.speed != null) {
@@ -310,7 +310,7 @@ class SignalKTransmitter @Inject constructor(
                     value = SignalKValues.number(locationData.speed.toDouble())
                 )
             )
-            
+
             // Add speed accuracy if available
             locationData.speedAccuracy?.let { speedAcc ->
                 values.add(
@@ -321,7 +321,7 @@ class SignalKTransmitter @Inject constructor(
                 )
             }
         }
-        
+
         // Course over ground with accuracy
         // Use null check instead of > 0 to allow valid zero bearing (True North)
         if (locationData.bearing != null) {
@@ -331,7 +331,7 @@ class SignalKTransmitter @Inject constructor(
                     value = SignalKValues.number(Math.toRadians(locationData.bearing.toDouble()))
                 )
             )
-            
+
             // Add bearing accuracy if available
             locationData.bearingAccuracy?.let { bearingAcc ->
                 values.add(
@@ -342,7 +342,7 @@ class SignalKTransmitter @Inject constructor(
                 )
             }
         }
-        
+
         // Altitude with accuracy
         // Use null check instead of != 0.0 to allow valid zero altitude (sea level)
         if (locationData.altitude != null) {
@@ -352,7 +352,7 @@ class SignalKTransmitter @Inject constructor(
                     value = SignalKValues.number(locationData.altitude)
                 )
             )
-            
+
             // Add vertical accuracy if available
             locationData.verticalAccuracy?.let { vertAcc ->
                 values.add(
@@ -363,30 +363,30 @@ class SignalKTransmitter @Inject constructor(
                 )
             }
         }
-        
+
         val update = SignalKUpdate(
             source = source,
             timestamp = timestamp,
             values = values
         )
-        
+
         val vesselContext = context?.let { AppSettings.getSignalKContext(it) } ?: "vessels.self"
-        
+
         return SignalKMessage(
             context = vesselContext,
             updates = listOf(update)
         )
     }
-    
+
     private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage {
         val timestamp = dateFormat.format(java.time.Instant.ofEpochMilli(sensorData.timestamp))
         val source = SignalKSource(
             label = "SignalK Pose Provider - Sensors",
             src = "signalk-nav-provider-sensors"
         )
-        
+
         val values = mutableListOf<SignalKValue>()
-        
+
         // Navigation orientation data (only if heading is enabled).
         //
         // Heading rides on `navigation.headingCompass`, whose spec description — "magnetic
@@ -401,7 +401,7 @@ class SignalKTransmitter @Inject constructor(
         // carrying the correction actually applied.
         if (sendHeading) {
             sensorData.compassHeading?.let { heading ->
-                SignalKValues.finiteNumber(heading.toDouble())?.let { v ->  // already radians
+                SignalKValues.finiteNumber(heading.toDouble())?.let { v -> // already radians
                     values.add(SignalKValue(path = "navigation.headingCompass", value = v))
                 }
             }
@@ -410,7 +410,7 @@ class SignalKTransmitter @Inject constructor(
             // publish today. It also lets a consumer derive true heading itself, with the
             // deviation caveat visible in the path name it came from.
             sensorData.magneticVariation?.let { variation ->
-                SignalKValues.finiteNumber(variation.toDouble())?.let { v ->  // already radians
+                SignalKValues.finiteNumber(variation.toDouble())?.let { v -> // already radians
                     values.add(SignalKValue(path = "navigation.magneticVariation", value = v))
                 }
             }
@@ -457,11 +457,11 @@ class SignalKTransmitter @Inject constructor(
 
         // Vehicle-frame rate of turn, positive to starboard (frame-conventions.md §4.2).
         sensorData.rateOfTurn?.let { rate ->
-            SignalKValues.finiteNumber(rate.toDouble())?.let { v ->  // already rad/s
+            SignalKValues.finiteNumber(rate.toDouble())?.let { v -> // already rad/s
                 values.add(SignalKValue(path = "navigation.rateOfTurn", value = v))
             }
         }
-        
+
         // Environmental sensors (conditional based on settings)
         if (sendPressure) {
             sensorData.pressure?.let { pressure ->
@@ -473,7 +473,7 @@ class SignalKTransmitter @Inject constructor(
                 )
             }
         }
-        
+
         sensorData.temperature?.let { temperature ->
             values.add(
                 SignalKValue(
@@ -482,7 +482,7 @@ class SignalKTransmitter @Inject constructor(
                 )
             )
         }
-        
+
         sensorData.relativeHumidity?.let { humidity ->
             values.add(
                 SignalKValue(
@@ -493,34 +493,36 @@ class SignalKTransmitter @Inject constructor(
         }
 
         val vesselContext = context?.let { AppSettings.getSignalKContext(it) } ?: "vessels.self"
-        
-        if (values.isEmpty()) return SignalKMessage(
-            context = vesselContext, 
-            updates = emptyList()
-        )
+
+        if (values.isEmpty()) {
+            return SignalKMessage(
+                context = vesselContext,
+                updates = emptyList()
+            )
+        }
 
         val update = SignalKUpdate(
             source = source,
             timestamp = timestamp,
             values = values
         )
-        
+
         return SignalKMessage(
             context = vesselContext,
             updates = listOf(update)
         )
     }
-    
+
     private suspend fun sendMessage(message: SignalKMessage) {
         try {
             val json = Json.encodeToString(message)
-            
+
             webSocket?.let { ws ->
                 ws.send(json)
             } ?: run {
                 throw Exception("WebSocket connection not established")
             }
-            
+
             // Update tracking state
             _lastSentMessage.value = json
             _messagesSent.value = _messagesSent.value + 1
@@ -531,7 +533,7 @@ class SignalKTransmitter @Inject constructor(
             Log.e(TAG, "SignalK transmission error: ${e.javaClass.simpleName} - ${e.message}", e)
         }
     }
-    
+
     private suspend fun initializeWebSocket() {
         // Atomic state transition: DISCONNECTED -> CONNECTING
         // If already CONNECTING or CONNECTED, this returns false and we skip initialization
@@ -539,7 +541,7 @@ class SignalKTransmitter @Inject constructor(
             Log.d(TAG, "WebSocket initialization skipped - current state: ${webSocketState.get()}")
             return
         }
-        
+
         Log.d(TAG, "Starting WebSocket connection...")
 
         // If we have no token but stored credentials exist, try to login now.
@@ -550,7 +552,7 @@ class SignalKTransmitter @Inject constructor(
             Log.d(TAG, "No token available — attempting login before WebSocket connection")
             authenticationService.tryRefreshToken()
         }
-        
+
         withContext(Dispatchers.IO) {
             try {
                 okHttpClient = OkHttpClient.Builder()
@@ -559,8 +561,8 @@ class SignalKTransmitter @Inject constructor(
                     .connectTimeout(30, TimeUnit.SECONDS)
                     .retryOnConnectionFailure(true)
                     .build()
-                
-                val streamUrl = "${baseUrl}/signalk/v1/stream"
+
+                val streamUrl = "$baseUrl/signalk/v1/stream"
                 val request = Request.Builder()
                     .url(streamUrl)
                     .apply {
@@ -570,7 +572,7 @@ class SignalKTransmitter @Inject constructor(
                         }
                     }
                     .build()
-                
+
                 val webSocketListener = object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         // Transition: CONNECTING -> CONNECTED
@@ -578,42 +580,41 @@ class SignalKTransmitter @Inject constructor(
                         _connectionStatus.value = true
                         Log.d(TAG, "WebSocket connected to SignalK server")
                     }
-                
+
                     override fun onMessage(webSocket: WebSocket, text: String) {
                         Log.d(TAG, "Received from SignalK: $text")
                     }
-                    
+
                     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                         Log.d(TAG, "WebSocket closing: $code $reason")
                     }
-                    
+
                     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                         // Transition: any state -> DISCONNECTED
                         webSocketState.set(WebSocketState.DISCONNECTED)
                         _connectionStatus.value = false
                         this@SignalKTransmitter.webSocket = null
                         Log.d(TAG, "WebSocket closed: $code $reason")
-                        
+
                         // Auto-reconnect for unexpected closures (not user-initiated)
                         if (code != 1000) {
                             Log.w(TAG, "Unexpected WebSocket closure (code: $code), scheduling reconnection...")
                             scheduleReconnection(5000)
                         }
                     }
-                    
+
                     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                         // Transition: any state -> DISCONNECTED
                         webSocketState.set(WebSocketState.DISCONNECTED)
                         _connectionStatus.value = false
                         this@SignalKTransmitter.webSocket = null
                         Log.e(TAG, "WebSocket error: ${t.message}", t)
-                        
+
                         handleWebSocketFailure(response)
                     }
                 }
-                
+
                 webSocket = okHttpClient?.newWebSocket(request, webSocketListener)
-                
             } catch (e: Exception) {
                 // Transition back to DISCONNECTED on setup error
                 webSocketState.set(WebSocketState.DISCONNECTED)
@@ -622,7 +623,7 @@ class SignalKTransmitter @Inject constructor(
             }
         }
     }
-    
+
     /**
      * Handle WebSocket failure by checking for auth errors and scheduling reconnection.
      */
@@ -632,7 +633,7 @@ class SignalKTransmitter @Inject constructor(
                 val errorMsg = "Authentication failed (${resp.code}): Token may be expired or invalid"
                 Log.e(TAG, errorMsg)
                 _authenticationError.value = errorMsg
-                
+
                 // Attempt automatic token renewal
                 // Use NonCancellable to ensure token renewal completes even if streaming stops
                 transmitterScope?.launch {
@@ -658,7 +659,8 @@ class SignalKTransmitter @Inject constructor(
                             // Keep retrying as long as we have credentials: the server may
                             // still be coming up (auth endpoint and WebSocket together).
                             if (authenticationService.hasStoredCredentials() &&
-                                transmitterScope?.isActive == true) {
+                                transmitterScope?.isActive == true
+                            ) {
                                 Log.d(TAG, "Credentials exist — scheduling reconnect retry in 30 s")
                                 scheduleReconnection(30_000)
                             }

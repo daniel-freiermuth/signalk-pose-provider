@@ -113,13 +113,19 @@ data class Quaternion(val w: Float, val x: Float, val y: Float, val z: Float) {
      * directly and the §10 reference poses apply unchanged.
      */
     fun toRotationMatrix(): FloatArray {
-        val xx = x * x; val yy = y * y; val zz = z * z
-        val xy = x * y; val xz = x * z; val yz = y * z
-        val wx = w * x; val wy = w * y; val wz = w * z
+        val xx = x * x
+        val yy = y * y
+        val zz = z * z
+        val xy = x * y
+        val xz = x * z
+        val yz = y * z
+        val wx = w * x
+        val wy = w * y
+        val wz = w * z
         return floatArrayOf(
-            1f - 2f * (yy + zz), 2f * (xy - wz),      2f * (xz + wy),
-            2f * (xy + wz),      1f - 2f * (xx + zz), 2f * (yz - wx),
-            2f * (xz - wy),      2f * (yz + wx),      1f - 2f * (xx + yy)
+            1f - 2f * (yy + zz), 2f * (xy - wz), 2f * (xz + wy),
+            2f * (xy + wz), 1f - 2f * (xx + zz), 2f * (yz - wx),
+            2f * (xz - wy), 2f * (yz + wx), 1f - 2f * (xx + yy)
         )
     }
 }

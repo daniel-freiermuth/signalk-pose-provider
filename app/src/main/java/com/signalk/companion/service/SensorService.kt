@@ -1,11 +1,11 @@
 package com.signalk.companion.service
 
 import android.content.Context
+import android.hardware.GeomagneticField
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.hardware.GeomagneticField
 import android.util.Log
 import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
@@ -13,9 +13,9 @@ import com.signalk.companion.util.DeviceCalibration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
-import java.util.Locale
 import kotlin.math.*
 
 @Singleton
@@ -44,8 +44,8 @@ class SensorService @Inject constructor(
     private var rotationMatrix = FloatArray(9)
 
     // Filtering for smooth data
-    private val alpha = 0.8f  // Low-pass filter constant
-    
+    private val alpha = 0.8f // Low-pass filter constant
+
     // Marine navigation configuration: device-to-vehicle calibration matrix (R_D_V)
     // R_W_V = R_W_D * calibrationMatrix gives vehicle attitude in world frame.
     // @Volatile because this is genuinely cross-thread: SignalKStreamingService writes it
@@ -53,21 +53,22 @@ class SensorService @Inject constructor(
     // looper. The volatile write/read pair also publishes the array's contents safely,
     // since the matrix is fully built before assignment.
     @Volatile private var calibrationMatrix = DeviceCalibration.IDENTITY_3X3.copyOf()
+
     @Volatile private var hasRotationMatrix = false
-    
+
     // Current sensor delay setting and rate limiting
     private var currentSensorDelay = SensorManager.SENSOR_DELAY_UI
     private var updateIntervalMs = 1000 // Default 1 second
     private var lastUpdateTime = 0L
-    
+
     // Cached sensor data to prevent data loss during rate limiting
     // Initialize magnetometerAccuracy to UNRELIABLE so the UI shows something
     // immediately; onAccuracyChanged will update it once Android reports the real value.
     private var pendingData = SensorData(magnetometerAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE)
-    
+
     // Accumulated sensor readings for rate limiting
     private var pendingSensorUpdate = false
-    
+
     // Track active state
     private var isActive = false
 
@@ -76,6 +77,7 @@ class SensorService @Inject constructor(
     private var cachedVariationLat = 0.0
     private var cachedVariationLon = 0.0
     private var cachedVariationAtMs = 0L
+
     /** Guards the no-fix warning so it fires on the transition, not on every sensor event. */
     private var loggedMissingFix = false
 
@@ -96,47 +98,50 @@ class SensorService @Inject constructor(
     fun startSensorUpdates(updateIntervalMs: Int = 1000) {
         startSensorUpdates(updateIntervalMs, needsHeading = true, needsPressure = true)
     }
-    
+
     fun startSensorUpdates(updateIntervalMs: Int = 1000, needsHeading: Boolean = true, needsPressure: Boolean = true) {
         this.updateIntervalMs = updateIntervalMs
         currentSensorDelay = getSensorDelayFromInterval(updateIntervalMs)
         lastUpdateTime = 0L // Reset to force immediate first update
         hasRotationMatrix = false // Force waiting for fresh sensor data
-        Log.d(TAG, "Starting sensor updates with interval ${updateIntervalMs}ms (delay: $currentSensorDelay, heading=$needsHeading, pressure=$needsPressure)")
-        
+        Log.d(
+            TAG,
+            "Starting sensor updates with interval ${updateIntervalMs}ms (delay: $currentSensorDelay, heading=$needsHeading, pressure=$needsPressure)"
+        )
+
         // Register sensors based on what's needed
         if (needsHeading) {
-            magnetometer?.let { 
+            magnetometer?.let {
                 sensorManager.registerListener(this, it, currentSensorDelay)
                 Log.d(TAG, "Magnetometer registered (needed for heading)")
             }
-            accelerometer?.let { 
+            accelerometer?.let {
                 sensorManager.registerListener(this, it, currentSensorDelay)
                 Log.d(TAG, "Accelerometer registered (needed for heading)")
             }
-            gyroscope?.let { 
+            gyroscope?.let {
                 sensorManager.registerListener(this, it, currentSensorDelay)
                 Log.d(TAG, "Gyroscope registered (needed for heading)")
             }
         } else {
             Log.d(TAG, "Heading disabled - skipping magnetometer, accelerometer, gyroscope")
         }
-        
+
         if (needsPressure) {
-            pressure?.let { 
+            pressure?.let {
                 sensorManager.registerListener(this, it, currentSensorDelay)
                 Log.d(TAG, "Pressure sensor registered")
             }
         } else {
             Log.d(TAG, "Pressure disabled - skipping pressure sensor")
         }
-        
+
         // Always register temperature and humidity as they're not configurable yet
-        temperature?.let { 
+        temperature?.let {
             sensorManager.registerListener(this, it, currentSensorDelay)
             Log.d(TAG, "Temperature sensor registered")
         }
-        humidity?.let { 
+        humidity?.let {
             sensorManager.registerListener(this, it, currentSensorDelay)
             Log.d(TAG, "Humidity sensor registered")
         }
@@ -156,7 +161,7 @@ class SensorService @Inject constructor(
     }
 
     fun setCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
-        Log.d(TAG, "Setting calibration angles: α=${alphaDeg}°, β=${betaDeg}°, γ=${gammaDeg}°")
+        Log.d(TAG, "Setting calibration angles: α=$alphaDeg°, β=$betaDeg°, γ=$gammaDeg°")
         calibrationMatrix = DeviceCalibration.composeZXZ(alphaDeg, betaDeg, gammaDeg)
     }
 
@@ -169,7 +174,7 @@ class SensorService @Inject constructor(
         sensorManager.unregisterListener(this)
         isActive = false
     }
-    
+
     fun isSensorUpdatesActive(): Boolean {
         return isActive
     }
@@ -185,7 +190,7 @@ class SensorService @Inject constructor(
                 magneticField[2] = alpha * magneticField[2] + (1 - alpha) * event.values[2]
                 updateOrientation()
             }
-            
+
             Sensor.TYPE_ACCELEROMETER -> {
                 // Apply low-pass filter for gravity
                 gravity[0] = alpha * gravity[0] + (1 - alpha) * event.values[0]
@@ -193,29 +198,29 @@ class SensorService @Inject constructor(
                 gravity[2] = alpha * gravity[2] + (1 - alpha) * event.values[2]
                 updateOrientation()
             }
-            
+
             Sensor.TYPE_GYROSCOPE -> {
-                gyroscope_data[0] = event.values[0]  // rad/s around x-axis
-                gyroscope_data[1] = event.values[1]  // rad/s around y-axis
-                gyroscope_data[2] = event.values[2]  // rad/s around z-axis
+                gyroscope_data[0] = event.values[0] // rad/s around x-axis
+                gyroscope_data[1] = event.values[1] // rad/s around y-axis
+                gyroscope_data[2] = event.values[2] // rad/s around z-axis
                 updateGyroscopeData()
             }
-            
+
             Sensor.TYPE_PRESSURE -> {
                 val pressureHpa = event.values[0]
-                val pressurePa = pressureHpa * 100  // Convert hPa to Pa
+                val pressurePa = pressureHpa * 100 // Convert hPa to Pa
                 updateSensorData { copy(pressure = pressurePa) }
             }
-            
+
             Sensor.TYPE_AMBIENT_TEMPERATURE -> {
                 val temperatureCelsius = event.values[0]
-                val temperatureKelvin = temperatureCelsius + 273.15f  // Convert °C to K
+                val temperatureKelvin = temperatureCelsius + 273.15f // Convert °C to K
                 updateSensorData { copy(temperature = temperatureKelvin) }
             }
-            
+
             Sensor.TYPE_RELATIVE_HUMIDITY -> {
                 val humidityPercent = event.values[0]
-                val humidityRatio = humidityPercent / 100f  // Convert % to ratio
+                val humidityRatio = humidityPercent / 100f // Convert % to ratio
                 updateSensorData { copy(relativeHumidity = humidityRatio) }
             }
         }
@@ -231,7 +236,7 @@ class SensorService @Inject constructor(
     private fun updateOrientation() {
         if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, magneticField)) {
             hasRotationMatrix = true
-            
+
             // Apply calibration: R_W_V = R_W_D * R_D_V
             val vehicleMatrix = DeviceCalibration.multiply3x3(rotationMatrix, calibrationMatrix)
 
@@ -317,7 +322,10 @@ class SensorService @Inject constructor(
             )
 
             val declinationDegrees = geomagneticField.declination
-            Log.d(TAG, "Magnetic variation: ${declinationDegrees}° at ${locationData.latitude}, ${locationData.longitude}")
+            Log.d(
+                TAG,
+                "Magnetic variation: $declinationDegrees° at ${locationData.latitude}, ${locationData.longitude}"
+            )
 
             val variationRad = Math.toRadians(declinationDegrees.toDouble()).toFloat()
             cachedVariationRad = variationRad
@@ -366,33 +374,36 @@ class SensorService @Inject constructor(
 
     private fun updateSensorData(update: SensorData.() -> SensorData) {
         val currentTime = System.currentTimeMillis()
-        
+
         // Always cache the latest sensor values to prevent data loss
         pendingData = pendingData.update()
-        
+
         // Rate limiting: only emit to StateFlow at configured intervals
         if (lastUpdateTime != 0L && currentTime - lastUpdateTime < updateIntervalMs) {
             pendingSensorUpdate = true
             return // Skip emission but data is cached
         }
-        
+
         // Emit cached data with current timestamp
         _sensorData.value = pendingData.copy(timestamp = currentTime)
-        
+
         // Update the last update time to track rate limiting
         val actualInterval = if (lastUpdateTime > 0) currentTime - lastUpdateTime else 0
         lastUpdateTime = currentTime
         pendingSensorUpdate = false
-        
+
         // Orientation values ride along here rather than being logged per sensor event,
         // so diagnostics cost one formatted line per emission instead of one per callback.
         val d = pendingData
-        Log.d(TAG, "Sensor data emitted. Actual interval: ${actualInterval}ms " +
-                  "(configured: ${updateIntervalMs}ms)" +
-                  d.compassHeading.degOrNull("compass")+
-                  d.approxTrueHeading.degOrNull("approxTrue") +
-                  d.pitch.degOrNull("pitch") +
-                  d.roll.degOrNull("roll"))
+        Log.d(
+            TAG,
+            "Sensor data emitted. Actual interval: ${actualInterval}ms " +
+                "(configured: ${updateIntervalMs}ms)" +
+                d.compassHeading.degOrNull("compass") +
+                d.approxTrueHeading.degOrNull("approxTrue") +
+                d.pitch.degOrNull("pitch") +
+                d.roll.degOrNull("roll")
+        )
     }
 
     /** Formats a radian value as `, name=12.3°`, or "" when absent. Log-only helper. */
@@ -402,12 +413,12 @@ class SensorService @Inject constructor(
     private fun logAvailableSensors() {
         val availableSensors = mutableListOf<String>()
         if (magnetometer != null) availableSensors.add("Magnetometer")
-        if (accelerometer != null) availableSensors.add("Accelerometer") 
+        if (accelerometer != null) availableSensors.add("Accelerometer")
         if (gyroscope != null) availableSensors.add("Gyroscope")
         if (pressure != null) availableSensors.add("Pressure")
         if (temperature != null) availableSensors.add("Temperature")
         if (humidity != null) availableSensors.add("Humidity")
-        
+
         Log.i(TAG, "Available sensors: ${availableSensors.joinToString(", ")}")
     }
 
@@ -421,13 +432,13 @@ class SensorService @Inject constructor(
             "humidity" to (humidity != null)
         )
     }
-    
+
     private fun getSensorDelayFromInterval(updateIntervalMs: Int): Int {
         // Match sensor sampling rate to emission rate for battery efficiency
         return when {
-            updateIntervalMs <= 100 -> SensorManager.SENSOR_DELAY_GAME     // ~50Hz for very fast updates
-            updateIntervalMs <= 500 -> SensorManager.SENSOR_DELAY_NORMAL   // ~5Hz provides good smoothing
-            else -> SensorManager.SENSOR_DELAY_NORMAL                      // ~5Hz for 1+ second intervals
+            updateIntervalMs <= 100 -> SensorManager.SENSOR_DELAY_GAME // ~50Hz for very fast updates
+            updateIntervalMs <= 500 -> SensorManager.SENSOR_DELAY_NORMAL // ~5Hz provides good smoothing
+            else -> SensorManager.SENSOR_DELAY_NORMAL // ~5Hz for 1+ second intervals
         }
     }
 }

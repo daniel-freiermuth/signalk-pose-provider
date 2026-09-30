@@ -2,31 +2,16 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ArgumentListWrapping:AttitudeEngine.kt$AttitudeEngine$( lastGyro[0] - bias[0], lastGyro[1] - bias[1], lastGyro[2] - bias[2] )</ID>
-    <ID>ArgumentListWrapping:LocationService.kt$LocationService.&lt;no name provided&gt;$(TAG, "GNSS fix received. Actual interval: ${actualInterval}ms (configured: ${currentIntervalMs}ms)")</ID>
-    <ID>ArgumentListWrapping:MainActivity.kt$MainActivity$("For reliable marine navigation, this app needs to run continuously in the background. Please disable battery optimization to ensure uninterrupted GPS tracking and data transmission.")</ID>
-    <ID>ArgumentListWrapping:MainViewModel.kt$MainViewModel$(TAG, "calibrateAll: starting, sensorsActive=${sensorService.isSensorUpdatesActive()}, hasRotation=${sensorService.hasValidRotationMatrix()}")</ID>
-    <ID>ArgumentListWrapping:MainViewModel.kt$MainViewModel$(calibrationAlphaDeg = alphaDeg, calibrationBetaDeg = betaDeg, calibrationGammaDeg = gammaDeg)</ID>
-    <ID>ArgumentListWrapping:RawSensorSource.kt$RawSensorSource$( eventListener, sensor, samplingPeriodUs, NO_BATCHING_US, handler )</ID>
-    <ID>ArgumentListWrapping:RawSensorSource.kt$RawSensorSource$( timestamp, values[0], values[1], values[2], values.getOrNull(3) )</ID>
-    <ID>ArgumentListWrapping:Recording.kt$RecordingFormat$( f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(), f.getOrNull(5)?.toFloat() ?: 0f, f.getOrNull(6)?.toFloat() ?: 0f, f.getOrNull(7)?.toFloat() ?: 0f )</ID>
-    <ID>ArgumentListWrapping:Recording.kt$RecordingFormat$( f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(), optF(f.getOrNull(5)) )</ID>
-    <ID>ArgumentListWrapping:RecordingSession.kt$RecordingSession$( context.getExternalFilesDir(null) ?: context.filesDir, DIRECTORY )</ID>
-    <ID>ArgumentListWrapping:SensorService.kt$SensorService$(TAG, "Magnetic variation: ${declinationDegrees}° at ${locationData.latitude}, ${locationData.longitude}")</ID>
-    <ID>ArgumentListWrapping:SensorService.kt$SensorService$(TAG, "Sensor data emitted. Actual interval: ${actualInterval}ms " + "(configured: ${updateIntervalMs}ms)" + d.compassHeading.degOrNull("compass")+ d.approxTrueHeading.degOrNull("approxTrue") + d.pitch.degOrNull("pitch") + d.roll.degOrNull("roll"))</ID>
-    <ID>ArgumentListWrapping:SensorService.kt$SensorService$(TAG, "Starting sensor updates with interval ${updateIntervalMs}ms (delay: $currentSensorDelay, heading=$needsHeading, pressure=$needsPressure)")</ID>
-    <ID>ArgumentListWrapping:SignalKStreamingService.kt$SignalKStreamingService$( parsedUrl, locationRate, sensorRate, sendLocation, sendHeading, sendPressure, startId )</ID>
-    <ID>ArgumentListWrapping:SignalKStreamingService.kt$SignalKStreamingService$( this, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE )</ID>
-    <ID>ArgumentListWrapping:SignalKStreamingService.kt$SignalKStreamingService$( this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE )</ID>
-    <ID>ArgumentListWrapping:SignalKStreamingService.kt$SignalKStreamingService$(TAG, "Starting sensor updates with rate: ${sensorRate}ms (heading=$sendHeading, pressure=$sendPressure)")</ID>
-    <ID>ArgumentListWrapping:SignalKStreamingService.kt$SignalKStreamingService$(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)</ID>
+    <ID>ArgumentListWrapping:MainViewModel.kt$MainViewModel$(error = "Invalid server URL: ${currentState.serverUrl}. Please use http://, https://, ws://, or wss:// protocol.")</ID>
+    <ID>ArgumentListWrapping:SignalKStreamingService.kt$SignalKStreamingService$(TAG, "Starting SignalK streaming to ${parsedUrl.toUrlString()} (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")</ID>
+    <ID>ArgumentListWrapping:SignalKStreamingService.kt$SignalKStreamingService$(TAG, "Updating streaming configuration (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")</ID>
     <ID>ComplexCondition:AppSettings.kt$AppSettings$vesselId.startsWith("vessels.") || vesselId.startsWith("aircraft.") || vesselId.startsWith("aton.") || vesselId.startsWith("shore.")</ID>
     <ID>ComplexCondition:MainScreen.kt$sensor.compassHeading != null || sensor.approxTrueHeading != null || sensor.roll != null || sensor.pitch != null || sensor.rateOfTurn != null</ID>
     <ID>CyclomaticComplexMethod:AuthenticationService.kt$AuthenticationService$suspend fun login(serverUrl: String, username: String, password: String): Result&lt;LoginResponse&gt;</ID>
     <ID>CyclomaticComplexMethod:MainScreen.kt$@Composable fun SensorDataCard( locationData: com.signalk.companion.data.model.LocationData?, sensorData: com.signalk.companion.data.model.SensorData? )</ID>
     <ID>CyclomaticComplexMethod:MainScreen.kt$@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class) @Composable fun MainScreen( onNavigateToSettings: () -&gt; Unit = {}, viewModel: MainViewModel = hiltViewModel() )</ID>
     <ID>CyclomaticComplexMethod:Recording.kt$RecordingFormat$fun parse(line: String): SensorRecord?</ID>
-    <ID>CyclomaticComplexMethod:SignalKStreamingService.kt$SignalKStreamingService$private fun startStreaming(parsedUrl: UrlParser.ParsedUrl, locationRate: Long, sensorRate: Int, sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true, startId: Int = 0)</ID>
+    <ID>CyclomaticComplexMethod:SignalKStreamingService.kt$SignalKStreamingService$private fun startStreaming( parsedUrl: UrlParser.ParsedUrl, locationRate: Long, sensorRate: Int, sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true, startId: Int = 0 )</ID>
     <ID>CyclomaticComplexMethod:SignalKStreamingService.kt$SignalKStreamingService$private fun updateStreamingConfig(locationRate: Long, sensorRate: Int, sendLocation: Boolean, sendHeading: Boolean, sendPressure: Boolean)</ID>
     <ID>CyclomaticComplexMethod:SignalKTransmitter.kt$SignalKTransmitter$private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage</ID>
     <ID>FunctionParameterNaming:DeviceCalibration.kt$DeviceCalibration$A: FloatArray</ID>
@@ -49,17 +34,6 @@
     <ID>ImplicitDefaultLocale:MainScreen.kt$String.format("%.2f", Math.toDegrees(rate.toDouble()))</ID>
     <ID>ImplicitDefaultLocale:MainScreen.kt$String.format("%.2f", location.speed)</ID>
     <ID>ImplicitDefaultLocale:MainScreen.kt$String.format("%.2f", pressure / 100)</ID>
-    <ID>ImportOrdering:MainActivity.kt$import android.app.AlertDialog import android.content.Intent import android.os.Bundle import androidx.activity.ComponentActivity import androidx.activity.compose.setContent import androidx.activity.enableEdgeToEdge import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.material3.MaterialTheme import androidx.compose.material3.Surface import androidx.compose.ui.Modifier import com.signalk.companion.ui.theme.SignalKCompanionTheme import com.signalk.companion.ui.navigation.SignalKNavHost import com.signalk.companion.util.BatteryOptimizationHelper import dagger.hilt.android.AndroidEntryPoint</ID>
-    <ID>ImportOrdering:MainScreen.kt$import androidx.compose.foundation.layout.* import androidx.compose.foundation.rememberScrollState import androidx.compose.foundation.verticalScroll import androidx.compose.foundation.horizontalScroll import androidx.compose.foundation.Canvas import androidx.compose.foundation.gestures.detectDragGestures import androidx.compose.material.icons.Icons import androidx.compose.material.icons.filled.PlayArrow import androidx.compose.material.icons.filled.Close import androidx.compose.material.icons.filled.Settings import androidx.compose.material3.* import androidx.compose.runtime.* import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.drawscope.Stroke import androidx.compose.ui.input.pointer.pointerInput import androidx.compose.ui.text.font.FontWeight import androidx.compose.ui.text.font.FontFamily import androidx.compose.ui.unit.dp import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel import androidx.lifecycle.Lifecycle import androidx.lifecycle.LifecycleEventObserver import androidx.lifecycle.compose.LocalLifecycleOwner import com.google.accompanist.permissions.ExperimentalPermissionsApi import com.google.accompanist.permissions.isGranted import com.google.accompanist.permissions.rememberMultiplePermissionsState import com.signalk.companion.replay.RecordingSession import com.signalk.companion.service.AttitudeEngine import com.signalk.companion.util.DeviceCalibration import android.hardware.SensorManager import java.text.SimpleDateFormat import java.util.* import kotlin.math.*</ID>
-    <ID>ImportOrdering:MainViewModel.kt$import android.content.ComponentName import android.content.Context import android.content.Intent import android.content.ServiceConnection import android.os.IBinder import androidx.lifecycle.ViewModel import androidx.lifecycle.viewModelScope import com.signalk.companion.data.model.LocationData import com.signalk.companion.data.model.SensorData import com.signalk.companion.replay.RecordingSession import com.signalk.companion.service.AttitudeEngine import com.signalk.companion.service.LocationService import com.signalk.companion.service.SensorService import com.signalk.companion.service.SignalKStreamingService import com.signalk.companion.util.AppSettings import com.signalk.companion.util.DeviceCalibration import com.signalk.companion.util.UrlParser import com.signalk.companion.service.SignalKTransmitter import com.signalk.companion.service.AuthenticationService import android.util.Log import dagger.hilt.android.lifecycle.HiltViewModel import dagger.hilt.android.qualifiers.ApplicationContext import kotlinx.coroutines.Job import kotlinx.coroutines.cancelAndJoin import kotlinx.coroutines.delay import kotlinx.coroutines.flow.* import kotlinx.coroutines.launch import kotlinx.coroutines.withTimeoutOrNull import javax.inject.Inject</ID>
-    <ID>ImportOrdering:SensorService.kt$import android.content.Context import android.hardware.Sensor import android.hardware.SensorEvent import android.hardware.SensorEventListener import android.hardware.SensorManager import android.hardware.GeomagneticField import android.util.Log import com.signalk.companion.data.model.LocationData import com.signalk.companion.data.model.SensorData import com.signalk.companion.util.DeviceCalibration import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asStateFlow import javax.inject.Inject import javax.inject.Singleton import java.util.Locale import kotlin.math.*</ID>
-    <ID>ImportOrdering:SignalKData.kt$import kotlinx.serialization.Serializable import kotlinx.serialization.json.JsonElement import kotlinx.serialization.json.JsonPrimitive import kotlinx.serialization.json.JsonObject import kotlinx.serialization.json.buildJsonObject</ID>
-    <ID>ImportOrdering:SignalKStreamingService.kt$import android.app.Notification import android.app.NotificationChannel import android.app.NotificationManager import android.app.PendingIntent import android.app.Service import android.content.Context import android.content.Intent import android.os.Binder import android.os.Build import android.os.IBinder import android.util.Log import androidx.core.app.NotificationCompat import com.signalk.companion.MainActivity import com.signalk.companion.R import com.signalk.companion.data.model.LocationData import com.signalk.companion.replay.FixRecord import com.signalk.companion.replay.RecordingSession import com.signalk.companion.util.BatteryOptimizationHelper import com.signalk.companion.util.AppSettings import com.signalk.companion.util.UrlParser import dagger.hilt.android.AndroidEntryPoint import kotlinx.coroutines.CoroutineScope import kotlinx.coroutines.CoroutineStart import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.SupervisorJob import kotlinx.coroutines.cancel import kotlinx.coroutines.delay import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.SharingStarted import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.flow.map import kotlinx.coroutines.flow.stateIn import kotlinx.coroutines.launch import javax.inject.Inject</ID>
-    <ID>ImportOrdering:SignalKTransmitter.kt$import android.content.Context import android.util.Log import com.signalk.companion.data.model.* import com.signalk.companion.util.AppSettings import com.signalk.companion.util.UrlParser import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.* import kotlinx.serialization.encodeToString import kotlinx.serialization.json.Json import kotlinx.serialization.json.JsonPrimitive import kotlinx.serialization.json.buildJsonObject import okhttp3.* import java.net.InetAddress import java.util.concurrent.TimeUnit import java.util.concurrent.atomic.AtomicReference import javax.inject.Inject import javax.inject.Singleton</ID>
-    <ID>Indentation:DeviceCalibration.kt$DeviceCalibration$ </ID>
-    <ID>Indentation:MainScreen.kt$ </ID>
-    <ID>Indentation:SensorService.kt$SensorService$ </ID>
-    <ID>Indentation:SignalKStreamingService.kt$SignalKStreamingService$ </ID>
     <ID>InjectDispatcher:AuthenticationService.kt$AuthenticationService$IO</ID>
     <ID>InjectDispatcher:SignalKStreamingService.kt$SignalKStreamingService$Default</ID>
     <ID>InjectDispatcher:SignalKTransmitter.kt$SignalKTransmitter$IO</ID>
@@ -71,10 +45,11 @@
     <ID>LongMethod:MainScreen.kt$@Composable fun SensorDataCard( locationData: com.signalk.companion.data.model.LocationData?, sensorData: com.signalk.companion.data.model.SensorData? )</ID>
     <ID>LongMethod:MainScreen.kt$@Composable private fun CalibrationDial( label: String, value: Float, onValueChange: (Float) -&gt; Unit, min: Float, max: Float, modifier: Modifier = Modifier )</ID>
     <ID>LongMethod:MainScreen.kt$@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class) @Composable fun MainScreen( onNavigateToSettings: () -&gt; Unit = {}, viewModel: MainViewModel = hiltViewModel() )</ID>
+    <ID>LongMethod:Recording.kt$RecordingFormat$fun parse(line: String): SensorRecord?</ID>
     <ID>LongMethod:SettingsScreen.kt$@Composable fun CredentialsCard( username: String, password: String, isAuthenticated: Boolean, isLoggingIn: Boolean, onUsernameChange: (String) -&gt; Unit, onPasswordChange: (String) -&gt; Unit, onTestConnection: () -&gt; Unit, onLogout: () -&gt; Unit )</ID>
     <ID>LongMethod:SettingsScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun SettingsScreen( onNavigateBack: () -&gt; Unit, viewModel: SettingsViewModel = hiltViewModel() )</ID>
     <ID>LongMethod:SignalKStreamingService.kt$SignalKStreamingService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
-    <ID>LongMethod:SignalKStreamingService.kt$SignalKStreamingService$private fun startStreaming(parsedUrl: UrlParser.ParsedUrl, locationRate: Long, sensorRate: Int, sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true, startId: Int = 0)</ID>
+    <ID>LongMethod:SignalKStreamingService.kt$SignalKStreamingService$private fun startStreaming( parsedUrl: UrlParser.ParsedUrl, locationRate: Long, sensorRate: Int, sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true, startId: Int = 0 )</ID>
     <ID>LongMethod:SignalKTransmitter.kt$SignalKTransmitter$private fun createLocationMessage(locationData: LocationData): SignalKMessage</ID>
     <ID>LongMethod:SignalKTransmitter.kt$SignalKTransmitter$private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage</ID>
     <ID>LongParameterList:MainScreen.kt$( calibrationAlphaDeg: Float, calibrationBetaDeg: Float, calibrationGammaDeg: Float, onCalibrationAnglesChange: (Float, Float, Float) -&gt; Unit, onCalibrateAll: () -&gt; Unit, onCalibrateAzimuth: () -&gt; Unit, onCalibrateTilt: () -&gt; Unit, hasGps: Boolean )</ID>
@@ -82,7 +57,7 @@
     <ID>LongParameterList:MainScreen.kt$( sendLocation: Boolean, sendHeading: Boolean, sendPressure: Boolean, locationIntervalMs: Long, sensorIntervalMs: Long, onSendLocationChange: (Boolean) -&gt; Unit, onSendHeadingChange: (Boolean) -&gt; Unit, onSendPressureChange: (Boolean) -&gt; Unit, onLocationIntervalChange: (Long) -&gt; Unit, onSensorIntervalChange: (Long) -&gt; Unit, )</ID>
     <ID>LongParameterList:MainViewModel.kt$MainViewModel$( @ApplicationContext private val applicationContext: Context, private val locationService: LocationService, private val sensorService: SensorService, private val signalKTransmitter: SignalKTransmitter, private val authenticationService: AuthenticationService, private val recordingSession: RecordingSession, private val attitudeEngine: AttitudeEngine )</ID>
     <ID>LongParameterList:SettingsScreen.kt$( username: String, password: String, isAuthenticated: Boolean, isLoggingIn: Boolean, onUsernameChange: (String) -&gt; Unit, onPasswordChange: (String) -&gt; Unit, onTestConnection: () -&gt; Unit, onLogout: () -&gt; Unit )</ID>
-    <ID>LongParameterList:SignalKStreamingService.kt$SignalKStreamingService$(parsedUrl: UrlParser.ParsedUrl, locationRate: Long, sensorRate: Int, sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true, startId: Int = 0)</ID>
+    <ID>LongParameterList:SignalKStreamingService.kt$SignalKStreamingService$( parsedUrl: UrlParser.ParsedUrl, locationRate: Long, sensorRate: Int, sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true, startId: Int = 0 )</ID>
     <ID>MagicNumber:AppSettings.kt$AppSettings$180f</ID>
     <ID>MagicNumber:AuthenticationService.kt$AuthenticationService$10000</ID>
     <ID>MagicNumber:AuthenticationService.kt$AuthenticationService$200</ID>
@@ -176,101 +151,28 @@
     <ID>MagicNumber:UrlParser.kt$UrlParser.ParsedUrl$443</ID>
     <ID>MagicNumber:UrlParser.kt$UrlParser.ParsedUrl$80</ID>
     <ID>MatchingDeclarationName:SignalKNavHost.kt$Screen</ID>
-    <ID>MaxLineLength:LocationService.kt$LocationService.&lt;no name provided&gt;$Log.d(TAG, "GNSS fix received. Actual interval: ${actualInterval}ms (configured: ${currentIntervalMs}ms)")</ID>
-    <ID>MaxLineLength:MainActivity.kt$MainActivity$.</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$"For reliable marine navigation, this app needs to run continuously in the background. Please disable battery optimization to ensure uninterrupted GPS tracking and data transmission."</ID>
     <ID>MaxLineLength:MainScreen.kt$SensorDataRow("Compass Heading", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")</ID>
     <ID>MaxLineLength:MainScreen.kt$SensorDataRow("Heel / roll (+stbd down)", "${String.format("%.1f", Math.toDegrees(roll.toDouble()))}°")</ID>
     <ID>MaxLineLength:MainScreen.kt$SensorDataRow("Rate of Turn (+stbd)", "${String.format("%.2f", Math.toDegrees(rate.toDouble()))}°/s")</ID>
     <ID>MaxLineLength:MainScreen.kt$SensorDataRow("True Heading (approx)", "${String.format("%.1f", Math.toDegrees(heading.toDouble()))}°")</ID>
     <ID>MaxLineLength:MainScreen.kt$SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM -&gt; "Medium" to MaterialTheme.colorScheme.secondary</ID>
-    <ID>MaxLineLength:MainScreen.kt$else -&gt; "Unreliable" to MaterialTheme.colorScheme.error</ID>
     <ID>MaxLineLength:MainScreen.kt$text = "• Check server address (hostnames like 'signalk.local' are supported)\n• Ensure network connectivity\n• Verify SignalK server is running"</ID>
-    <ID>MaxLineLength:MainViewModel.kt$MainViewModel$Log.d(TAG, "calibrateAll: starting, sensorsActive=${sensorService.isSensorUpdatesActive()}, hasRotation=${sensorService.hasValidRotationMatrix()}")</ID>
-    <ID>MaxLineLength:MainViewModel.kt$MainViewModel$_uiState.update { it.copy(calibrationAlphaDeg = alphaDeg, calibrationBetaDeg = betaDeg, calibrationGammaDeg = gammaDeg) }</ID>
+    <ID>MaxLineLength:MainViewModel.kt$MainViewModel$"calibrateAll: starting, sensorsActive=${sensorService.isSensorUpdatesActive()}, hasRotation=${sensorService.hasValidRotationMatrix()}"</ID>
     <ID>MaxLineLength:MainViewModel.kt$MainViewModel$it.copy(error = "Invalid server URL: ${currentState.serverUrl}. Please use http://, https://, ws://, or wss:// protocol.")</ID>
-    <ID>MaxLineLength:SensorService.kt$SensorService$Log.d(TAG, "Magnetic variation: ${declinationDegrees}° at ${locationData.latitude}, ${locationData.longitude}")</ID>
-    <ID>MaxLineLength:SensorService.kt$SensorService$Log.d(TAG, "Starting sensor updates with interval ${updateIntervalMs}ms (delay: $currentSensorDelay, heading=$needsHeading, pressure=$needsPressure)")</ID>
+    <ID>MaxLineLength:SensorService.kt$SensorService$"Starting sensor updates with interval ${updateIntervalMs}ms (delay: $currentSensorDelay, heading=$needsHeading, pressure=$needsPressure)"</ID>
+    <ID>MaxLineLength:SignalKStreamingService.kt$SignalKStreamingService$"Starting sensor updates with rate: ${sensorRate}ms (heading=$sendHeading, pressure=$sendPressure)"</ID>
     <ID>MaxLineLength:SignalKStreamingService.kt$SignalKStreamingService$Log.d(TAG, "Starting SignalK streaming to ${parsedUrl.toUrlString()} (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")</ID>
-    <ID>MaxLineLength:SignalKStreamingService.kt$SignalKStreamingService$Log.d(TAG, "Starting sensor updates with rate: ${sensorRate}ms (heading=$sendHeading, pressure=$sendPressure)")</ID>
     <ID>MaxLineLength:SignalKStreamingService.kt$SignalKStreamingService$Log.d(TAG, "Updating streaming configuration (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")</ID>
     <ID>MaxLineLength:SignalKStreamingService.kt$SignalKStreamingService$is IllegalArgumentException -&gt; "Invalid server URL: ${e.message?.substringAfter(":")?.trim() ?: "unknown error"}"</ID>
     <ID>MaxLineLength:SignalKStreamingService.kt$SignalKStreamingService$private</ID>
-    <ID>MaxLineLength:SignalKStreamingService.kt$SignalKStreamingService$sensorService.startSensorUpdates(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)</ID>
     <ID>MaxLineLength:SignalKTransmitter.kt$SignalKTransmitter$private</ID>
-    <ID>MaximumLineLength:LocationService.kt$LocationService.&lt;no name provided&gt;$ </ID>
     <ID>MaximumLineLength:MainActivity.kt$MainActivity$ </ID>
     <ID>MaximumLineLength:MainScreen.kt$ </ID>
     <ID>MaximumLineLength:MainViewModel.kt$MainViewModel$ </ID>
     <ID>MaximumLineLength:SensorService.kt$SensorService$ </ID>
     <ID>MaximumLineLength:SignalKStreamingService.kt$SignalKStreamingService$ </ID>
     <ID>MaximumLineLength:SignalKTransmitter.kt$SignalKTransmitter$ </ID>
-    <ID>MultiLineIfElse:MainScreen.kt$"Compass accuracy low — wave your phone in a figure-8 to calibrate"</ID>
-    <ID>MultiLineIfElse:MainScreen.kt$"Compass unreliable — wave your phone in a figure-8 to calibrate"</ID>
-    <ID>MultiLineIfElse:MainScreen.kt$Icons.Default.Close</ID>
-    <ID>MultiLineIfElse:MainScreen.kt$Icons.Default.PlayArrow</ID>
-    <ID>MultiLineIfElse:MainScreen.kt$MaterialTheme.colorScheme.onSurfaceVariant</ID>
-    <ID>MultiLineIfElse:MainScreen.kt$MaterialTheme.colorScheme.primary</ID>
-    <ID>MultiLineIfElse:Recording.kt$RecordingFormat$AccelRecord(f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat())</ID>
-    <ID>MultiLineIfElse:Recording.kt$RecordingFormat$FixRecord( f[1].toLong(), f[2].toDouble(), f[3].toDouble(), optD(f.getOrNull(4)), optF(f.getOrNull(5)), optF(f.getOrNull(6)), optF(f.getOrNull(7)), optF(f.getOrNull(8)), optF(f.getOrNull(9)) )</ID>
-    <ID>MultiLineIfElse:Recording.kt$RecordingFormat$GyroRecord( f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(), f.getOrNull(5)?.toFloat() ?: 0f, f.getOrNull(6)?.toFloat() ?: 0f, f.getOrNull(7)?.toFloat() ?: 0f )</ID>
-    <ID>MultiLineIfElse:Recording.kt$RecordingFormat$MagRecord( f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(), f.getOrNull(5)?.toFloat() ?: 0f, f.getOrNull(6)?.toFloat() ?: 0f, f.getOrNull(7)?.toFloat() ?: 0f )</ID>
-    <ID>MultiLineIfElse:Recording.kt$RecordingFormat$RotationVectorRecord( f[1].toLong(), f[2].toFloat(), f[3].toFloat(), f[4].toFloat(), optF(f.getOrNull(5)) )</ID>
-    <ID>MultiLineIfElse:Recording.kt$RecordingFormat$null</ID>
-    <ID>MultiLineIfElse:SettingsScreen.kt$MaterialTheme.colorScheme.onPrimaryContainer</ID>
-    <ID>MultiLineIfElse:SettingsScreen.kt$MaterialTheme.colorScheme.onSurfaceVariant</ID>
-    <ID>MultiLineIfElse:SettingsScreen.kt$MaterialTheme.colorScheme.primaryContainer</ID>
-    <ID>MultiLineIfElse:SettingsScreen.kt$MaterialTheme.colorScheme.surfaceVariant</ID>
-    <ID>MultiLineIfElse:SettingsScreen.kt$PasswordVisualTransformation()</ID>
-    <ID>MultiLineIfElse:SettingsScreen.kt$VisualTransformation.None</ID>
-    <ID>MultiLineIfElse:SignalKTransmitter.kt$SignalKTransmitter$return SignalKMessage( context = vesselContext, updates = emptyList() )</ID>
-    <ID>NoBlankLineBeforeRbrace:SignalKStreamingService.kt$SignalKStreamingService$ </ID>
-    <ID>NoBlankLineBeforeRbrace:SignalKTransmitter.kt$SignalKTransmitter$ </ID>
-    <ID>NoBlankLineBeforeRbrace:SignalKTransmitter.kt$SignalKTransmitter.Companion$ </ID>
-    <ID>NoConsecutiveBlankLines:MainScreen.kt$ </ID>
-    <ID>NoEmptyFirstLineInMethodBlock:AuthenticationService.kt$AuthenticationService$ </ID>
-    <ID>NoMultipleSpaces:AuthData.kt$AuthState$ </ID>
-    <ID>NoMultipleSpaces:AuthData.kt$LoginResponse$ </ID>
-    <ID>NoMultipleSpaces:AuthenticationService.kt$AuthenticationService$ </ID>
-    <ID>NoMultipleSpaces:DeviceCalibration.kt$DeviceCalibration$ </ID>
-    <ID>NoMultipleSpaces:DeviceCalibration.kt$DeviceCalibration.NauticalAngles$ </ID>
-    <ID>NoMultipleSpaces:MahonyAhrs.kt$MahonyAhrs$ </ID>
-    <ID>NoMultipleSpaces:MainScreen.kt$ </ID>
-    <ID>NoMultipleSpaces:MainViewModel.kt$MainUiState$ </ID>
-    <ID>NoMultipleSpaces:Quaternion.kt$Quaternion$ </ID>
-    <ID>NoMultipleSpaces:SensorService.kt$SensorService$ </ID>
-    <ID>NoMultipleSpaces:SignalKData.kt$LocationData$ </ID>
-    <ID>NoMultipleSpaces:SignalKData.kt$SensorData$ </ID>
-    <ID>NoMultipleSpaces:SignalKData.kt$SignalKValue$ </ID>
-    <ID>NoMultipleSpaces:SignalKStreamingService.kt$SignalKStreamingService.StreamingState.IDLE$ </ID>
-    <ID>NoMultipleSpaces:SignalKStreamingService.kt$SignalKStreamingService.StreamingState.STARTING$ </ID>
-    <ID>NoMultipleSpaces:SignalKStreamingService.kt$SignalKStreamingService.StreamingState.STREAMING$ </ID>
-    <ID>NoMultipleSpaces:SignalKTransmitter.kt$SignalKTransmitter$ </ID>
-    <ID>NoMultipleSpaces:SignalKTransmitter.kt$SignalKTransmitter.WebSocketState.CONNECTED$ </ID>
-    <ID>NoMultipleSpaces:SignalKTransmitter.kt$SignalKTransmitter.WebSocketState.CONNECTING$ </ID>
-    <ID>NoMultipleSpaces:SignalKTransmitter.kt$SignalKTransmitter.WebSocketState.DISCONNECTED$ </ID>
-    <ID>NoTrailingSpaces:AppModule.kt$AppModule$ </ID>
-    <ID>NoTrailingSpaces:AppSettings.kt$AppSettings$ </ID>
-    <ID>NoTrailingSpaces:AuthenticationService.kt$AuthenticationService$ </ID>
-    <ID>NoTrailingSpaces:BatteryOptimizationHelper.kt$BatteryOptimizationHelper$ </ID>
-    <ID>NoTrailingSpaces:MainActivity.kt$MainActivity$ </ID>
-    <ID>NoTrailingSpaces:MainScreen.kt$ </ID>
-    <ID>NoTrailingSpaces:MainScreen.kt$// Value display </ID>
-    <ID>NoTrailingSpaces:MainViewModel.kt$MainViewModel$ </ID>
-    <ID>NoTrailingSpaces:MainViewModel.kt$MainViewModel.&lt;no name provided&gt;$ </ID>
-    <ID>NoTrailingSpaces:SensorService.kt$SensorService$ </ID>
-    <ID>NoTrailingSpaces:SettingsScreen.kt$ </ID>
-    <ID>NoTrailingSpaces:SettingsViewModel.kt$SettingsViewModel$ </ID>
-    <ID>NoTrailingSpaces:SignalKData.kt$LocationData$// Speed accuracy in m/s (API 26+) </ID>
-    <ID>NoTrailingSpaces:SignalKData.kt$SensorData$ </ID>
-    <ID>NoTrailingSpaces:SignalKNavHost.kt$ </ID>
-    <ID>NoTrailingSpaces:SignalKStreamingService.kt$SignalKStreamingService$ </ID>
-    <ID>NoTrailingSpaces:SignalKStreamingService.kt$SignalKStreamingService.Companion$ </ID>
-    <ID>NoTrailingSpaces:SignalKTransmitter.kt$SignalKTransmitter$ </ID>
-    <ID>NoTrailingSpaces:SignalKTransmitter.kt$SignalKTransmitter.&lt;no name provided&gt;$ </ID>
-    <ID>NoTrailingSpaces:UrlParser.kt$UrlParser$ </ID>
-    <ID>NoUnusedImports:MainActivity.kt$com.signalk.companion.MainActivity.kt</ID>
-    <ID>NoUnusedImports:MainScreen.kt$com.signalk.companion.ui.main.MainScreen.kt</ID>
-    <ID>NoUnusedImports:SignalKData.kt$com.signalk.companion.data.model.SignalKData.kt</ID>
     <ID>NoWildcardImports:AuthenticationService.kt$import com.signalk.companion.data.model.*</ID>
     <ID>NoWildcardImports:DeviceCalibration.kt$import kotlin.math.*</ID>
     <ID>NoWildcardImports:MainScreen.kt$import androidx.compose.foundation.layout.*</ID>
@@ -286,12 +188,6 @@
     <ID>NoWildcardImports:SignalKTransmitter.kt$import com.signalk.companion.data.model.*</ID>
     <ID>NoWildcardImports:SignalKTransmitter.kt$import kotlinx.coroutines.*</ID>
     <ID>NoWildcardImports:SignalKTransmitter.kt$import okhttp3.*</ID>
-    <ID>ParameterListWrapping:Recording.kt$AccelRecord$( override val timestampNs: Long, val x: Float, val y: Float, val z: Float )</ID>
-    <ID>ParameterListWrapping:Recording.kt$FixRecord$( override val timestampNs: Long, val latitude: Double, val longitude: Double, val altitude: Double? = null, val speedMps: Float? = null, val courseDeg: Float? = null, val horizontalAccuracyM: Float? = null, val speedAccuracyMps: Float? = null, val courseAccuracyDeg: Float? = null )</ID>
-    <ID>ParameterListWrapping:Recording.kt$GyroRecord$( override val timestampNs: Long, val x: Float, val y: Float, val z: Float, val driftX: Float = 0f, val driftY: Float = 0f, val driftZ: Float = 0f )</ID>
-    <ID>ParameterListWrapping:Recording.kt$MagRecord$( override val timestampNs: Long, val x: Float, val y: Float, val z: Float, val biasX: Float = 0f, val biasY: Float = 0f, val biasZ: Float = 0f )</ID>
-    <ID>ParameterListWrapping:Recording.kt$RotationVectorRecord$( override val timestampNs: Long, val x: Float, val y: Float, val z: Float, /** Absent on many devices; reconstructed by [toQuaternion]. */ val w: Float? = null )</ID>
-    <ID>ParameterListWrapping:SignalKStreamingService.kt$SignalKStreamingService$(parsedUrl: UrlParser.ParsedUrl, locationRate: Long, sensorRate: Int, sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true, startId: Int = 0)</ID>
     <ID>RedundantSuspendModifier:LocationService.kt$LocationService$suspend</ID>
     <ID>RedundantSuspendModifier:SignalKTransmitter.kt$SignalKTransmitter$suspend</ID>
     <ID>ReturnCount:AttitudeEngine.kt$AttitudeEngine$fun start( samplingPeriodUs: Int = RawSensorSource.DEFAULT_SAMPLING_PERIOD_US, record: Boolean = false ): Boolean</ID>
@@ -301,20 +197,6 @@
     <ID>ReturnCount:SensorService.kt$SensorService$private fun currentMagneticVariation(): Float?</ID>
     <ID>ReturnCount:SignalKStreamingService.kt$SignalKStreamingService$fun startRecording(locationRate: Long = 1000L): Boolean</ID>
     <ID>ReturnCount:UrlParser.kt$UrlParser$fun parseUrl(url: String): ParsedUrl?</ID>
-    <ID>SpacingAroundOperators:SensorService.kt$SensorService$+</ID>
-    <ID>SpacingBetweenDeclarationsWithAnnotations:SensorService.kt$SensorService$@Volatile private var hasRotationMatrix = false</ID>
-    <ID>SpacingBetweenDeclarationsWithAnnotations:SignalKTransmitter.kt$SignalKTransmitter$@Volatile private var webSocket: WebSocket? = null</ID>
-    <ID>SpacingBetweenDeclarationsWithComments:Recording.kt$RecordingFormat$// Throwing rather than *OrNull conversions: "-" means the sensor did not report the</ID>
-    <ID>SpacingBetweenDeclarationsWithComments:SensorService.kt$SensorService$/** Guards the no-fix warning so it fires on the transition, not on every sensor event. */</ID>
-    <ID>StringTemplate:MainScreen.kt$${selected}</ID>
-    <ID>StringTemplate:SensorService.kt$SensorService$${alphaDeg}</ID>
-    <ID>StringTemplate:SensorService.kt$SensorService$${betaDeg}</ID>
-    <ID>StringTemplate:SensorService.kt$SensorService$${declinationDegrees}</ID>
-    <ID>StringTemplate:SensorService.kt$SensorService$${gammaDeg}</ID>
-    <ID>StringTemplate:SignalKStreamingService.kt$SignalKStreamingService$${alphaDeg}</ID>
-    <ID>StringTemplate:SignalKStreamingService.kt$SignalKStreamingService$${betaDeg}</ID>
-    <ID>StringTemplate:SignalKStreamingService.kt$SignalKStreamingService$${gammaDeg}</ID>
-    <ID>StringTemplate:SignalKTransmitter.kt$SignalKTransmitter$${baseUrl}</ID>
     <ID>SwallowedException:AuthenticationService.kt$AuthenticationService$e: Exception</ID>
     <ID>SwallowedException:AuthenticationService.kt$AuthenticationService$e: java.net.SocketTimeoutException</ID>
     <ID>SwallowedException:MainActivity.kt$MainActivity$e: Exception</ID>
@@ -365,19 +247,5 @@
     <ID>WildcardImport:SignalKTransmitter.kt$import com.signalk.companion.data.model.*</ID>
     <ID>WildcardImport:SignalKTransmitter.kt$import kotlinx.coroutines.*</ID>
     <ID>WildcardImport:SignalKTransmitter.kt$import okhttp3.*</ID>
-    <ID>Wrapping:AppSettings.kt$AppSettings$(</ID>
-    <ID>Wrapping:AuthenticationService.kt$AuthenticationService$(</ID>
-    <ID>Wrapping:AuthenticationService.kt$AuthenticationService$it.copy( isAuthenticated = true, token = loginResponse.token, username = username, password = password, // Store temporarily for re-authentication serverUrl = parsedUrl.toUrlString(), isLoading = false, error = null )</ID>
-    <ID>Wrapping:AuthenticationService.kt$AuthenticationService$it.copy( serverUrl = parsedUrl.toUrlString(), username = username, password = password )</ID>
-    <ID>Wrapping:MahonyAhrs.kt$MahonyAhrs$;</ID>
-    <ID>Wrapping:MainScreen.kt$(</ID>
-    <ID>Wrapping:MainViewModel.kt$MainViewModel$(</ID>
-    <ID>Wrapping:MainViewModel.kt$MainViewModel$it.copy(calibrationAlphaDeg = alphaDeg, calibrationBetaDeg = betaDeg, calibrationGammaDeg = gammaDeg)</ID>
-    <ID>Wrapping:Quaternion.kt$Quaternion$;</ID>
-    <ID>Wrapping:Recording.kt$RecordingFormat$-&gt;</ID>
-    <ID>Wrapping:SensorService.kt$SensorService$(</ID>
-    <ID>Wrapping:SensorService.kt$SensorService$(TAG, "Sensor data emitted. Actual interval: ${actualInterval}ms " + "(configured: ${updateIntervalMs}ms)" + d.compassHeading.degOrNull("compass")+ d.approxTrueHeading.degOrNull("approxTrue") + d.pitch.degOrNull("pitch") + d.roll.degOrNull("roll"))</ID>
-    <ID>Wrapping:SignalKStreamingService.kt$SignalKStreamingService$(</ID>
-    <ID>Wrapping:SignalKTransmitter.kt$SignalKTransmitter$(</ID>
   </CurrentIssues>
 </SmellBaseline>

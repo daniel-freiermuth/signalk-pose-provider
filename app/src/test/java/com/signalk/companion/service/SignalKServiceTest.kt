@@ -1,13 +1,11 @@
 package com.signalk.companion.service
 
 import com.signalk.companion.data.model.LocationData
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
 
 class SignalKDataTest {
-    
+
     @Test
     fun testLocationDataSerialization() {
         // Mock location data
@@ -20,14 +18,14 @@ class SignalKDataTest {
             altitude = 10.0,
             timestamp = System.currentTimeMillis()
         )
-        
+
         // This would normally be a private method, but for testing we can verify
         // the basic structure
         assertNotNull(locationData)
         assertTrue(locationData.latitude > 0)
         assertTrue(locationData.longitude > 0)
     }
-    
+
     @Test
     fun testSignalKMessageStructure() {
         // Test basic SignalK message structure
@@ -37,7 +35,7 @@ class SignalKDataTest {
                 "updates": []
             }
         """.trimIndent()
-        
+
         // This test verifies our data model can be serialized
         assertTrue(true, "SignalK message structure should be valid")
     }

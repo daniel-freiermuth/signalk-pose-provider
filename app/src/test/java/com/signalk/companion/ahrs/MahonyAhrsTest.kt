@@ -85,7 +85,7 @@ class MahonyAhrsTest {
     private fun assertDegreesNear(expected: Float, actualRad: Float, tolDeg: Float, name: String) {
         val actual = Math.toDegrees(actualRad.toDouble()).toFloat()
         val diff = abs(((expected - actual + 540f) % 360f) - 180f)
-        assertTrue(diff <= tolDeg, "$name: expected ${expected}°, got ${actual}° (tol ${tolDeg}°)")
+        assertTrue(diff <= tolDeg, "$name: expected $expected°, got $actual° (tol $tolDeg°)")
     }
 
     // ------------------------------------------------------------------ convergence
@@ -211,7 +211,9 @@ class MahonyAhrsTest {
 
         for (i in 0..2) {
             assertEquals(
-                bias[i], f.gyroBias[i], 0.005f,
+                bias[i],
+                f.gyroBias[i],
+                0.005f,
                 "bias axis $i should converge to the injected value"
             )
         }
@@ -235,8 +237,12 @@ class MahonyAhrsTest {
         // Gyro arrives first, before either reference sensor — a real startup ordering, and
         // the one case where seeding cannot apply. The filter starts at identity, 90° out.
         f.onGyroscope(t, 0f, 0f, 0f)
-        assertEquals(1f, Quaternion.IDENTITY.cosAngleTo(f.attitude), 1e-6f,
-            "with no reference sensors yet, the filter must start at identity")
+        assertEquals(
+            1f,
+            Quaternion.IDENTITY.cosAngleTo(f.attitude),
+            1e-6f,
+            "with no reference sensors yet, the filter must start at identity"
+        )
 
         repeat(15000) {
             t += 10_000_000L
@@ -332,7 +338,10 @@ class MahonyAhrsTest {
         f.onMagnetometer(mag[0], mag[1], mag[2])
         var t = 1_000_000_000L
         f.onGyroscope(t, 0f, 0f, 0f)
-        repeat(500) { t += 10_000_000L; f.onGyroscope(t, 0f, 0f, 0f) }
+        repeat(500) {
+            t += 10_000_000L
+            f.onGyroscope(t, 0f, 0f, 0f)
+        }
 
         assertFalse(f.accelerometerAccepted, "an implausible |a| must be gated out")
         val a = angles(f)
@@ -433,9 +442,11 @@ class MahonyAhrsTest {
         f.onGyroscope(t, 0f, 0f, 0f)
         t += 60_000_000_000L
         f.onGyroscope(t, 0f, 0f, 1f) // 1 rad/s
-        val turnedDeg = abs(Math.toDegrees(angles(f).headingRad.toDouble()).toFloat().let {
-            if (it > 180f) 360f - it else it
-        })
+        val turnedDeg = abs(
+            Math.toDegrees(angles(f).headingRad.toDouble()).toFloat().let {
+                if (it > 180f) 360f - it else it
+            }
+        )
         val maxExpected = Math.toDegrees((1f * MahonyAhrs.MAX_DT_SECONDS).toDouble()).toFloat()
         assertTrue(
             turnedDeg <= maxExpected + 0.5f,
@@ -449,8 +460,12 @@ class MahonyAhrsTest {
         assertFalse(f.isInitialised)
         f.onGyroscope(1_000_000_000L, 0f, 0f, 10f) // huge rate, but no dt exists yet
         assertTrue(f.isInitialised)
-        assertEquals(1f, Quaternion.IDENTITY.cosAngleTo(f.attitude), 1e-6f,
-            "the first gyro sample must not rotate anything")
+        assertEquals(
+            1f,
+            Quaternion.IDENTITY.cosAngleTo(f.attitude),
+            1e-6f,
+            "the first gyro sample must not rotate anything"
+        )
     }
 
     // ------------------------------------------------------------------ numerics

@@ -5,21 +5,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.replay.RecordingSession
 import com.signalk.companion.service.AttitudeEngine
+import com.signalk.companion.service.AuthenticationService
 import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SensorService
 import com.signalk.companion.service.SignalKStreamingService
+import com.signalk.companion.service.SignalKTransmitter
 import com.signalk.companion.util.AppSettings
 import com.signalk.companion.util.DeviceCalibration
 import com.signalk.companion.util.UrlParser
-import com.signalk.companion.service.SignalKTransmitter
-import com.signalk.companion.service.AuthenticationService
-import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -36,9 +36,9 @@ data class MainUiState(
     val serverUrl: String = "", // Raw user input for the URL field
     val parsedUrl: UrlParser.ParsedUrl? = null,
     val vesselId: String = "self",
-    val calibrationAlphaDeg: Float = 0f,  // ZXZ α: screen twist (charging port direction)
-    val calibrationBetaDeg: Float = 0f,   // ZXZ β: tilt from horizontal [0°, 180°]
-    val calibrationGammaDeg: Float = 0f,  // ZXZ γ: heading offset
+    val calibrationAlphaDeg: Float = 0f, // ZXZ α: screen twist (charging port direction)
+    val calibrationBetaDeg: Float = 0f, // ZXZ β: tilt from horizontal [0°, 180°]
+    val calibrationGammaDeg: Float = 0f, // ZXZ γ: heading offset
     // Data transmission options
     val sendLocation: Boolean = true,
     val sendHeading: Boolean = true,
@@ -73,7 +73,7 @@ class MainViewModel @Inject constructor(
     private val recordingSession: RecordingSession,
     private val attitudeEngine: AttitudeEngine
 ) : ViewModel() {
-    
+
     private var streamingService: SignalKStreamingService? = null
     private var bound = false
     private var serviceCollectorJob: Job? = null
@@ -82,13 +82,13 @@ class MainViewModel @Inject constructor(
     companion object {
         private const val TAG = "MainViewModel"
     }
-    
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
             val binder = service as SignalKStreamingService.LocalBinder
             streamingService = binder.getService()
             bound = true
-            
+
             // Cancel any previous collectors and wait for completion before starting new ones
             viewModelScope.launch {
                 serviceCollectorJob?.cancelAndJoin()
@@ -100,7 +100,7 @@ class MainViewModel @Inject constructor(
             cleanupServiceBinding(unbind = false)
         }
     }
-    
+
     /**
      * Starts coroutines to collect service state flows.
      * Must be called from a coroutine context after ensuring previous collectors are cancelled.
@@ -108,26 +108,26 @@ class MainViewModel @Inject constructor(
     private fun startServiceCollectors() {
         // Capture service reference to ensure all collectors use the same instance
         val service = streamingService ?: return
-        
+
         serviceCollectorJob = viewModelScope.launch {
             launch {
                 service.isStreaming.collect { isStreaming ->
                     _uiState.update { it.copy(isStreaming = isStreaming) }
                 }
             }
-            
+
             launch {
                 service.messagesSent.collect { count ->
                     _uiState.update { it.copy(messagesSent = count) }
                 }
             }
-            
+
             launch {
                 service.lastTransmissionTime.collect { time ->
                     _uiState.update { it.copy(lastTransmissionTime = time) }
                 }
             }
-            
+
             launch {
                 service.error.collect { errorMsg ->
                     if (errorMsg != null) {
@@ -137,7 +137,7 @@ class MainViewModel @Inject constructor(
             }
         }
     }
-    
+
     /**
      * Cleans up service binding state. Call when disconnecting from the service.
      * @param unbind If true, unbinds from the service. Set to false when called from onServiceDisconnected
@@ -146,34 +146,34 @@ class MainViewModel @Inject constructor(
     private fun cleanupServiceBinding(unbind: Boolean) {
         serviceCollectorJob?.cancel()
         serviceCollectorJob = null
-        
+
         if (unbind && bound) {
             applicationContext.unbindService(serviceConnection)
         }
         bound = false
         streamingService = null
     }
-    
+
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
-    
+
     init {
         // Configure sensor service with default (identity) calibration
         sensorService.setCalibrationAngles(0f, 0f, 0f)
-        
+
         // Still observe location and sensor data for UI display (but not for transmission)
         viewModelScope.launch {
             locationService.locationUpdates.collect { locationData ->
                 _uiState.update { it.copy(locationData = locationData) }
             }
         }
-        
+
         viewModelScope.launch {
             sensorService.sensorData.collect { sensorData ->
                 _uiState.update { it.copy(sensorData = sensorData) }
             }
         }
-        
+
         // M1 recording status and the filter's own pose. Both are observed unconditionally —
         // they are cheap StateFlows that sit idle when nothing is recording, and the
         // recording outlives this ViewModel, so the UI must be able to rejoin one in progress.
@@ -202,7 +202,7 @@ class MainViewModel @Inject constructor(
                 _uiState.update { it.copy(lastSentMessage = msg) }
             }
         }
-        
+
         // Observe authentication errors from SignalK transmitter
         viewModelScope.launch {
             signalKTransmitter.authenticationError.collect { authError ->
@@ -211,18 +211,18 @@ class MainViewModel @Inject constructor(
                 }
             }
         }
-        
+
         // Observe authentication state
         viewModelScope.launch {
             authenticationService.authState.collect { authState ->
-                _uiState.update { 
+                _uiState.update {
                     it.copy(
                         isAuthenticated = authState.isAuthenticated,
                         username = authState.username,
                         isLoggingIn = authState.isLoading
                     )
                 }
-                
+
                 // Update error state if there's an auth error
                 if (authState.error != null) {
                     _uiState.update { it.copy(error = authState.error) }
@@ -233,7 +233,9 @@ class MainViewModel @Inject constructor(
 
     fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
         Log.d(TAG, "updateCalibrationAngles: α=$alphaDeg, β=$betaDeg, γ=$gammaDeg")
-        _uiState.update { it.copy(calibrationAlphaDeg = alphaDeg, calibrationBetaDeg = betaDeg, calibrationGammaDeg = gammaDeg) }
+        _uiState.update {
+            it.copy(calibrationAlphaDeg = alphaDeg, calibrationBetaDeg = betaDeg, calibrationGammaDeg = gammaDeg)
+        }
         AppSettings.setCalibrationAngles(applicationContext, alphaDeg, betaDeg, gammaDeg)
         sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
         streamingService?.updateCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
@@ -305,7 +307,10 @@ class MainViewModel @Inject constructor(
      */
     fun calibrateAll() {
         viewModelScope.launch {
-            Log.d(TAG, "calibrateAll: starting, sensorsActive=${sensorService.isSensorUpdatesActive()}, hasRotation=${sensorService.hasValidRotationMatrix()}")
+            Log.d(
+                TAG,
+                "calibrateAll: starting, sensorsActive=${sensorService.isSensorUpdatesActive()}, hasRotation=${sensorService.hasValidRotationMatrix()}"
+            )
             if (!ensureSensorData()) {
                 Log.w(TAG, "calibrateAll: sensor data not available within timeout")
                 _uiState.update { it.copy(error = "Calibration failed: no sensor data available") }
@@ -410,7 +415,7 @@ class MainViewModel @Inject constructor(
             true
         } != null
     }
-    
+
     fun updateSendLocation(enabled: Boolean) {
         _uiState.update { it.copy(sendLocation = enabled) }
         // Save to shared preferences
@@ -418,7 +423,7 @@ class MainViewModel @Inject constructor(
         // Update running service if active
         sendConfigUpdateToService()
     }
-    
+
     fun updateSendHeading(enabled: Boolean) {
         _uiState.update { it.copy(sendHeading = enabled) }
         // Save to shared preferences
@@ -426,7 +431,7 @@ class MainViewModel @Inject constructor(
         // Update running service if active
         sendConfigUpdateToService()
     }
-    
+
     fun updateSendPressure(enabled: Boolean) {
         _uiState.update { it.copy(sendPressure = enabled) }
         // Save to shared preferences
@@ -446,7 +451,7 @@ class MainViewModel @Inject constructor(
         AppSettings.setSensorIntervalMs(applicationContext, intervalMs)
         sendConfigUpdateToService()
     }
-    
+
     private fun sendConfigUpdateToService() {
         if (_uiState.value.isStreaming) {
             val intent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
@@ -460,9 +465,9 @@ class MainViewModel @Inject constructor(
             applicationContext.startService(intent)
         }
     }
-    
+
     private var settingsInitialized = false
-    
+
     /**
      * Loads settings from shared preferences. Safe to call multiple times;
      * auto-login only occurs on first invocation.
@@ -478,16 +483,16 @@ class MainViewModel @Inject constructor(
         val savedLocationIntervalMs = AppSettings.getLocationIntervalMs(applicationContext)
         val savedSensorIntervalMs = AppSettings.getSensorIntervalMs(applicationContext)
         val savedUsername = AppSettings.getUsername(applicationContext)
-        
+
         // Load calibration angles
         val savedAlpha = AppSettings.getCalibrationAlphaDeg(applicationContext)
         val savedBeta = AppSettings.getCalibrationBetaDeg(applicationContext)
         val savedGamma = AppSettings.getCalibrationGammaDeg(applicationContext)
-        
+
         // Apply calibration to sensor service
         sensorService.setCalibrationAngles(savedAlpha, savedBeta, savedGamma)
-        
-        _uiState.update { 
+
+        _uiState.update {
             it.copy(
                 serverUrl = savedServerUrl,
                 parsedUrl = savedParsedUrl,
@@ -503,11 +508,12 @@ class MainViewModel @Inject constructor(
                 calibrationGammaDeg = savedGamma
             )
         }
-        
+
         // Auto-login if credentials are stored (only on first initialization)
-        if (!settingsInitialized && 
-            AppSettings.hasCredentials(applicationContext) && 
-            savedServerUrl.isNotBlank()) {
+        if (!settingsInitialized &&
+            AppSettings.hasCredentials(applicationContext) &&
+            savedServerUrl.isNotBlank()
+        ) {
             val savedPassword = AppSettings.getPassword(applicationContext)
             viewModelScope.launch {
                 authenticationService.login(savedServerUrl, savedUsername, savedPassword)
@@ -520,21 +526,21 @@ class MainViewModel @Inject constructor(
         // Validate URL before starting service
         val currentState = _uiState.value
         if (currentState.parsedUrl == null) {
-            _uiState.update { 
-                it.copy(error = "Invalid server URL: ${currentState.serverUrl}. Please use http://, https://, ws://, or wss:// protocol.") 
+            _uiState.update {
+                it.copy(error = "Invalid server URL: ${currentState.serverUrl}. Please use http://, https://, ws://, or wss:// protocol.")
             }
             return
         }
-        
+
         // Clear any previous errors
         _uiState.update { it.copy(error = null) }
-        
+
         // Bind to service if not already bound
         if (!bound) {
             val intent = Intent(applicationContext, SignalKStreamingService::class.java)
             applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
-        
+
         // Start streaming service
         val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
             action = SignalKStreamingService.ACTION_START_STREAMING
@@ -545,7 +551,7 @@ class MainViewModel @Inject constructor(
             putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, currentState.sendHeading)
             putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, currentState.sendPressure)
         }
-        
+
         applicationContext.startForegroundService(serviceIntent)
     }
 
@@ -576,7 +582,7 @@ class MainViewModel @Inject constructor(
             }
         }
     }
-    
+
     /**
      * Start or stop a raw sensor recording (M1).
      *
@@ -616,11 +622,11 @@ class MainViewModel @Inject constructor(
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
-    
+
     fun getAvailableSensors(): Map<String, Boolean> {
         return sensorService.getAvailableSensors()
     }
-    
+
     override fun onCleared() {
         super.onCleared()
         cleanupServiceBinding(unbind = true)

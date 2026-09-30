@@ -144,7 +144,9 @@ class MahonyAhrs(
     /** Latest accelerometer sample, device frame, m/s². Specific force — reads +g up at rest. */
     fun onAccelerometer(x: Float, y: Float, z: Float) {
         if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return
-        accel[0] = x; accel[1] = y; accel[2] = z
+        accel[0] = x
+        accel[1] = y
+        accel[2] = z
         haveAccel = true
     }
 
@@ -159,7 +161,9 @@ class MahonyAhrs(
      */
     fun onMagnetometer(x: Float, y: Float, z: Float) {
         if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return
-        mag[0] = x; mag[1] = y; mag[2] = z
+        mag[0] = x
+        mag[1] = y
+        mag[2] = z
         haveMag = true
     }
 
@@ -244,7 +248,7 @@ class MahonyAhrs(
             q.x + dq.x * half,
             q.y + dq.y * half,
             q.z + dq.z * half
-        ).normalized().alignedWith(q)   // continuity, never w ≥ 0 (§3.2)
+        ).normalized().alignedWith(q) // continuity, never w ≥ 0 (§3.2)
     }
 
     /**
@@ -302,7 +306,11 @@ class MahonyAhrs(
         accelerometerAccepted = false
         magnetometerAccepted = false
         biasEstimatorRunning = false
-        if (clearBias) { gyroBias[0] = 0f; gyroBias[1] = 0f; gyroBias[2] = 0f }
+        if (clearBias) {
+            gyroBias[0] = 0f
+            gyroBias[1] = 0f
+            gyroBias[2] = 0f
+        }
     }
 
     /**
@@ -328,7 +336,9 @@ class MahonyAhrs(
                 val up = attitude.rotateInverse(WORLD_UP)
                 val c = cross(a, up)
                 val g = accelGain
-                e[0] += c[0] * g; e[1] += c[1] * g; e[2] += c[2] * g
+                e[0] += c[0] * g
+                e[1] += c[1] * g
+                e[2] += c[2] * g
                 accelerometerAccepted = true
             }
         }
@@ -347,7 +357,9 @@ class MahonyAhrs(
                 val predicted = attitude.rotateInverse(reference)
                 val c = cross(m, predicted)
                 val g = magGain
-                e[0] += c[0] * g; e[1] += c[1] * g; e[2] += c[2] * g
+                e[0] += c[0] * g
+                e[1] += c[1] * g
+                e[2] += c[2] * g
                 magnetometerAccepted = true
             }
         }

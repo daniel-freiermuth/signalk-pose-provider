@@ -1,10 +1,8 @@
 package com.signalk.companion.util
 
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
 import kotlin.math.*
 
 class DeviceCalibrationTest {
@@ -329,7 +327,7 @@ class DeviceCalibrationTest {
         // Column 2 = where vehicle Z-axis points in world
         //
         // But Android's row-major convention: R[row][col] stored as R[row*3+col]
-        // R_W_V * v_vehicle = v_world. 
+        // R_W_V * v_vehicle = v_world.
         // Column j of R_W_V = R_W_V * e_j = where the j-th vehicle axis points in world.
         // In row-major storage, column j values are at indices [j, j+3, j+6].
         //
@@ -340,9 +338,9 @@ class DeviceCalibrationTest {
         // Column 2 (vehicle Z/up in world): should point Up = (0, 0, 1)
         //   R[2]=0, R[5]=0, R[8]=1
         val expected = floatArrayOf(
-             0f, 1f, 0f,
+            0f, 1f, 0f,
             -1f, 0f, 0f,
-             0f, 0f, 1f
+            0f, 0f, 1f
         )
         assertMatrixEquals(expected, R_W_V, tolerance = 1e-4f)
     }
@@ -356,9 +354,9 @@ class DeviceCalibrationTest {
         // Column 1 (Y in world): (0, -1, 0) → R[1]=0, R[4]=-1, R[7]=0
         // Column 2 (Z in world): (0, 0, 1)  → R[2]=0, R[5]=0, R[8]=1
         val expected = floatArrayOf(
-            -1f,  0f, 0f,
-             0f, -1f, 0f,
-             0f,  0f, 1f
+            -1f, 0f, 0f,
+            0f, -1f, 0f,
+            0f, 0f, 1f
         )
         assertMatrixEquals(expected, R_W_V, tolerance = 1e-4f)
     }
@@ -492,7 +490,8 @@ class DeviceCalibrationTest {
         val waveTilt = DeviceCalibration.composeZYX(0f, 0f, 10f)
         val R_W_V_wavy = DeviceCalibration.multiply3x3(waveTilt, R_W_V_flat)
         val R_W_D_wavy = DeviceCalibration.multiply3x3(
-            R_W_V_wavy, DeviceCalibration.transpose3x3(mounting)
+            R_W_V_wavy,
+            DeviceCalibration.transpose3x3(mounting)
         )
 
         // Before azimuth calibration
@@ -501,7 +500,13 @@ class DeviceCalibrationTest {
         val rollBefore = atan2(-R_W_V_before[6].toDouble(), R_W_V_before[8].toDouble()).toFloat()
 
         val (existingAlpha, existingBeta, existingGamma) = DeviceCalibration.decomposeZXZ(mounting)
-        val (_, updated) = DeviceCalibration.calibrateAzimuth(R_W_D_wavy, existingAlpha, existingBeta, existingGamma, 90f)
+        val (_, updated) = DeviceCalibration.calibrateAzimuth(
+            R_W_D_wavy,
+            existingAlpha,
+            existingBeta,
+            existingGamma,
+            90f
+        )
         val R_W_V_after = DeviceCalibration.multiply3x3(R_W_D_wavy, updated)
 
         val pitchAfter = asin(-R_W_V_after[7].toDouble()).toFloat()
@@ -521,7 +526,8 @@ class DeviceCalibrationTest {
         val mounting = DeviceCalibration.composeZYX(45f, 30f, -60f)
         val R_W_V_true = DeviceCalibration.buildFlatHeadingMatrix(270f)
         val R_W_D = DeviceCalibration.multiply3x3(
-            R_W_V_true, DeviceCalibration.transpose3x3(mounting)
+            R_W_V_true,
+            DeviceCalibration.transpose3x3(mounting)
         )
 
         // Step 1: Tilt calibration (gets α, β correct, heading arbitrary)
@@ -547,7 +553,8 @@ class DeviceCalibrationTest {
         // Vehicle heading north, flat, at the dock
         val R_W_V_dock = DeviceCalibration.buildFlatHeadingMatrix(0f)
         val R_W_D_dock = DeviceCalibration.multiply3x3(
-            R_W_V_dock, DeviceCalibration.transpose3x3(realMounting)
+            R_W_V_dock,
+            DeviceCalibration.transpose3x3(realMounting)
         )
 
         // Step 1: Calibrate tilt (γ=0 initially)
@@ -565,7 +572,8 @@ class DeviceCalibrationTest {
             DeviceCalibration.buildFlatHeadingMatrix(90f)
         )
         val R_W_D_sea = DeviceCalibration.multiply3x3(
-            R_W_V_sea, DeviceCalibration.transpose3x3(realMounting)
+            R_W_V_sea,
+            DeviceCalibration.transpose3x3(realMounting)
         )
 
         // Calibrate azimuth with GPS = 90° (east)
@@ -722,7 +730,8 @@ class DeviceCalibrationTest {
         // Step 1: At dock, vehicle flat, heading north
         val R_W_V_dock = DeviceCalibration.buildFlatHeadingMatrix(0f)
         val R_W_D_dock = DeviceCalibration.multiply3x3(
-            R_W_V_dock, DeviceCalibration.transpose3x3(realMounting)
+            R_W_V_dock,
+            DeviceCalibration.transpose3x3(realMounting)
         )
         val (afterTiltAlpha, afterTiltBeta, afterTilt) = DeviceCalibration.calibrateTilt(R_W_D_dock, 0f)
 
@@ -734,13 +743,19 @@ class DeviceCalibrationTest {
         // Step 2: Underway heading east, 8° wave tilt (pitch)
         val waveTilt = DeviceCalibration.composeZYX(0f, 8f, 0f)
         val R_W_V_sea = DeviceCalibration.multiply3x3(
-            waveTilt, DeviceCalibration.buildFlatHeadingMatrix(gpsHeading)
+            waveTilt,
+            DeviceCalibration.buildFlatHeadingMatrix(gpsHeading)
         )
         val R_W_D_sea = DeviceCalibration.multiply3x3(
-            R_W_V_sea, DeviceCalibration.transpose3x3(realMounting)
+            R_W_V_sea,
+            DeviceCalibration.transpose3x3(realMounting)
         )
         val (_, afterAzimuth) = DeviceCalibration.calibrateAzimuth(
-            R_W_D_sea, afterTiltAlpha, afterTiltBeta, 0f, gpsHeading
+            R_W_D_sea,
+            afterTiltAlpha,
+            afterTiltBeta,
+            0f,
+            gpsHeading
         )
         val R_W_V_final = DeviceCalibration.multiply3x3(R_W_D_sea, afterAzimuth)
 
@@ -796,7 +811,7 @@ class DeviceCalibrationTest {
         val (newGamma, updated) = DeviceCalibration.calibrateAzimuth(R_W_D, 0f, 0f, 0f, 30f)
 
         // γ must change, α must stay 0 (user pressed "Azimuth Only")
-        assertAngleEquals(0f, 0f)  // α stays 0 — verified by new update path in ViewModel
+        assertAngleEquals(0f, 0f) // α stays 0 — verified by new update path in ViewModel
         assertAngleEquals(0f, newGamma, tolerance = 0.5f) // correction brings heading to 30°
 
         // Resulting calibration must produce correct heading
@@ -821,11 +836,15 @@ class DeviceCalibrationTest {
 
         // Tilt calibration at dock — correct tilt, heading arbitrary (γ=0)
         val (alpha1, beta1, afterTilt) = DeviceCalibration.calibrateTilt(R_W_D_distorted, 0f)
-        val gamma1 = 0f  // γ passed to calibrateTilt
+        val gamma1 = 0f // γ passed to calibrateTilt
 
         // GPS says heading = 0° (north)
         val (newGamma, afterAzimuth) = DeviceCalibration.calibrateAzimuth(
-            R_W_D_distorted, alpha1, beta1, gamma1, 0f
+            R_W_D_distorted,
+            alpha1,
+            beta1,
+            gamma1,
+            0f
         )
         val (alpha2, beta2, gamma2) = DeviceCalibration.decomposeZXZ(afterAzimuth)
 
@@ -860,12 +879,16 @@ class DeviceCalibrationTest {
 
         // Tilt calibration at dock
         val (alpha1, beta1, afterTilt) = DeviceCalibration.calibrateTilt(R_W_D_distorted, 0f)
-        val gamma1 = 0f  // γ passed to calibrateTilt
+        val gamma1 = 0f // γ passed to calibrateTilt
         val (rz1, ry1, rx1) = DeviceCalibration.decomposeZYX(afterTilt)
 
         // GPS says heading = 0° (north)
         val (_, afterAzimuth) = DeviceCalibration.calibrateAzimuth(
-            R_W_D_distorted, alpha1, beta1, gamma1, 0f
+            R_W_D_distorted,
+            alpha1,
+            beta1,
+            gamma1,
+            0f
         )
         val (rz2, ry2, rx2) = DeviceCalibration.decomposeZYX(afterAzimuth)
 
@@ -875,8 +898,10 @@ class DeviceCalibrationTest {
         // a combination of ZYX Euler angles — there's no clean separation.
         val ryChanged = abs(ry2 - ry1) > 1f
         val rxChanged = abs(abs(rx2) - abs(rx1)) > 1f
-        assertTrue(ryChanged || rxChanged,
-            "ZYX heading correction should leak into non-RZ angles")
+        assertTrue(
+            ryChanged || rxChanged,
+            "ZYX heading correction should leak into non-RZ angles"
+        )
 
         // In contrast, ZXZ decomposition keeps α, β unchanged
         val (alphaA, betaA, _) = DeviceCalibration.decomposeZXZ(afterAzimuth)

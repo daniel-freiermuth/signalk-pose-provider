@@ -170,7 +170,11 @@ class RawSensorSource(private val context: Context) {
         val required = listOfNotNull(accelerometer, gyroscope, magnetometer)
         val registered = required.map { sensor ->
             val ok = sensorManager.registerListener(
-                eventListener, sensor, samplingPeriodUs, NO_BATCHING_US, handler
+                eventListener,
+                sensor,
+                samplingPeriodUs,
+                NO_BATCHING_US,
+                handler
             )
             Log.d(TAG, "Registered ${sensor.stringType} at ${samplingPeriodUs}us: $ok")
             ok
@@ -260,7 +264,11 @@ class RawSensorSource(private val context: Context) {
         // Stored exactly as delivered: scalar-LAST, with values[3] absent on many devices.
         // The conversion into our scalar-first convention lives in RotationVectorRecord.
         Sensor.TYPE_ROTATION_VECTOR -> RotationVectorRecord(
-            timestamp, values[0], values[1], values[2], values.getOrNull(3)
+            timestamp,
+            values[0],
+            values[1],
+            values[2],
+            values.getOrNull(3)
         )
 
         else -> null

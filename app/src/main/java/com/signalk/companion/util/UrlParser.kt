@@ -9,7 +9,7 @@ import java.net.URI
  * Handles URLs with or without protocol, port, and path components.
  */
 object UrlParser {
-    
+
     @Parcelize
     data class ParsedUrl(
         val hostname: String,
@@ -31,12 +31,12 @@ object UrlParser {
             return "$protocol://$hostname$portPart"
         }
     }
-    
+
     private val ALLOWED_SCHEMES = setOf("http", "https", "ws", "wss")
-    
+
     /**
      * Parses a URL string and extracts hostname, port, and protocol information.
-     * 
+     *
      * Handles various URL formats:
      * - http://192.168.1.1
      * - https://192.168.1.1:3000
@@ -46,10 +46,10 @@ object UrlParser {
      * - signalk.local:3000/api
      * - ws://192.168.1.1:3000 (WebSocket)
      * - wss://192.168.1.1:3000 (Secure WebSocket)
-     * 
+     *
      * Uses standard Java URI parser for robust URL validation.
      * Rejects non-HTTP/WebSocket protocols (e.g., ftp://, file://, mailto:).
-     * 
+     *
      * @param url The URL string to parse
      * @return ParsedUrl containing hostname, port, and HTTPS flag, or null if parsing fails
      */
@@ -59,42 +59,42 @@ object UrlParser {
             // Using just ":" would incorrectly treat "localhost:3000" as having scheme "localhost"
             val hasScheme = url.matches(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*"))
             val urlWithScheme = if (hasScheme) url else "http://$url"
-            
+
             // Parse using standard URI parser
             val uri = URI(urlWithScheme)
-            
+
             // Reject opaque URIs (like mailto:, urn:, tel:, etc.)
             // We only accept hierarchical URIs (with ://)
             if (uri.isOpaque) {
                 return null
             }
-            
+
             // Validate scheme
             val scheme = uri.scheme?.lowercase() ?: return null
             if (scheme !in ALLOWED_SCHEMES) {
                 return null
             }
-            
+
             // Extract hostname
             val hostname = uri.host ?: return null
             if (hostname.isEmpty()) {
                 return null
             }
-            
+
             // Determine if secure
             val isHttps = scheme in setOf("https", "wss")
-            
+
             // Extract port or use default
             val port = if (uri.port != -1) {
                 uri.port
             } else {
                 if (isHttps) 443 else 80
             }
-            
+
             // Check if URL contains a path (will be ignored for SignalK connection)
             val path = uri.path ?: ""
             val hasPath = path.isNotEmpty() && path != "/"
-            
+
             ParsedUrl(hostname, port, isHttps, hasPath)
         } catch (e: Exception) {
             null

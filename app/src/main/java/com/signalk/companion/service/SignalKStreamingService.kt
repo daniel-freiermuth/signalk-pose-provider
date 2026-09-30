@@ -17,8 +17,8 @@ import com.signalk.companion.R
 import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.replay.FixRecord
 import com.signalk.companion.replay.RecordingSession
-import com.signalk.companion.util.BatteryOptimizationHelper
 import com.signalk.companion.util.AppSettings
+import com.signalk.companion.util.BatteryOptimizationHelper
 import com.signalk.companion.util.UrlParser
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -40,17 +40,17 @@ import javax.inject.Inject
 class SignalKStreamingService : Service() {
 
     enum class StreamingState {
-        IDLE,      // Not streaming
-        STARTING,  // Initialization in progress
-        STREAMING  // Successfully streaming
+        IDLE, // Not streaming
+        STARTING, // Initialization in progress
+        STREAMING // Successfully streaming
     }
 
     @Inject
     lateinit var locationService: LocationService
-    
+
     @Inject
     lateinit var sensorService: SensorService
-    
+
     @Inject
     lateinit var signalKTransmitter: SignalKTransmitter
 
@@ -92,10 +92,10 @@ class SignalKStreamingService : Service() {
     private var sendLocation: Boolean = true
     private var sendHeading: Boolean = true
     private var sendPressure: Boolean = true
-    
+
     private val _streamingState = MutableStateFlow(StreamingState.IDLE)
     val streamingState: StateFlow<StreamingState> = _streamingState.asStateFlow()
-    
+
     // Derived property for consumers expecting Boolean - always consistent with streamingState
     val isStreaming: StateFlow<Boolean> = _streamingState
         .map { it == StreamingState.STREAMING }
@@ -104,13 +104,13 @@ class SignalKStreamingService : Service() {
             started = SharingStarted.Eagerly,
             initialValue = false
         )
-    
+
     private val _messagesSent = MutableStateFlow(0)
     val messagesSent: StateFlow<Int> = _messagesSent.asStateFlow()
-    
+
     private val _lastTransmissionTime = MutableStateFlow<Long?>(null)
     val lastTransmissionTime: StateFlow<Long?> = _lastTransmissionTime.asStateFlow()
-    
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
@@ -118,13 +118,13 @@ class SignalKStreamingService : Service() {
         private const val TAG = "SignalKStreamingService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "SIGNALK_STREAMING"
-        
+
         const val ACTION_START_STREAMING = "START_STREAMING"
         const val ACTION_STOP_STREAMING = "STOP_STREAMING"
         const val ACTION_UPDATE_CONFIG = "UPDATE_CONFIG"
         const val ACTION_START_RECORDING = "START_RECORDING"
         const val ACTION_STOP_RECORDING = "STOP_RECORDING"
-        
+
         const val EXTRA_PARSED_URL = "PARSED_URL"
         const val EXTRA_LOCATION_RATE = "LOCATION_RATE"
         const val EXTRA_SENSOR_RATE = "SENSOR_RATE"
@@ -240,11 +240,16 @@ class SignalKStreamingService : Service() {
                 val sendLocation = intent.getBooleanExtra(EXTRA_SEND_LOCATION, true)
                 val sendHeading = intent.getBooleanExtra(EXTRA_SEND_HEADING, true)
                 val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
-                
+
                 if (parsedUrl != null) {
                     startStreaming(
-                        parsedUrl, locationRate, sensorRate,
-                        sendLocation, sendHeading, sendPressure, startId
+                        parsedUrl,
+                        locationRate,
+                        sensorRate,
+                        sendLocation,
+                        sendHeading,
+                        sendPressure,
+                        startId
                     )
                 } else {
                     Log.w(TAG, "ACTION_START_STREAMING received but parsedUrl is null - ignoring request")
@@ -256,7 +261,7 @@ class SignalKStreamingService : Service() {
                 val sendLocation = intent.getBooleanExtra(EXTRA_SEND_LOCATION, true)
                 val sendHeading = intent.getBooleanExtra(EXTRA_SEND_HEADING, true)
                 val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
-                
+
                 updateStreamingConfig(locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
             }
             ACTION_STOP_STREAMING -> {
@@ -280,54 +285,59 @@ class SignalKStreamingService : Service() {
                 stopRecording()
             }
         }
-        
+
         // START_STICKY: the OS will restart this service after an unexpected kill.
         // If it was actively streaming (tracked via AppSettings.wasStreaming), the null-intent
         // branch above will resume it. If not streaming, it will call stopSelf() immediately.
         return START_STICKY
     }
 
-    private fun startStreaming(parsedUrl: UrlParser.ParsedUrl,
-                               locationRate: Long, sensorRate: Int,
-                               sendLocation: Boolean = true, sendHeading: Boolean = true, sendPressure: Boolean = true,
-                               startId: Int = 0) {
+    private fun startStreaming(
+        parsedUrl: UrlParser.ParsedUrl,
+        locationRate: Long,
+        sensorRate: Int,
+        sendLocation: Boolean = true,
+        sendHeading: Boolean = true,
+        sendPressure: Boolean = true,
+        startId: Int = 0
+    ) {
         if (_streamingState.value != StreamingState.IDLE) {
             Log.d(TAG, "Already streaming or starting (state=${_streamingState.value}), ignoring start request")
             return
         }
-        
+
         // Set to STARTING immediately to prevent race condition
         _streamingState.value = StreamingState.STARTING
-        
+
         // Store configuration
         this.sendLocation = sendLocation
         this.sendHeading = sendHeading
         this.sendPressure = sendPressure
-        
+
         Log.d(TAG, "Starting SignalK streaming to ${parsedUrl.toUrlString()} (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")
-        
+
         // Check battery optimization status
         val batteryOptimized = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)
         Log.d(TAG, "Battery optimization disabled: $batteryOptimized")
         if (!batteryOptimized) {
             Log.w(TAG, "WARNING: Battery optimization is enabled - app may stop in background!")
         }
-        
+
         serviceScope.launch {
             try {
                 _error.value = null // Clear any previous errors
                 Log.d(TAG, "Configuring SignalK transmitter")
-                
+
                 // Configure SignalK transmitter with parsed URL
                 signalKTransmitter.configure(parsedUrl)
-                
+
                 // Start SignalK streaming (this is crucial!)
                 Log.d(TAG, "Starting SignalK transmitter...")
                 signalKTransmitter.startStreaming()
-                
+
                 // Wait a moment for connection to establish
                 delay(1000)
-                
+
                 // Conditionally start location updates only if location data is needed
                 if (sendLocation) {
                     Log.d(TAG, "Starting location updates with rate: ${locationRate}ms")
@@ -339,15 +349,22 @@ class SignalKStreamingService : Service() {
                 } else {
                     Log.d(TAG, "Location transmission disabled - skipping GPS activation")
                 }
-                
+
                 // Conditionally start sensor updates only if heading or pressure data is needed
                 if (sendHeading || sendPressure) {
-                    Log.d(TAG, "Starting sensor updates with rate: ${sensorRate}ms (heading=$sendHeading, pressure=$sendPressure)")
-                    sensorService.startSensorUpdates(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)
+                    Log.d(
+                        TAG,
+                        "Starting sensor updates with rate: ${sensorRate}ms (heading=$sendHeading, pressure=$sendPressure)"
+                    )
+                    sensorService.startSensorUpdates(
+                        sensorRate,
+                        needsHeading = sendHeading,
+                        needsPressure = sendPressure
+                    )
                 } else {
                     Log.d(TAG, "All sensor transmission disabled - skipping sensor activation")
                 }
-                
+
                 // Mark as successfully streaming
                 _streamingState.value = StreamingState.STREAMING
 
@@ -360,9 +377,8 @@ class SignalKStreamingService : Service() {
                 // Start foreground service with notification
                 val notification = createNotification("Streaming to SignalK server")
                 startForeground(NOTIFICATION_ID, notification)
-                
+
                 Log.d(TAG, "SignalK streaming started successfully")
-                
             } catch (e: Exception) {
                 val errorMessage = when (e) {
                     is IllegalArgumentException -> "Invalid server URL: ${e.message?.substringAfter(":")?.trim() ?: "unknown error"}"
@@ -620,22 +636,22 @@ class SignalKStreamingService : Service() {
             Log.d(TAG, "Not currently streaming (state=${_streamingState.value}), ignoring config update")
             return
         }
-        
+
         Log.d(TAG, "Updating streaming configuration (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)")
-        
+
         serviceScope.launch {
             // Update stored configuration
             this@SignalKStreamingService.sendLocation = sendLocation
             this@SignalKStreamingService.sendHeading = sendHeading
             this@SignalKStreamingService.sendPressure = sendPressure
-            
+
             // Handle location service changes
             val wasLocationActive = locationService.isLocationUpdatesActive()
             // An active recording needs GNSS as much as sendLocation does - a config update
             // that turns sendLocation off must not stop fixes out from under a recording that
             // is still running, the same ownership rule stopRecording() applies on its side.
             val shouldLocationBeActive = sendLocation || recordingSession.isRecording
-            
+
             if (wasLocationActive && !shouldLocationBeActive) {
                 Log.d(TAG, "Stopping location updates (disabled in config)")
                 locationService.stopLocationUpdates()
@@ -650,11 +666,11 @@ class SignalKStreamingService : Service() {
                 Log.d(TAG, "Updating location rate to ${locationRate}ms")
                 locationService.updateLocationRate(locationRate)
             }
-            
+
             // Handle sensor service changes
             val wasSensorActive = sensorService.isSensorUpdatesActive()
             val shouldSensorBeActive = sendHeading || sendPressure
-            
+
             if (wasSensorActive && !shouldSensorBeActive) {
                 Log.d(TAG, "Stopping sensor updates (all sensors disabled in config)")
                 sensorService.stopSensorUpdates()
@@ -667,7 +683,7 @@ class SignalKStreamingService : Service() {
                 sensorService.stopSensorUpdates()
                 sensorService.startSensorUpdates(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)
             }
-            
+
             Log.d(TAG, "Streaming configuration updated successfully")
         }
     }
@@ -675,17 +691,17 @@ class SignalKStreamingService : Service() {
     fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
         sensorService.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
         attitudeEngine.setCalibrationAngles(alphaDeg, betaDeg, gammaDeg)
-        Log.d(TAG, "Updated calibration angles: α=${alphaDeg}°, β=${betaDeg}°, γ=${gammaDeg}°")
+        Log.d(TAG, "Updated calibration angles: α=$alphaDeg°, β=$betaDeg°, γ=$gammaDeg°")
     }
 
     private fun updateTransmissionStats() {
         _messagesSent.value += 1
         _lastTransmissionTime.value = System.currentTimeMillis()
-        
+
         // Update notification with current stats
         updateNotification("Messages sent: ${_messagesSent.value}")
     }
-    
+
     private fun updateNotification(contentText: String) {
         val notification = createNotification(contentText)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -730,7 +746,9 @@ class SignalKStreamingService : Service() {
         val (stopAction, stopLabel) = currentStopAction()
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, notificationIntent,
+            this,
+            0,
+            notificationIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -738,7 +756,9 @@ class SignalKStreamingService : Service() {
             action = stopAction
         }
         val stopPendingIntent = PendingIntent.getService(
-            this, 0, stopIntent,
+            this,
+            0,
+            stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 

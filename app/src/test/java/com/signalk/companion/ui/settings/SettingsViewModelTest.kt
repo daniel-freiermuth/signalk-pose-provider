@@ -27,36 +27,36 @@ class SettingsViewModelTest {
     private lateinit var context: Context
     private lateinit var sharedPreferences: SharedPreferences
     private lateinit var editor: SharedPreferences.Editor
-    
+
     private val testDispatcher = UnconfinedTestDispatcher()
 
     @BeforeEach
     fun setup() {
         Dispatchers.setMain(testDispatcher)
-        
+
         // Create mock auth state flow
         authStateFlow = MutableStateFlow(AuthState())
-        
+
         // Mock AuthenticationService
         authenticationService = mock(AuthenticationService::class.java)
         `when`(authenticationService.authState).thenReturn(authStateFlow)
-        
+
         // Mock Android Context and SharedPreferences
         context = mock(Context::class.java)
         sharedPreferences = mock(SharedPreferences::class.java)
         editor = mock(SharedPreferences.Editor::class.java)
-        
+
         `when`(context.getSharedPreferences(anyString(), anyInt())).thenReturn(sharedPreferences)
         `when`(sharedPreferences.edit()).thenReturn(editor)
         `when`(editor.putString(anyString(), anyString())).thenReturn(editor)
         `when`(editor.apply()).then { }
-        
+
         // Default mock values
         `when`(sharedPreferences.getString(eq("server_url"), anyString())).thenReturn("")
         `when`(sharedPreferences.getString(eq("username"), anyString())).thenReturn("")
         `when`(sharedPreferences.getString(eq("password"), anyString())).thenReturn("")
         `when`(sharedPreferences.getString(eq("vessel_id"), anyString())).thenReturn("self")
-        
+
         viewModel = SettingsViewModel(authenticationService)
     }
 
@@ -70,30 +70,34 @@ class SettingsViewModelTest {
         // Set a local error (e.g., from save failure)
         viewModel.saveSettings(context)
         advanceUntilIdle()
-        
+
         // Simulate save error
         `when`(sharedPreferences.edit()).thenThrow(RuntimeException("Storage error"))
         viewModel.saveSettings(context)
         advanceUntilIdle()
-        
+
         val errorAfterSave = viewModel.uiState.value.error
         assertNotNull(errorAfterSave, "Should have error after save failure")
         assertTrue(
             errorAfterSave!!.contains("Failed to save settings"),
-            "Error should mention save failure")
-        
+            "Error should mention save failure"
+        )
+
         // Now emit an auth state update with null error (simulating isLoading change)
         authStateFlow.value = AuthState(isLoading = true, error = null)
         advanceUntilIdle()
-        
+
         // BUG: The local error gets overwritten by null
         // EXPECTED: Local error should be preserved
         val errorAfterAuthUpdate = viewModel.uiState.value.error
-        assertNotNull(errorAfterAuthUpdate,
-            "Local error should not be cleared by auth state update with null error")
+        assertNotNull(
+            errorAfterAuthUpdate,
+            "Local error should not be cleared by auth state update with null error"
+        )
         assertTrue(
             errorAfterAuthUpdate!!.contains("Failed to save settings"),
-            "Error should still mention save failure")
+            "Error should still mention save failure"
+        )
     }
 
     @Test
@@ -102,7 +106,7 @@ class SettingsViewModelTest {
         val authError = "Invalid credentials"
         authStateFlow.value = AuthState(error = authError)
         advanceUntilIdle()
-        
+
         assertEquals(authError, viewModel.uiState.value.error, "Auth error should be shown")
     }
 
@@ -112,21 +116,21 @@ class SettingsViewModelTest {
         val authError = "Invalid credentials"
         authStateFlow.value = AuthState(error = authError)
         advanceUntilIdle()
-        
+
         assertEquals(authError, viewModel.uiState.value.error, "Should have auth error")
-        
+
         // Clear error
         viewModel.clearError()
         advanceUntilIdle()
-        
+
         // BUG: Auth service error not cleared, so it will reappear
         // EXPECTED: Both local and auth service errors should be cleared
         verify(authenticationService).clearError()
-        
+
         // Simulate another auth state emission (which would reapply the error if not cleared)
         authStateFlow.value = AuthState(isLoading = false, error = null)
         advanceUntilIdle()
-        
+
         assertNull(viewModel.uiState.value.error, "Error should remain null after clearing")
     }
 
@@ -136,14 +140,17 @@ class SettingsViewModelTest {
         viewModel.updateServerUrl("")
         viewModel.testConnection(context)
         advanceUntilIdle()
-        
-        assertEquals("Server URL is required", viewModel.uiState.value.error,
-            "Should have validation error")
-        
+
+        assertEquals(
+            "Server URL is required",
+            viewModel.uiState.value.error,
+            "Should have validation error"
+        )
+
         // Auth state update with null error
         authStateFlow.value = AuthState(isLoading = false, error = null)
         advanceUntilIdle()
-        
+
         // BUG: Validation error gets cleared
         // EXPECTED: Validation error should persist
         assertNotNull(viewModel.uiState.value.error, "Validation error should not be cleared")
@@ -155,37 +162,47 @@ class SettingsViewModelTest {
         viewModel.updateServerUrl("")
         viewModel.testConnection(context)
         advanceUntilIdle()
-        
-        assertEquals("Server URL is required", viewModel.uiState.value.error,
-            "Should have validation error")
-        
+
+        assertEquals(
+            "Server URL is required",
+            viewModel.uiState.value.error,
+            "Should have validation error"
+        )
+
         // Emit an auth error
         val authError = "Connection timeout"
         authStateFlow.value = AuthState(error = authError)
         advanceUntilIdle()
-        
+
         // Auth error should replace local error
-        assertEquals(authError, viewModel.uiState.value.error,
-            "Auth error should replace local error")
+        assertEquals(
+            authError,
+            viewModel.uiState.value.error,
+            "Auth error should replace local error"
+        )
     }
 
     @Test
     fun `isAuthenticated and isLoggingIn should update from auth state`() = runTest {
-        assertFalse(viewModel.uiState.value.isAuthenticated,
-            "Should not be authenticated initially")
-        assertFalse(viewModel.uiState.value.isLoggingIn,
-            "Should not be logging in initially")
-        
+        assertFalse(
+            viewModel.uiState.value.isAuthenticated,
+            "Should not be authenticated initially"
+        )
+        assertFalse(
+            viewModel.uiState.value.isLoggingIn,
+            "Should not be logging in initially"
+        )
+
         // Update to logging in
         authStateFlow.value = AuthState(isLoading = true)
         advanceUntilIdle()
-        
+
         assertTrue(viewModel.uiState.value.isLoggingIn, "Should be logging in")
-        
+
         // Update to authenticated
         authStateFlow.value = AuthState(isAuthenticated = true, isLoading = false, token = "test-token")
         advanceUntilIdle()
-        
+
         assertTrue(viewModel.uiState.value.isAuthenticated, "Should be authenticated")
         assertFalse(viewModel.uiState.value.isLoggingIn, "Should not be logging in")
     }

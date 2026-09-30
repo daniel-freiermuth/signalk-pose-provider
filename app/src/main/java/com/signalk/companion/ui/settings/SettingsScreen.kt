@@ -25,12 +25,12 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    
+
     // Initialize settings when the screen is first shown
     LaunchedEffect(Unit) {
         viewModel.initializeSettings(context)
     }
-    
+
     // Clear save success after showing
     LaunchedEffect(uiState.saveSuccess) {
         if (uiState.saveSuccess) {
@@ -38,7 +38,7 @@ fun SettingsScreen(
             viewModel.clearSaveSuccess()
         }
     }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -106,7 +106,7 @@ fun SettingsScreen(
                     }
                 }
             }
-            
+
             // Error message
             uiState.error?.let { error ->
                 Card(
@@ -130,7 +130,7 @@ fun SettingsScreen(
                     }
                 }
             }
-            
+
             // Server Configuration Card
             ServerConfigCard(
                 serverUrl = uiState.serverUrl,
@@ -138,7 +138,7 @@ fun SettingsScreen(
                 onServerUrlChange = viewModel::updateServerUrl,
                 onVesselIdChange = viewModel::updateVesselId
             )
-            
+
             // Credentials Card
             CredentialsCard(
                 username = uiState.username,
@@ -150,7 +150,7 @@ fun SettingsScreen(
                 onTestConnection = { viewModel.testConnection(context) },
                 onLogout = viewModel::logout
             )
-            
+
             // Save Button at bottom
             Button(
                 onClick = { viewModel.saveSettings(context) },
@@ -190,7 +190,7 @@ fun ServerConfigCard(
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
-            
+
             OutlinedTextField(
                 value = serverUrl,
                 onValueChange = onServerUrlChange,
@@ -198,11 +198,11 @@ fun ServerConfigCard(
                 placeholder = { Text("https://signalk.example.com:3000") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                supportingText = { 
-                    Text("Full URL including protocol (http/https) and port") 
+                supportingText = {
+                    Text("Full URL including protocol (http/https) and port")
                 }
             )
-            
+
             OutlinedTextField(
                 value = vesselId,
                 onValueChange = onVesselIdChange,
@@ -210,8 +210,8 @@ fun ServerConfigCard(
                 placeholder = { Text("self") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                supportingText = { 
-                    Text("Used in SignalK context: vessels.$vesselId") 
+                supportingText = {
+                    Text("Used in SignalK context: vessels.$vesselId")
                 }
             )
         }
@@ -230,7 +230,7 @@ fun CredentialsCard(
     onLogout: () -> Unit
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
-    
+
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -248,28 +248,30 @@ fun CredentialsCard(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
-                
+
                 // Status indicator
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = if (isAuthenticated) 
-                            MaterialTheme.colorScheme.primaryContainer 
-                        else 
+                        containerColor = if (isAuthenticated) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
                             MaterialTheme.colorScheme.surfaceVariant
+                        }
                     )
                 ) {
                     Text(
                         text = if (isAuthenticated) "Authenticated" else "Not authenticated",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (isAuthenticated) 
-                            MaterialTheme.colorScheme.onPrimaryContainer 
-                        else 
+                        color = if (isAuthenticated) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                     )
                 }
             }
-            
+
             OutlinedTextField(
                 value = username,
                 onValueChange = onUsernameChange,
@@ -278,17 +280,18 @@ fun CredentialsCard(
                 singleLine = true,
                 enabled = !isLoggingIn
             )
-            
+
             OutlinedTextField(
                 value = password,
                 onValueChange = onPasswordChange,
                 label = { Text("Password") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                visualTransformation = if (passwordVisible) 
-                    VisualTransformation.None 
-                else 
-                    PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
                 trailingIcon = {
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
                         Text(
@@ -302,7 +305,7 @@ fun CredentialsCard(
                     Text("Credentials are stored locally on your device")
                 }
             )
-            
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -315,7 +318,7 @@ fun CredentialsCard(
                         Text("Logout")
                     }
                 }
-                
+
                 Button(
                     onClick = onTestConnection,
                     modifier = Modifier.weight(1f),

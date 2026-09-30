@@ -115,10 +115,14 @@ class ReplayTest {
     /** A synthetic sail: level, heading 90°, at rest, sampled at 100 Hz. */
     private fun syntheticRecording(headingDeg: Float, seconds: Double): List<SensorRecord> {
         val theta = Math.toRadians(-headingDeg.toDouble()).toFloat() // world→body about up
-        val c = cos(theta.toDouble()).toFloat(); val s = sin(theta.toDouble()).toFloat()
+        val c = cos(theta.toDouble()).toFloat()
+        val s = sin(theta.toDouble()).toFloat()
+
         // Rotate world vectors into the body frame for a level boat on this heading.
         fun toBody(v: FloatArray) = floatArrayOf(
-            c * v[0] + s * v[1], -s * v[0] + c * v[1], v[2]
+            c * v[0] + s * v[1],
+            -s * v[0] + c * v[1],
+            v[2]
         )
         val accel = toBody(floatArrayOf(0f, 0f, g))
         val field = toBody(floatArrayOf(0f, 25f, -43.3f))
@@ -168,8 +172,11 @@ class ReplayTest {
         val second = runner.run(recording.asSequence())
         assertEquals(first, second, "the same recording replayed twice must give the same trace")
         assertEquals(1, runner.fixes.size, "fixes from a prior run must not accumulate")
-        assertEquals(1, runner.referenceAttitudes.size,
-            "reference attitudes from a prior run must not accumulate")
+        assertEquals(
+            1,
+            runner.referenceAttitudes.size,
+            "reference attitudes from a prior run must not accumulate"
+        )
     }
 
     @Test
@@ -201,13 +208,21 @@ class ReplayTest {
         val corrected = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f), HardIronStrategy.HalEstimate)
             .run(withBias.asSequence()).last()
 
-        assertEquals(0.0, Math.toDegrees(corrected.headingRad.toDouble()), 0.5,
-            "subtracting the known bias must recover true heading")
-        val uncorrectedErr = abs(Math.toDegrees(uncorrected.headingRad.toDouble()).let {
-            if (it > 180) 360 - it else it
-        })
-        assertTrue(uncorrectedErr > 5.0,
-            "ignoring a 10 µT hard iron must visibly skew heading, got ${uncorrectedErr}°")
+        assertEquals(
+            0.0,
+            Math.toDegrees(corrected.headingRad.toDouble()),
+            0.5,
+            "subtracting the known bias must recover true heading"
+        )
+        val uncorrectedErr = abs(
+            Math.toDegrees(uncorrected.headingRad.toDouble()).let {
+                if (it > 180) 360 - it else it
+            }
+        )
+        assertTrue(
+            uncorrectedErr > 5.0,
+            "ignoring a 10 µT hard iron must visibly skew heading, got $uncorrectedErr°"
+        )
     }
 
     @Test
@@ -242,8 +257,10 @@ class ReplayTest {
         val samples = runner.run(recording.asSequence())
         assertEquals(1, runner.fixes.size, "the fix must be captured for M4")
         assertEquals(2.5f, runner.fixes[0].speedMps)
-        assertTrue(samples.all { it.timestampNs < 2_000_000_000L },
-            "only gyro ticks advance the filter, so no sample comes from the fix")
+        assertTrue(
+            samples.all { it.timestampNs < 2_000_000_000L },
+            "only gyro ticks advance the filter, so no sample comes from the fix"
+        )
     }
 
     @Test
@@ -255,7 +272,9 @@ class ReplayTest {
         val withReference = clean.flatMap { record ->
             if (record is GyroRecord) {
                 listOf(record, RotationVectorRecord(record.timestampNs, 0.7f, 0.7f, 0f, 0.1f))
-            } else listOf(record)
+            } else {
+                listOf(record)
+            }
         }
 
         val plain = ReplayRunner(MahonyAhrs(kp = 2f, ki = 0f)).run(clean.asSequence())
@@ -263,8 +282,11 @@ class ReplayTest {
         val withRef = runner.run(withReference.asSequence())
 
         assertEquals(plain, withRef, "the comparison trace must not change our own solution")
-        assertEquals(clean.count { it is GyroRecord }, runner.referenceAttitudes.size,
-            "every reference sample must still be retained for comparison")
+        assertEquals(
+            clean.count { it is GyroRecord },
+            runner.referenceAttitudes.size,
+            "every reference sample must still be retained for comparison"
+        )
     }
 
     @Test
@@ -309,7 +331,8 @@ class ReplayTest {
         // contributes a rotation — a different, further-integrated answer than preserving
         // delivery order. Equal answers here would mean the runner silently sorted the input.
         assertNotEquals(
-            sortedFirst.last().headingRad, preservedOrder.last().headingRad,
+            sortedFirst.last().headingRad,
+            preservedOrder.last().headingRad,
             "sorting first must give a different answer than preserving delivery order"
         )
     }
