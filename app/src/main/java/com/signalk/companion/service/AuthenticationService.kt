@@ -5,6 +5,7 @@ import com.signalk.companion.data.model.AuthState
 import com.signalk.companion.data.model.LoginRequest
 import com.signalk.companion.data.model.LoginResponse
 import com.signalk.companion.di.IoDispatcher
+import com.signalk.companion.util.CanIgnoreReturnValue
 import com.signalk.companion.util.UrlParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -61,6 +62,12 @@ class AuthenticationService @Inject constructor(
         return Result.failure(cause)
     }
 
+    /**
+     * Logs in and stores the credentials for [tryRefreshToken]. The outcome, including the
+     * user-facing error, is also published in [authState]; callers that only drive the UI
+     * may therefore ignore the returned [Result].
+     */
+    @CanIgnoreReturnValue
     suspend fun login(
         serverUrl: String,
         username: String,
@@ -174,7 +181,7 @@ class AuthenticationService @Inject constructor(
         else -> "Network error: ${e.message ?: "I/O error"}"
     }
 
-    suspend fun logout(): Result<Unit> {
+    suspend fun logout() {
         val currentState = _authState.value
         val serverUrl = currentState.serverUrl
         val token = currentState.token
@@ -193,7 +200,6 @@ class AuthenticationService @Inject constructor(
             // since the server may already have invalidated the token.
             _authState.update { AuthState() }
         }
-        return Result.success(Unit)
     }
 
     /** Blocking PUT to the server's logout endpoint; the response is irrelevant. */

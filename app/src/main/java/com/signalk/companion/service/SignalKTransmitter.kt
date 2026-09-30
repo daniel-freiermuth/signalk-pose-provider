@@ -516,7 +516,13 @@ class SignalKTransmitter @Inject constructor(
 
         try {
             val json = Json.encodeToString(message)
-            ws.send(json)
+            if (!ws.send(json)) {
+                // OkHttp refuses once the socket is closing or its outgoing queue is full;
+                // either way this message is lost and the link is not usable.
+                _connectionStatus.value = false
+                Log.w(TAG, "SignalK transmission dropped: WebSocket closing or send queue full")
+                return
+            }
 
             // Update tracking state
             _lastSentMessage.value = json
@@ -550,7 +556,10 @@ class SignalKTransmitter @Inject constructor(
             authenticationService.hasStoredCredentials()
         ) {
             Log.d(TAG, "No token available — attempting login before WebSocket connection")
-            authenticationService.tryRefreshToken()
+            val token = authenticationService.tryRefreshToken().getOrNull()
+            if (token == null) {
+                Log.w(TAG, "Login before WebSocket connection failed; connecting without a token")
+            }
         }
 
         withContext(ioDispatcher) {

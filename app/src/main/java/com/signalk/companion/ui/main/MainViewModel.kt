@@ -397,10 +397,7 @@ class MainViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
 
         // Bind to service if not already bound
-        if (!bound) {
-            val intent = Intent(applicationContext, SignalKStreamingService::class.java)
-            applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        }
+        if (!bound) bindStreamingService()
 
         // Start streaming service
         val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
@@ -419,14 +416,14 @@ class MainViewModel @Inject constructor(
             putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, currentState.sendPressure)
         }
 
-        applicationContext.startForegroundService(serviceIntent)
+        applicationContext.sendToStreamingService(serviceIntent, foreground = true)
     }
 
     fun stopStreaming() {
         val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
             action = SignalKStreamingService.ACTION_STOP_STREAMING
         }
-        applicationContext.startService(serviceIntent)
+        applicationContext.sendToStreamingService(serviceIntent)
 
         // Update state eagerly: cleanupServiceBinding cancels the service collector before
         // the service can emit isStreaming=false, which would leave the button stuck in
@@ -465,10 +462,7 @@ class MainViewModel @Inject constructor(
             SignalKStreamingService.ACTION_START_RECORDING
         }
 
-        if (!bound) {
-            val intent = Intent(applicationContext, SignalKStreamingService::class.java)
-            applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        }
+        if (!bound) bindStreamingService()
 
         val serviceIntent = Intent(applicationContext, SignalKStreamingService::class.java).apply {
             this.action = action
@@ -481,9 +475,17 @@ class MainViewModel @Inject constructor(
         // Starting needs foreground promotion; stopping does not. The SDK_INT >= O half of
         // this condition went with the rest of the checks minSdk=30 already guarantees.
         if (action == SignalKStreamingService.ACTION_START_RECORDING) {
-            applicationContext.startForegroundService(serviceIntent)
+            applicationContext.sendToStreamingService(serviceIntent, foreground = true)
         } else {
-            applicationContext.startService(serviceIntent)
+            applicationContext.sendToStreamingService(serviceIntent)
+        }
+    }
+
+    private fun bindStreamingService() {
+        val intent = Intent(applicationContext, SignalKStreamingService::class.java)
+        if (!applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)) {
+            // The service still runs from the start command; only its live state is missing.
+            Log.e(TAG, "Could not bind to SignalKStreamingService; live status will not update")
         }
     }
 

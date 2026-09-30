@@ -38,11 +38,51 @@ potential-bugs:
   UnsafeCallOnNullableType:
     active: true
   IgnoredReturnValue:
-    # Default scope: calls annotated @CheckResult/@CheckReturnValue, and ignored
-    # Sequence/Flow/Stream results. `restrictToConfig: false` would also cover OkHttp's
-    # unannotated WebSocket.send, but on this codebase it reports 283 sites dominated by
-    # Log.d, launch, let and MutableList.add — noise that would bury the real findings.
+    # Every call, not only @CheckResult ones: an ignored Boolean/Result is how a dropped
+    # WebSocket.send or a failed registerListener goes unnoticed. The exceptions below
+    # return something informational by contract: bytes logged, a map's previous value, a
+    # Job owned by its scope, a fluent builder's receiver, a block's own value, or "was
+    # already closing/stopped/popped" where the call site has nothing to do about it.
+    # Own functions whose result is also published in state carry @CanIgnoreReturnValue.
     active: true
+    restrictToConfig: false
+    ignoreFunctionCall:
+      - 'android.util.Log.v'
+      - 'android.util.Log.d'
+      - 'android.util.Log.i'
+      - 'android.util.Log.w'
+      - 'android.util.Log.e'
+      - 'kotlinx.coroutines.launch'
+      - 'kotlinx.coroutines.flow.StateFlow.collect'
+      - 'kotlinx.coroutines.flow.SharedFlow.collect'
+      - 'kotlin.let'
+      - 'kotlin.apply'
+      - 'kotlin.synchronized'
+      - 'kotlin.checkNotNull'
+      - 'kotlin.collections.MutableCollection.add'
+      - 'kotlin.collections.MutableCollection.addAll'
+      - 'kotlin.collections.MutableList.add'
+      - 'kotlin.collections.MutableList.addAll'
+      - 'android.content.Intent.putExtra'
+      - 'android.content.SharedPreferences.Editor.putBoolean'
+      - 'android.content.SharedPreferences.Editor.putFloat'
+      - 'android.content.SharedPreferences.Editor.putLong'
+      - 'android.content.SharedPreferences.Editor.putString'
+      - 'kotlinx.serialization.json.put'
+      - 'kotlinx.serialization.json.JsonObjectBuilder.put'
+      - 'okhttp3.Request.Builder.addHeader'
+      - 'okhttp3.WebSocket.close'
+      - 'android.app.Service.stopSelfResult'
+      # Calls on `this` resolve to the subclass's inherited copy.
+      - 'com.signalk.companion.service.SignalKStreamingService.stopSelfResult'
+      - 'android.os.HandlerThread.quitSafely'
+      - 'android.view.View.post'
+      - 'androidx.navigation.NavController.popBackStack'
+      - 'androidx.navigation.NavHostController.popBackStack'
+      - 'android.app.AlertDialog.Builder.show'
+      - 'org.mockito.stubbing.OngoingStubbing.thenReturn'
+      - 'org.mockito.stubbing.OngoingStubbing.thenThrow'
+      - 'org.junit.jupiter.api.assertThrows'
 
 naming:
   FunctionNaming:

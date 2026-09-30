@@ -235,5 +235,11 @@ private fun InputStream.readHttpRequest() {
             contentLength = line.substringAfter(':').trim().toInt()
         }
     }
-    repeat(contentLength) { reader.read() }
+    val body = CharArray(contentLength)
+    var read = 0
+    while (read < contentLength) {
+        val n = reader.read(body, read, contentLength - read)
+        if (n < 0) break
+        read += n
+    }
 }
