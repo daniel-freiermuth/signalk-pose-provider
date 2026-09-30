@@ -39,6 +39,22 @@ naming:
   FunctionNaming:
     # Compose convention: @Composable functions are PascalCase.
     ignoreAnnotated: ['Composable']
+  # frame-conventions.md §3 is normative and names rotations by frame: `R_W_D` maps device
+  # into world, `R_D_V_step1` is a variant of it, `gyro_D` is a vector in frame D, and a
+  # generic matrix operand is a single capital (`R`, `A`, `B`). Beyond detekt's default
+  # camelCase, accept exactly those shapes — renaming them to camelCase would erase the
+  # subscripts the document's cancellation rule is checked with.
+  VariableNaming:
+    variablePattern: '[a-z][A-Za-z0-9]*|[A-Z][a-z]?(_[A-Z]_[A-Z])?(_[A-Za-z0-9]+)*|[a-z][A-Za-z0-9]*_[A-Z]'
+  FunctionParameterNaming:
+    parameterPattern: '[a-z][A-Za-z0-9]*|[A-Z][a-z]?(_[A-Z]_[A-Z])?(_[A-Za-z0-9]+)*|[a-z][A-Za-z0-9]*_[A-Z]'
+
+style:
+  MagicNumber:
+    # A literal assigned to a property is already named by the property (detekt's
+    # recommended setting for Compose, where `val SignalKBlue = Color(0xFF1976D2)` is the
+    # idiom).
+    ignorePropertyDeclaration: true
 
 formatting:
   # ktlint's rules, via detekt-formatting. Android Studio code style, matching the IDE's
