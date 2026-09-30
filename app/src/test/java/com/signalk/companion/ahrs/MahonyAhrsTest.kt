@@ -388,9 +388,11 @@ class MahonyAhrsTest {
     @Test
     fun `zero gain freezes the affected axis`() {
         // magGain = 0 is the "freeze and coast" lever P6 gives the heading gates.
-        val f = MahonyAhrs(kp = 2f, ki = 0f)
-        f.magGain = 0f
-        settle(levelAtHeading(90f), f, seconds = 20.0)
+        val f = settle(
+            levelAtHeading(90f),
+            MahonyAhrs(kp = 2f, ki = 0f).apply { magGain = 0f },
+            seconds = 20.0
+        )
         assertFalse(f.magnetometerAccepted, "magGain 0 must suppress the magnetometer term")
         // Heading stays at its cold-start value because nothing corrects it.
         assertDegreesNear(0f, angles(f).headingRad, 2f, "heading must not be corrected")

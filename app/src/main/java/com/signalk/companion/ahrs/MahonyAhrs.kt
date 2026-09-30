@@ -210,11 +210,15 @@ class MahonyAhrs(
         val bx = wx - gyroBias[0]
         val by = wy - gyroBias[1]
         val bz = wz - gyroBias[2]
-        if (accelGain > 0f && magGain > 0f &&
+        val seed = if (accelGain > 0f && magGain > 0f &&
             accelerometerGate(sqrt(bx * bx + by * by + bz * bz))
         ) {
-            seedFromMeasurements()
+            triadAttitude()
+        } else {
+            null
         }
+        // No usable pair yet: start from the current attitude and let the loop converge.
+        if (seed != null) attitude = seed.alignedWith(attitude)
     }
 
     private fun propagate(timestampNs: Long, wx: Float, wy: Float, wz: Float) {

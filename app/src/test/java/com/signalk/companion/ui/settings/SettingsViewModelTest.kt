@@ -58,7 +58,6 @@ class SettingsViewModelTest {
         `when`(context.getSharedPreferences(anyString(), anyInt())).thenReturn(sharedPreferences)
         `when`(sharedPreferences.edit()).thenReturn(editor)
         `when`(editor.putString(anyString(), anyString())).thenReturn(editor)
-        `when`(editor.apply()).then { }
 
         // Default mock values
         `when`(sharedPreferences.getString(eq("server_url"), anyString())).thenReturn("")

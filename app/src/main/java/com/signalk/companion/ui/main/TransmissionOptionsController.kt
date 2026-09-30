@@ -62,7 +62,7 @@ class TransmissionOptionsController(
                 putExtra(SignalKStreamingService.EXTRA_SEND_HEADING, state.sendHeading)
                 putExtra(SignalKStreamingService.EXTRA_SEND_PRESSURE, state.sendPressure)
             }
-            applicationContext.startService(intent)
+            applicationContext.sendToStreamingService(intent)
         }
     }
 }

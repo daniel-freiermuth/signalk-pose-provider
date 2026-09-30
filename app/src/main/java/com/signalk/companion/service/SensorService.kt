@@ -124,40 +124,22 @@ class SensorService @Inject constructor(
 
         // Register sensors based on what's needed
         if (needsHeading) {
-            magnetometer?.let {
-                sensorManager.registerListener(this, it, currentSensorDelay)
-                Log.d(TAG, "Magnetometer registered (needed for heading)")
-            }
-            accelerometer?.let {
-                sensorManager.registerListener(this, it, currentSensorDelay)
-                Log.d(TAG, "Accelerometer registered (needed for heading)")
-            }
-            gyroscope?.let {
-                sensorManager.registerListener(this, it, currentSensorDelay)
-                Log.d(TAG, "Gyroscope registered (needed for heading)")
-            }
+            magnetometer?.let { register(it, "Magnetometer") }
+            accelerometer?.let { register(it, "Accelerometer") }
+            gyroscope?.let { register(it, "Gyroscope") }
         } else {
             Log.d(TAG, "Heading disabled - skipping magnetometer, accelerometer, gyroscope")
         }
 
         if (needsPressure) {
-            pressure?.let {
-                sensorManager.registerListener(this, it, currentSensorDelay)
-                Log.d(TAG, "Pressure sensor registered")
-            }
+            pressure?.let { register(it, "Pressure sensor") }
         } else {
             Log.d(TAG, "Pressure disabled - skipping pressure sensor")
         }
 
         // Always register temperature and humidity as they're not configurable yet
-        temperature?.let {
-            sensorManager.registerListener(this, it, currentSensorDelay)
-            Log.d(TAG, "Temperature sensor registered")
-        }
-        humidity?.let {
-            sensorManager.registerListener(this, it, currentSensorDelay)
-            Log.d(TAG, "Humidity sensor registered")
-        }
+        temperature?.let { register(it, "Temperature sensor") }
+        humidity?.let { register(it, "Humidity sensor") }
 
         logAvailableSensors()
         isActive = true
@@ -461,6 +443,15 @@ class SensorService @Inject constructor(
             SensorManager.SENSOR_DELAY_GAME
         } else {
             SensorManager.SENSOR_DELAY_NORMAL
+        }
+    }
+
+    /** Registers [sensor] at the current delay; a sensor the HAL refuses is logged, not lost. */
+    private fun register(sensor: Sensor, name: String) {
+        if (sensorManager.registerListener(this, sensor, currentSensorDelay)) {
+            Log.d(TAG, "$name registered")
+        } else {
+            Log.w(TAG, "$name could not be registered; its readings will be missing")
         }
     }
 }

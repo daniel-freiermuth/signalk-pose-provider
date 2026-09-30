@@ -566,7 +566,7 @@ class SignalKStreamingService : Service() {
         val engineStarted = attitudeEngine.start(record = true)
         if (!engineStarted) {
             Log.e(TAG, "Attitude engine refused to start - closing the empty recording")
-            recordingSession.stop()
+            closeRecording("attitude engine refused to start")
         }
         return engineStarted
     }
@@ -635,12 +635,18 @@ class SignalKStreamingService : Service() {
         false
     }
 
+    /** Closes the recording file, if any, so its buffered records reach disk. */
+    private fun closeRecording(reason: String) {
+        val file = recordingSession.stop()
+        Log.i(TAG, "Recording closed ($reason): ${file?.absolutePath}")
+    }
+
     private fun rollBackRecording(cause: RuntimeException) {
         Log.e(TAG, "Foreground promotion refused - rolling the recording back", cause)
         recordingJob?.cancel()
         recordingJob = null
         attitudeEngine.stop()
-        recordingSession.stop()
+        closeRecording("rolled back")
         releaseGnssUnlessStreamingWantsIt()
     }
 
@@ -659,20 +665,20 @@ class SignalKStreamingService : Service() {
     }
 
     /**
-     * Stop the recording and return the file, or null if none was running.
+     * Stop the recording, if one is running, and log where it was written.
      *
      * Order matters: the engine is stopped first so the sensor thread is gone before the
      * writer closes. [RecordingSession] is explicitly single-writer, and closing underneath a
      * live 200 Hz callback is the one way to lose the tail of a sail.
      */
-    fun stopRecording(): java.io.File? {
+    fun stopRecording() {
         // Keyed on the job as well as the session, because the two can disagree:
         // RecordingSession detaches its own writer when a write fails mid-sail (storage
         // full, an MTP hiccup), so it reports "not recording" while this service still owns
         // the attitude engine, the sensor thread, the GNSS forwarding job and the foreground
         // promise. Returning early there would strand all of it — running, recording
         // nothing, with no path left that tears it down.
-        if (recordingJob == null && !recordingSession.isRecording) return null
+        if (recordingJob == null && !recordingSession.isRecording) return
 
         recordingJob?.cancel()
         recordingJob = null
@@ -692,7 +698,6 @@ class SignalKStreamingService : Service() {
         } else {
             updateNotification("Messages sent: ${_messagesSent.value}")
         }
-        return file
     }
 
     private fun updateStreamingConfig(config: StreamingConfig) {
@@ -877,7 +882,7 @@ class SignalKStreamingService : Service() {
         recordingJob?.cancel()
         recordingJob = null
         attitudeEngine.stop()
-        recordingSession.stop()
+        closeRecording("service destroyed")
         sensorService.stopSensorUpdates()
         locationService.stopLocationUpdates()
         serviceScope.cancel()
