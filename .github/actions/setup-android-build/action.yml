@@ -1,0 +1,46 @@
+name: Set up Android build
+description: >
+  JDK 17, Gradle (with caching) and Android SDK platform 36 — the toolchain every job in
+  build.yml needs. Run actions/checkout first: a local action is read from the checkout.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up JDK 17
+      uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+      with:
+        distribution: temurin
+        # Pinned to the toolchain the build declares (sourceCompatibility 17,
+        # jvmTarget 17) rather than tracking the runner default, so a runner image
+        # upgrade cannot silently change what the app is compiled against.
+        java-version: '17'
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@da187c8e6ffbd3802e00f2477aa5a822b25f2dda # v4.4.4
+      with:
+        # Only write to the shared cache from the default branch. PR branches read it but
+        # cannot poison it for everyone else.
+        cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+    - name: Install Android SDK Platform 36
+      # compileSdk = 36 in app/build.gradle.kts. ubuntu-latest currently preinstalls
+      # platform 35, but nothing in this workflow declares the dependency — a future runner
+      # image is free to drop it and the Gradle steps would fail without warning.
+      #
+      # `sdkmanager` is not on PATH on the runner image — only the cmdline-tools copy
+      # under $ANDROID_HOME is guaranteed to exist, which is what broke the first version
+      # of this step ("sdkmanager: command not found"). A block scalar here, not a quoted
+      # inline string: a YAML scalar can't start with `"` and then continue past the
+      # closing quote, which is exactly what broke the *second* version of this step —
+      # not a shell error this time but a workflow-file parse failure, so the whole
+      # workflow stopped running rather than just this step failing.
+      shell: bash
+      run: |
+        "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36"
+
+    - name: Report the toolchain
+      shell: bash
+      run: |
+        echo "ANDROID_HOME=$ANDROID_HOME"
+        ls "$ANDROID_HOME/platforms" 2>/dev/null || echo "no platforms directory"
+        java -version
