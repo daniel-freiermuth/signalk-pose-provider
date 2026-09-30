@@ -1,0 +1,48 @@
+# Overrides on top of detekt's default config (`buildUponDefaultConfig = true` in
+# app/build.gradle.kts). Everything not listed here keeps detekt's default.
+#
+# Rules with "requires type resolution" only run in the variant tasks (`detektDebug`,
+# `detektDebugUnitTest`), not in the plain `detekt` task — CI runs the variant tasks.
+
+config:
+  validation: true
+
+build:
+  # Any finding outside the baseline fails the build.
+  maxIssues: 0
+
+coroutines:
+  SuspendFunSwallowedCancellation:
+    # A catch in a suspend call chain that eats CancellationException leaves a cancelled
+    # coroutine running — the failure mode `catch (e: Exception)` hides.
+    active: true
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: true
+  SwallowedException:
+    active: true
+  RethrowCaughtException:
+    active: true
+
+potential-bugs:
+  UnsafeCallOnNullableType:
+    active: true
+  IgnoredReturnValue:
+    # Default scope: calls annotated @CheckResult/@CheckReturnValue, and ignored
+    # Sequence/Flow/Stream results. `restrictToConfig: false` would also cover OkHttp's
+    # unannotated WebSocket.send, but on this codebase it reports 283 sites dominated by
+    # Log.d, launch, let and MutableList.add — noise that would bury the real findings.
+    active: true
+
+naming:
+  FunctionNaming:
+    # Compose convention: @Composable functions are PascalCase.
+    ignoreAnnotated: ['Composable']
+
+formatting:
+  # ktlint's rules, via detekt-formatting. Android Studio code style, matching the IDE's
+  # formatter.
+  android: true
+  FunctionName:
+    ignoreAnnotated: ['Composable']

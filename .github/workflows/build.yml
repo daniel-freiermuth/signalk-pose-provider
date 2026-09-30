@@ -72,6 +72,25 @@ jobs:
           ls "$ANDROID_HOME/platforms" 2>/dev/null || echo "no platforms directory"
           java -version
 
+      - name: Static analysis (format, detekt, Android Lint)
+        # Formatting (ktlint rules via detekt-formatting), detekt's correctness rules and
+        # Android Lint, all at error level against their checked-in baselines: anything not
+        # already recorded in app/detekt-baseline-*.xml or app/lint-baseline.xml fails here.
+        # The detekt variant tasks, not plain `detekt`: only they run type-resolution rules
+        # such as IgnoredReturnValue and SuspendFunSwallowedCancellation.
+        run: ./gradlew detektDebug detektDebugUnitTest lintDebug --continue --stacktrace
+
+      - name: Upload static analysis reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: static-analysis-reports
+          path: |
+            app/build/reports/detekt/
+            app/build/reports/lint-results-debug.*
+          retention-days: 14
+          if-no-files-found: warn
+
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
