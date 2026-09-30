@@ -12,6 +12,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineDispatcher
 import javax.inject.Singleton
 
 @Module
@@ -20,8 +21,10 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideAuthenticationService(): AuthenticationService {
-        return AuthenticationService()
+    fun provideAuthenticationService(
+        @IoDispatcher ioDispatcher: CoroutineDispatcher
+    ): AuthenticationService {
+        return AuthenticationService(ioDispatcher)
     }
 
     @Provides
@@ -63,9 +66,10 @@ object AppModule {
     @Singleton
     fun provideSignalKTransmitter(
         @ApplicationContext context: Context,
-        authenticationService: AuthenticationService
+        authenticationService: AuthenticationService,
+        @IoDispatcher ioDispatcher: CoroutineDispatcher
     ): SignalKTransmitter {
-        val transmitter = SignalKTransmitter(authenticationService)
+        val transmitter = SignalKTransmitter(authenticationService, ioDispatcher)
         transmitter.setContext(context)
         return transmitter
     }

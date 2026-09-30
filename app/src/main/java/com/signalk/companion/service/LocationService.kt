@@ -88,7 +88,7 @@ class LocationService @Inject constructor() {
     // racing a concurrent rate change could still see the pre-change value. Resolving null
     // to currentIntervalMs *inside* doStart() closes that window.
     @Throws(SecurityException::class)
-    suspend fun startLocationUpdates(context: Context, updateIntervalMs: Long? = null) {
+    fun startLocationUpdates(context: Context, updateIntervalMs: Long? = null) {
         doStart(context, updateIntervalMs, onlyIfActive = false)
     }
 
@@ -114,7 +114,7 @@ class LocationService @Inject constructor() {
      * check and the restart could resurrect a registration the caller had just stopped.
      */
     @Throws(SecurityException::class)
-    suspend fun updateLocationRate(context: Context, updateIntervalMs: Long) {
+    fun updateLocationRate(context: Context, updateIntervalMs: Long) {
         doStart(context, updateIntervalMs, onlyIfActive = true)
     }
 

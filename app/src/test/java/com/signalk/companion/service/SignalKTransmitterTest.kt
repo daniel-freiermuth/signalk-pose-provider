@@ -1,10 +1,18 @@
 package com.signalk.companion.service
 
-import com.signalk.companion.data.model.*
 import com.signalk.companion.data.model.LocationData
+import com.signalk.companion.data.model.SignalKMessage
+import com.signalk.companion.data.model.SignalKSource
+import com.signalk.companion.data.model.SignalKUpdate
+import com.signalk.companion.data.model.SignalKValue
+import com.signalk.companion.data.model.SignalKValues
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SignalKTransmitterTest {
