@@ -126,9 +126,6 @@ android {
         abortOnError = true
         warningsAsErrors = true
         checkDependencies = false
-        // Pre-existing findings, recorded so the gate applies to new code. Regenerate with
-        // `./gradlew updateLintBaseline` only when deliberately accepting a finding.
-        baseline = file("lint-baseline.xml")
         // These report "a newer version exists" and so change verdict with the calendar,
         // not with the code: a green commit would turn red on the day a library ships.
         // Dependency freshness is tracked separately from the correctness gate.
@@ -173,10 +170,8 @@ composeCompiler {
 detekt {
     buildUponDefaultConfig = true
     config.setFrom(rootProject.file("config/detekt/detekt.yml"))
-    // Pre-existing findings; new code must be clean. Regenerate with
-    // `./gradlew detektBaselineDebug detektBaselineDebugUnitTest` only when deliberately
-    // accepting a finding.
-    baseline = file("detekt-baseline.xml")
+    // No baseline: every finding fails the build. A deliberate exception is a local
+    // @Suppress with its reason next to it, not an entry in a file nobody reads.
 }
 
 dependencies {
@@ -231,6 +226,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    // Static analysis: ktlint's formatting rules, run and baselined through detekt.
+    // Static analysis: ktlint's formatting rules, run through detekt.
     detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.8")
 }
