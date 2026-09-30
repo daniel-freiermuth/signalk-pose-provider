@@ -2,18 +2,41 @@ package com.signalk.companion.service
 
 import android.content.Context
 import android.util.Log
-import com.signalk.companion.data.model.*
+import com.signalk.companion.data.model.LocationData
+import com.signalk.companion.data.model.SensorData
+import com.signalk.companion.data.model.SignalKMessage
+import com.signalk.companion.data.model.SignalKSource
+import com.signalk.companion.data.model.SignalKUpdate
+import com.signalk.companion.data.model.SignalKValue
+import com.signalk.companion.data.model.SignalKValues
+import com.signalk.companion.di.IoDispatcher
 import com.signalk.companion.util.UrlParser
 import com.signalk.companion.util.VesselSettings
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import okhttp3.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.net.HttpURLConnection
 import java.net.InetAddress
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
@@ -26,11 +49,38 @@ import javax.inject.Singleton
  */
 @Singleton
 class SignalKTransmitter @Inject constructor(
-    private val authenticationService: AuthenticationService
+    private val authenticationService: AuthenticationService,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
 
     companion object {
         private const val TAG = "SignalKTransmitter"
+
+        // DNS refresh interval (5 minutes) - good balance between responsiveness and network load
+        private const val DNS_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
+
+        private const val READ_TIMEOUT_S = 60L
+        private const val WRITE_TIMEOUT_S = 60L
+        private const val CONNECT_TIMEOUT_S = 30L
+
+        /** RFC 6455 close code for a deliberate, user-initiated closure. */
+        private const val NORMAL_CLOSURE = 1000
+
+        private const val UNEXPECTED_CLOSURE_RECONNECT_DELAY_MS = 5_000L
+        private const val FAILURE_RECONNECT_DELAY_MS = 10_000L
+        private const val TOKEN_RENEWED_RECONNECT_DELAY_MS = 1_000L
+        private const val TOKEN_RENEWAL_RETRY_DELAY_MS = 30_000L
+
+        private const val DEFAULT_VESSEL_CONTEXT = "vessels.self"
+
+        private val LOCATION_SOURCE = SignalKSource(
+            label = "SignalK Pose Provider",
+            src = "signalk-nav-provider"
+        )
+        private val SENSOR_SOURCE = SignalKSource(
+            label = "SignalK Pose Provider - Sensors",
+            src = "signalk-nav-provider-sensors"
+        )
     }
 
     /**
@@ -58,9 +108,6 @@ class SignalKTransmitter @Inject constructor(
     private var transmitterScope: CoroutineScope? = null
     private var dnsRefreshJob: Job? = null
     private var reconnectionJob: Job? = null
-
-    // DNS refresh interval (5 minutes) - good balance between responsiveness and network load
-    private val DNS_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
 
     private val _connectionStatus = MutableStateFlow(false)
     val connectionStatus: StateFlow<Boolean> = _connectionStatus
@@ -105,11 +152,12 @@ class SignalKTransmitter @Inject constructor(
     suspend fun startStreaming() {
         // Create a fresh scope for this streaming session
         transmitterScope?.cancel()
-        transmitterScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        transmitterScope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
+        var started = false
         try {
             // Initial DNS resolution for WebSocket
-            withContext(Dispatchers.IO) {
+            withContext(ioDispatcher) {
                 refreshDnsResolution()
             }
 
@@ -119,10 +167,10 @@ class SignalKTransmitter @Inject constructor(
             // Start periodic DNS refresh for hostname resolution
             startDnsRefreshTimer()
 
-            _connectionStatus.value = true
-        } catch (e: Exception) {
-            _connectionStatus.value = false
-            throw e
+            started = true
+        } finally {
+            // A failed or cancelled start leaves the transmitter reporting disconnected
+            _connectionStatus.value = started
         }
     }
 
@@ -149,17 +197,25 @@ class SignalKTransmitter @Inject constructor(
             if (!_connectionStatus.value && webSocket == null) {
                 Log.d(TAG, "WebSocket disconnected, attempting reconnection after DNS refresh")
                 transmitterScope?.launch {
-                    try {
-                        initializeWebSocket()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "WebSocket reconnection failed: ${e.message}", e)
-                    }
+                    reconnectWebSocket("WebSocket reconnection failed")
                 } ?: Log.w(TAG, "Cannot attempt reconnection - transmitter scope is null")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "DNS resolution failed for $serverAddress: ${e.message}", e)
+        } catch (e: UnknownHostException) {
             // DNS resolution failed - but don't kill the entire streaming
             // Keep the WebSocket going, it will handle its own reconnection
+            Log.e(TAG, "DNS resolution failed for $serverAddress: ${e.message}", e)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "DNS resolution not permitted for $serverAddress: ${e.message}", e)
+        }
+    }
+
+    /** Opens a new WebSocket, logging rather than propagating a malformed server URL. */
+    private suspend fun reconnectWebSocket(failureMessage: String) {
+        try {
+            initializeWebSocket()
+        } catch (e: IllegalArgumentException) {
+            // State is already DISCONNECTED, so future reconnection attempts are possible
+            Log.e(TAG, "$failureMessage: ${e.message}", e)
         }
     }
 
@@ -179,12 +235,8 @@ class SignalKTransmitter @Inject constructor(
             while (isActive) {
                 delay(DNS_REFRESH_INTERVAL_MS)
                 if (isActive) {
-                    try {
-                        Log.d(TAG, "Performing periodic DNS refresh for $serverAddress...")
-                        refreshDnsResolution()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "DNS refresh failed: ${e.message}", e)
-                    }
+                    Log.d(TAG, "Performing periodic DNS refresh for $serverAddress...")
+                    refreshDnsResolution()
                 }
             }
         }
@@ -192,7 +244,10 @@ class SignalKTransmitter @Inject constructor(
 
     private fun scheduleReconnection(delayMs: Long) {
         val scope = transmitterScope ?: run {
-            Log.w(TAG, "Cannot schedule reconnection - transmitter scope is null (streaming stopped?)")
+            Log.w(
+                TAG,
+                "Cannot schedule reconnection - transmitter scope is null (streaming stopped?)"
+            )
             return
         }
 
@@ -203,12 +258,7 @@ class SignalKTransmitter @Inject constructor(
             // Only attempt if still disconnected
             if (webSocketState.get() == WebSocketState.DISCONNECTED) {
                 Log.d(TAG, "Executing scheduled WebSocket reconnection...")
-                try {
-                    initializeWebSocket()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Scheduled WebSocket reconnection failed: ${e.message}", e)
-                    // State is already DISCONNECTED, so future reconnection attempts are possible
-                }
+                reconnectWebSocket("Scheduled WebSocket reconnection failed")
             } else {
                 Log.d(TAG, "Skipping scheduled reconnection - state: ${webSocketState.get()}")
             }
@@ -223,7 +273,7 @@ class SignalKTransmitter @Inject constructor(
         reconnectionJob = null
 
         // Close WebSocket connection
-        webSocket?.close(1000, "Streaming stopped")
+        webSocket?.close(NORMAL_CLOSURE, "Streaming stopped")
         webSocket = null
 
         // Properly shut down OkHttpClient to release its thread pool and connection pool.
@@ -248,7 +298,7 @@ class SignalKTransmitter @Inject constructor(
     // Manual DNS refresh - can be called from UI if user reports connectivity issues
     suspend fun refreshDns() {
         if (webSocket != null) {
-            withContext(Dispatchers.IO) {
+            withContext(ioDispatcher) {
                 refreshDnsResolution()
             }
         }
@@ -259,285 +309,233 @@ class SignalKTransmitter @Inject constructor(
         _authenticationError.value = null
     }
 
-    suspend fun sendLocationData(locationData: LocationData, sendLocation: Boolean = true) {
+    fun sendLocationData(locationData: LocationData, sendLocation: Boolean = true) {
         if (sendLocation) {
             val signalKMessage = createLocationMessage(locationData)
             sendMessage(signalKMessage)
         }
     }
 
-    suspend fun sendSensorData(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true) {
+    fun sendSensorData(
+        sensorData: SensorData,
+        sendHeading: Boolean = true,
+        sendPressure: Boolean = true
+    ) {
         val signalKMessage = createSensorMessage(sensorData, sendHeading, sendPressure)
         sendMessage(signalKMessage)
     }
 
     private fun createLocationMessage(locationData: LocationData): SignalKMessage {
-        val timestamp = dateFormat.format(java.time.Instant.ofEpochMilli(locationData.timestamp))
-        val source = SignalKSource(
-            label = "SignalK Pose Provider",
-            src = "signalk-nav-provider"
-        )
-
-        val values = mutableListOf<SignalKValue>()
-
-        // Position with quality indicators
-        values.add(
-            SignalKValue(
-                path = "navigation.position",
-                value = SignalKValues.position(
-                    latitude = locationData.latitude,
-                    longitude = locationData.longitude
-                )
-            )
-        )
-
-        // Add position accuracy as separate quality indicator
-        if (locationData.accuracy > 0) {
-            values.add(
+        val values = buildList {
+            // Position with quality indicators
+            add(
                 SignalKValue(
-                    path = "navigation.position.accuracy",
-                    value = SignalKValues.number(locationData.accuracy.toDouble())
-                )
-            )
-        }
-
-        // Speed over ground with accuracy
-        // Use null check instead of > 0 to allow valid zero speed (stationary)
-        if (locationData.speed != null) {
-            values.add(
-                SignalKValue(
-                    path = "navigation.speedOverGround",
-                    value = SignalKValues.number(locationData.speed.toDouble())
-                )
-            )
-
-            // Add speed accuracy if available
-            locationData.speedAccuracy?.let { speedAcc ->
-                values.add(
-                    SignalKValue(
-                        path = "navigation.speedOverGround.accuracy",
-                        value = SignalKValues.number(speedAcc.toDouble())
+                    path = "navigation.position",
+                    value = SignalKValues.position(
+                        latitude = locationData.latitude,
+                        longitude = locationData.longitude
                     )
                 )
+            )
+
+            // Add position accuracy as separate quality indicator
+            if (locationData.accuracy > 0) {
+                add(numberValue("navigation.position.accuracy", locationData.accuracy.toDouble()))
+            }
+
+            // Speed over ground with accuracy
+            // Use null check instead of > 0 to allow valid zero speed (stationary)
+            locationData.speed?.let { speed ->
+                add(numberValue("navigation.speedOverGround", speed.toDouble()))
+                locationData.speedAccuracy?.let { speedAcc ->
+                    add(numberValue("navigation.speedOverGround.accuracy", speedAcc.toDouble()))
+                }
+            }
+
+            // Course over ground with accuracy
+            // Use null check instead of > 0 to allow valid zero bearing (True North)
+            locationData.bearing?.let { bearing ->
+                add(
+                    numberValue(
+                        "navigation.courseOverGroundTrue",
+                        Math.toRadians(bearing.toDouble())
+                    )
+                )
+                locationData.bearingAccuracy?.let { bearingAcc ->
+                    add(
+                        numberValue(
+                            "navigation.courseOverGroundTrue.accuracy",
+                            Math.toRadians(bearingAcc.toDouble())
+                        )
+                    )
+                }
+            }
+
+            // Altitude with accuracy
+            // Use null check instead of != 0.0 to allow valid zero altitude (sea level)
+            locationData.altitude?.let { altitude ->
+                add(numberValue("navigation.gnss.altitude", altitude))
+                locationData.verticalAccuracy?.let { vertAcc ->
+                    add(numberValue("navigation.gnss.altitude.accuracy", vertAcc.toDouble()))
+                }
             }
         }
 
-        // Course over ground with accuracy
-        // Use null check instead of > 0 to allow valid zero bearing (True North)
-        if (locationData.bearing != null) {
-            values.add(
-                SignalKValue(
-                    path = "navigation.courseOverGroundTrue",
-                    value = SignalKValues.number(Math.toRadians(locationData.bearing.toDouble()))
-                )
-            )
-
-            // Add bearing accuracy if available
-            locationData.bearingAccuracy?.let { bearingAcc ->
-                values.add(
-                    SignalKValue(
-                        path = "navigation.courseOverGroundTrue.accuracy",
-                        value = SignalKValues.number(Math.toRadians(bearingAcc.toDouble()))
-                    )
-                )
-            }
-        }
-
-        // Altitude with accuracy
-        // Use null check instead of != 0.0 to allow valid zero altitude (sea level)
-        if (locationData.altitude != null) {
-            values.add(
-                SignalKValue(
-                    path = "navigation.gnss.altitude",
-                    value = SignalKValues.number(locationData.altitude)
-                )
-            )
-
-            // Add vertical accuracy if available
-            locationData.verticalAccuracy?.let { vertAcc ->
-                values.add(
-                    SignalKValue(
-                        path = "navigation.gnss.altitude.accuracy",
-                        value = SignalKValues.number(vertAcc.toDouble())
-                    )
-                )
-            }
-        }
-
-        val update = SignalKUpdate(
-            source = source,
-            timestamp = timestamp,
-            values = values
-        )
-
-        val vesselContext = context?.let { VesselSettings.getSignalKContext(it) } ?: "vessels.self"
-
-        return SignalKMessage(
-            context = vesselContext,
-            updates = listOf(update)
-        )
+        return buildMessage(LOCATION_SOURCE, locationData.timestamp, values)
     }
 
-    private fun createSensorMessage(sensorData: SensorData, sendHeading: Boolean = true, sendPressure: Boolean = true): SignalKMessage {
-        val timestamp = dateFormat.format(java.time.Instant.ofEpochMilli(sensorData.timestamp))
-        val source = SignalKSource(
-            label = "SignalK Pose Provider - Sensors",
-            src = "signalk-nav-provider-sensors"
-        )
+    private fun createSensorMessage(
+        sensorData: SensorData,
+        sendHeading: Boolean,
+        sendPressure: Boolean
+    ): SignalKMessage {
+        val values = buildList {
+            if (sendHeading) addAll(headingValues(sensorData))
+            attitudeValue(sensorData)?.let { add(it) }
 
-        val values = mutableListOf<SignalKValue>()
+            // Vehicle-frame rate of turn, positive to starboard (frame-conventions.md §4.2).
+            sensorData.rateOfTurn?.let { rate ->
+                finiteNumberValue("navigation.rateOfTurn", rate.toDouble()) // already rad/s
+            }?.let { add(it) }
 
-        // Navigation orientation data (only if heading is enabled).
-        //
-        // Heading rides on `navigation.headingCompass`, whose spec description — "magnetic
-        // heading received from the compass, this is not adjusted for magneticDeviation" —
-        // is a precise statement of what we have until M2. `headingMagnetic` is defined as
-        // "headingCompass adjusted for magneticDeviation" and `headingTrue` as
-        // "headingMagnetic adjusted for magneticVariation", so publishing on either would
-        // assert a correction we have not made. The spec's own vocabulary is the honesty
-        // marker; no custom quality path is needed (frame-conventions.md §11).
-        //
-        // At M2 this promotes to `headingMagnetic`, alongside `navigation.magneticDeviation`
-        // carrying the correction actually applied.
-        if (sendHeading) {
-            sensorData.compassHeading?.let { heading ->
-                SignalKValues.finiteNumber(heading.toDouble())?.let { v -> // already radians
-                    values.add(SignalKValue(path = "navigation.headingCompass", value = v))
-                }
-            }
+            addAll(environmentValues(sensorData, sendPressure))
+        }
 
-            // Variation is a property of position, not of our compass, so it is honest to
-            // publish today. It also lets a consumer derive true heading itself, with the
-            // deviation caveat visible in the path name it came from.
-            sensorData.magneticVariation?.let { variation ->
-                SignalKValues.finiteNumber(variation.toDouble())?.let { v -> // already radians
-                    values.add(SignalKValue(path = "navigation.magneticVariation", value = v))
-                }
-            }
-        } // End of sendHeading condition
+        return buildMessage(SENSOR_SOURCE, sensorData.timestamp, values)
+    }
+
+    /**
+     * Heading, variation and magnetometer accuracy — sent only when heading is enabled.
+     *
+     * Heading rides on `navigation.headingCompass`, whose spec description — "magnetic
+     * heading received from the compass, this is not adjusted for magneticDeviation" —
+     * is a precise statement of what we have until M2. `headingMagnetic` is defined as
+     * "headingCompass adjusted for magneticDeviation" and `headingTrue` as
+     * "headingMagnetic adjusted for magneticVariation", so publishing on either would
+     * assert a correction we have not made. The spec's own vocabulary is the honesty
+     * marker; no custom quality path is needed (frame-conventions.md §11).
+     *
+     * At M2 this promotes to `headingMagnetic`, alongside `navigation.magneticDeviation`
+     * carrying the correction actually applied.
+     */
+    private fun headingValues(sensorData: SensorData): List<SignalKValue> = buildList {
+        sensorData.compassHeading?.let { heading ->
+            finiteNumberValue("navigation.headingCompass", heading.toDouble()) // already radians
+        }?.let { add(it) }
+
+        // Variation is a property of position, not of our compass, so it is honest to
+        // publish today. It also lets a consumer derive true heading itself, with the
+        // deviation caveat visible in the path name it came from.
+        sensorData.magneticVariation?.let { variation ->
+            finiteNumberValue("navigation.magneticVariation", variation.toDouble()) // radians
+        }?.let { add(it) }
 
         // Magnetometer accuracy (always sent when heading is enabled, independent of GPS)
-        if (sendHeading) {
-            sensorData.magnetometerAccuracy?.let { acc ->
-                values.add(
-                    SignalKValue(
-                        path = "sensors.magnetometer.accuracy",
-                        value = SignalKValues.number(acc.toDouble()) // 0=unreliable, 1=low, 2=medium, 3=high
-                    )
-                )
-            }
+        sensorData.magnetometerAccuracy?.let { acc ->
+            // 0=unreliable, 1=low, 2=medium, 3=high
+            add(numberValue("sensors.magnetometer.accuracy", acc.toDouble()))
         }
-
-        // Vehicle attitude. Roll is positive to starboard ("list to starboard" in the spec's
-        // wording), pitch positive bow-up — both verified verbatim against the schema. Roll
-        // here is instantaneous inclination: steady heel plus wave-driven roll oscillation
-        // (frame-conventions.md §5).
-        //
-        // No `yaw` member, permanently rather than pending M1. The field that used to be here
-        // carried a gyro *rate* in a slot consumers read as an *angle* (audit A2), but the
-        // deeper reason is that SignalK defines no datum for `attitude.yaw`: with north as
-        // datum it merely duplicates the heading paths, and with mean heading as datum it is
-        // a yawing oscillation — two incompatible readings the spec never resolves
-        // (frame-conventions.md §11). Heading rides on the heading paths, which are
-        // unambiguous.
-        val rollValue = sensorData.roll?.toDouble()?.takeIf { it.isFinite() }
-        val pitchValue = sensorData.pitch?.toDouble()?.takeIf { it.isFinite() }
-        if (rollValue != null || pitchValue != null) {
-            val attitude = buildJsonObject {
-                rollValue?.let { put("roll", JsonPrimitive(it)) }
-                pitchValue?.let { put("pitch", JsonPrimitive(it)) }
-            }
-            values.add(
-                SignalKValue(
-                    path = "navigation.attitude",
-                    value = attitude
-                )
-            )
-        }
-
-        // Vehicle-frame rate of turn, positive to starboard (frame-conventions.md §4.2).
-        sensorData.rateOfTurn?.let { rate ->
-            SignalKValues.finiteNumber(rate.toDouble())?.let { v -> // already rad/s
-                values.add(SignalKValue(path = "navigation.rateOfTurn", value = v))
-            }
-        }
-
-        // Environmental sensors (conditional based on settings)
-        if (sendPressure) {
-            sensorData.pressure?.let { pressure ->
-                values.add(
-                    SignalKValue(
-                        path = "environment.outside.pressure",
-                        value = SignalKValues.number(pressure.toDouble()) // Already in Pa
-                    )
-                )
-            }
-        }
-
-        sensorData.temperature?.let { temperature ->
-            values.add(
-                SignalKValue(
-                    path = "environment.outside.temperature",
-                    value = SignalKValues.number(temperature.toDouble()) // Already in K
-                )
-            )
-        }
-
-        sensorData.relativeHumidity?.let { humidity ->
-            values.add(
-                SignalKValue(
-                    path = "environment.outside.relativeHumidity",
-                    value = SignalKValues.number(humidity.toDouble()) // Already as ratio
-                )
-            )
-        }
-
-        val vesselContext = context?.let { VesselSettings.getSignalKContext(it) } ?: "vessels.self"
-
-        if (values.isEmpty()) {
-            return SignalKMessage(
-                context = vesselContext,
-                updates = emptyList()
-            )
-        }
-
-        val update = SignalKUpdate(
-            source = source,
-            timestamp = timestamp,
-            values = values
-        )
-
-        return SignalKMessage(
-            context = vesselContext,
-            updates = listOf(update)
-        )
     }
 
-    private suspend fun sendMessage(message: SignalKMessage) {
+    /**
+     * Vehicle attitude, or null when neither roll nor pitch is finite.
+     *
+     * Roll is positive to starboard ("list to starboard" in the spec's wording), pitch
+     * positive bow-up — both verified verbatim against the schema. Roll here is
+     * instantaneous inclination: steady heel plus wave-driven roll oscillation
+     * (frame-conventions.md §5).
+     *
+     * No `yaw` member, permanently rather than pending M1. The field that used to be here
+     * carried a gyro *rate* in a slot consumers read as an *angle* (audit A2), but the
+     * deeper reason is that SignalK defines no datum for `attitude.yaw`: with north as
+     * datum it merely duplicates the heading paths, and with mean heading as datum it is
+     * a yawing oscillation — two incompatible readings the spec never resolves
+     * (frame-conventions.md §11). Heading rides on the heading paths, which are
+     * unambiguous.
+     */
+    private fun attitudeValue(sensorData: SensorData): SignalKValue? {
+        val rollValue = sensorData.roll?.toDouble()?.takeIf { it.isFinite() }
+        val pitchValue = sensorData.pitch?.toDouble()?.takeIf { it.isFinite() }
+        if (rollValue == null && pitchValue == null) return null
+
+        val attitude = buildJsonObject {
+            rollValue?.let { put("roll", JsonPrimitive(it)) }
+            pitchValue?.let { put("pitch", JsonPrimitive(it)) }
+        }
+        return SignalKValue(path = "navigation.attitude", value = attitude)
+    }
+
+    /** Environmental sensors; pressure is conditional on settings. */
+    private fun environmentValues(
+        sensorData: SensorData,
+        sendPressure: Boolean
+    ): List<SignalKValue> = buildList {
+        if (sendPressure) {
+            sensorData.pressure?.let { pressure ->
+                add(numberValue("environment.outside.pressure", pressure.toDouble())) // Pa
+            }
+        }
+        sensorData.temperature?.let { temperature ->
+            add(numberValue("environment.outside.temperature", temperature.toDouble())) // K
+        }
+        sensorData.relativeHumidity?.let { humidity ->
+            add(numberValue("environment.outside.relativeHumidity", humidity.toDouble())) // ratio
+        }
+    }
+
+    private fun numberValue(path: String, value: Double): SignalKValue =
+        SignalKValue(path = path, value = SignalKValues.number(value))
+
+    private fun finiteNumberValue(path: String, value: Double): SignalKValue? =
+        SignalKValues.finiteNumber(value)?.let { SignalKValue(path = path, value = it) }
+
+    /** Wraps [values] in a single update, or no update at all when there is nothing to send. */
+    private fun buildMessage(
+        source: SignalKSource,
+        timestampMs: Long,
+        values: List<SignalKValue>
+    ): SignalKMessage {
+        val vesselContext =
+            context?.let { VesselSettings.getSignalKContext(it) } ?: DEFAULT_VESSEL_CONTEXT
+        val updates = if (values.isEmpty()) {
+            emptyList()
+        } else {
+            val timestamp = dateFormat.format(java.time.Instant.ofEpochMilli(timestampMs))
+            listOf(SignalKUpdate(source = source, timestamp = timestamp, values = values))
+        }
+        return SignalKMessage(context = vesselContext, updates = updates)
+    }
+
+    private fun sendMessage(message: SignalKMessage) {
+        val ws = webSocket
+        if (ws == null) {
+            _connectionStatus.value = false
+            Log.e(TAG, "SignalK transmission error: WebSocket connection not established")
+            return
+        }
+
         try {
             val json = Json.encodeToString(message)
-
-            webSocket?.let { ws ->
-                ws.send(json)
-            } ?: run {
-                throw Exception("WebSocket connection not established")
-            }
+            ws.send(json)
 
             // Update tracking state
             _lastSentMessage.value = json
             _messagesSent.value = _messagesSent.value + 1
             _lastTransmissionTime.value = System.currentTimeMillis()
-        } catch (e: Exception) {
+        } catch (e: SerializationException) {
             _connectionStatus.value = false
-            // Log the error details for debugging
-            Log.e(TAG, "SignalK transmission error: ${e.javaClass.simpleName} - ${e.message}", e)
+            Log.e(TAG, "SignalK transmission error: message could not be encoded", e)
         }
     }
 
     private suspend fun initializeWebSocket() {
         // Atomic state transition: DISCONNECTED -> CONNECTING
         // If already CONNECTING or CONNECTED, this returns false and we skip initialization
-        if (!webSocketState.compareAndSet(WebSocketState.DISCONNECTED, WebSocketState.CONNECTING)) {
+        val claimed = webSocketState.compareAndSet(
+            WebSocketState.DISCONNECTED,
+            WebSocketState.CONNECTING
+        )
+        if (!claimed) {
             Log.d(TAG, "WebSocket initialization skipped - current state: ${webSocketState.get()}")
             return
         }
@@ -548,74 +546,25 @@ class SignalKTransmitter @Inject constructor(
         // This covers the case where the startup auto-login raced with a server restart
         // and the server wasn't ready yet.  We attempt this before opening the WebSocket
         // so the WS upgrade request can carry a valid Authorization header immediately.
-        if (authenticationService.getAuthToken() == null && authenticationService.hasStoredCredentials()) {
+        if (authenticationService.getAuthToken() == null &&
+            authenticationService.hasStoredCredentials()
+        ) {
             Log.d(TAG, "No token available — attempting login before WebSocket connection")
             authenticationService.tryRefreshToken()
         }
 
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             try {
-                okHttpClient = OkHttpClient.Builder()
-                    .readTimeout(60, TimeUnit.SECONDS)
-                    .writeTimeout(60, TimeUnit.SECONDS)
-                    .connectTimeout(30, TimeUnit.SECONDS)
+                val client = OkHttpClient.Builder()
+                    .readTimeout(READ_TIMEOUT_S, TimeUnit.SECONDS)
+                    .writeTimeout(WRITE_TIMEOUT_S, TimeUnit.SECONDS)
+                    .connectTimeout(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
                     .retryOnConnectionFailure(true)
                     .build()
-
-                val streamUrl = "$baseUrl/signalk/v1/stream"
-                val request = Request.Builder()
-                    .url(streamUrl)
-                    .apply {
-                        // Add authentication header if we have a token
-                        authenticationService.getAuthToken()?.let { token ->
-                            addHeader("Authorization", "Bearer $token")
-                        }
-                    }
-                    .build()
-
-                val webSocketListener = object : WebSocketListener() {
-                    override fun onOpen(webSocket: WebSocket, response: Response) {
-                        // Transition: CONNECTING -> CONNECTED
-                        webSocketState.set(WebSocketState.CONNECTED)
-                        _connectionStatus.value = true
-                        Log.d(TAG, "WebSocket connected to SignalK server")
-                    }
-
-                    override fun onMessage(webSocket: WebSocket, text: String) {
-                        Log.d(TAG, "Received from SignalK: $text")
-                    }
-
-                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                        Log.d(TAG, "WebSocket closing: $code $reason")
-                    }
-
-                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                        // Transition: any state -> DISCONNECTED
-                        webSocketState.set(WebSocketState.DISCONNECTED)
-                        _connectionStatus.value = false
-                        this@SignalKTransmitter.webSocket = null
-                        Log.d(TAG, "WebSocket closed: $code $reason")
-
-                        // Auto-reconnect for unexpected closures (not user-initiated)
-                        if (code != 1000) {
-                            Log.w(TAG, "Unexpected WebSocket closure (code: $code), scheduling reconnection...")
-                            scheduleReconnection(5000)
-                        }
-                    }
-
-                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        // Transition: any state -> DISCONNECTED
-                        webSocketState.set(WebSocketState.DISCONNECTED)
-                        _connectionStatus.value = false
-                        this@SignalKTransmitter.webSocket = null
-                        Log.e(TAG, "WebSocket error: ${t.message}", t)
-
-                        handleWebSocketFailure(response)
-                    }
-                }
-
-                webSocket = okHttpClient?.newWebSocket(request, webSocketListener)
-            } catch (e: Exception) {
+                okHttpClient = client
+                webSocket = client.newWebSocket(buildStreamRequest(), webSocketListener)
+            } catch (e: IllegalArgumentException) {
+                // Request.Builder.url() rejects a malformed server URL.
                 // Transition back to DISCONNECTED on setup error
                 webSocketState.set(WebSocketState.DISCONNECTED)
                 Log.e(TAG, "WebSocket initialization error: ${e.message}", e)
@@ -624,64 +573,116 @@ class SignalKTransmitter @Inject constructor(
         }
     }
 
+    private fun buildStreamRequest(): Request = Request.Builder()
+        .url("$baseUrl/signalk/v1/stream")
+        .apply {
+            // Add authentication header if we have a token
+            authenticationService.getAuthToken()?.let { token ->
+                addHeader("Authorization", "Bearer $token")
+            }
+        }
+        .build()
+
+    private val webSocketListener = object : WebSocketListener() {
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            // Transition: CONNECTING -> CONNECTED
+            webSocketState.set(WebSocketState.CONNECTED)
+            _connectionStatus.value = true
+            Log.d(TAG, "WebSocket connected to SignalK server")
+        }
+
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            Log.d(TAG, "Received from SignalK: $text")
+        }
+
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            Log.d(TAG, "WebSocket closing: $code $reason")
+        }
+
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            // Transition: any state -> DISCONNECTED
+            webSocketState.set(WebSocketState.DISCONNECTED)
+            _connectionStatus.value = false
+            this@SignalKTransmitter.webSocket = null
+            Log.d(TAG, "WebSocket closed: $code $reason")
+
+            // Auto-reconnect for unexpected closures (not user-initiated)
+            if (code != NORMAL_CLOSURE) {
+                Log.w(
+                    TAG,
+                    "Unexpected WebSocket closure (code: $code), scheduling reconnection..."
+                )
+                scheduleReconnection(UNEXPECTED_CLOSURE_RECONNECT_DELAY_MS)
+            }
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            // Transition: any state -> DISCONNECTED
+            webSocketState.set(WebSocketState.DISCONNECTED)
+            _connectionStatus.value = false
+            this@SignalKTransmitter.webSocket = null
+            Log.e(TAG, "WebSocket error: ${t.message}", t)
+
+            handleWebSocketFailure(response)
+        }
+    }
+
     /**
      * Handle WebSocket failure by checking for auth errors and scheduling reconnection.
      */
     private fun handleWebSocketFailure(response: Response?) {
-        response?.let { resp ->
-            if (resp.code == 401 || resp.code == 403) {
-                val errorMsg = "Authentication failed (${resp.code}): Token may be expired or invalid"
-                Log.e(TAG, errorMsg)
-                _authenticationError.value = errorMsg
+        val code = response?.code
+        if (code == HttpURLConnection.HTTP_UNAUTHORIZED ||
+            code == HttpURLConnection.HTTP_FORBIDDEN
+        ) {
+            val errorMsg = "Authentication failed ($code): Token may be expired or invalid"
+            Log.e(TAG, errorMsg)
+            _authenticationError.value = errorMsg
 
-                // Attempt automatic token renewal
-                // Use NonCancellable to ensure token renewal completes even if streaming stops
-                transmitterScope?.launch {
-                    try {
-                        Log.d(TAG, "Attempting automatic token renewal...")
-                        val result = withContext(NonCancellable) {
-                            authenticationService.tryRefreshToken()
-                        }
-                        if (result.isSuccess && result.getOrNull() != null) {
-                            Log.d(TAG, "Token renewed successfully")
-                            _authenticationError.value = null
-                            // Only schedule reconnection if scope is still active
-                            if (transmitterScope?.isActive == true) {
-                                Log.d(TAG, "Scheduling reconnection...")
-                                scheduleReconnection(1000)
-                            } else {
-                                Log.d(TAG, "Streaming stopped - skipping reconnection after token renewal")
-                            }
-                        } else {
-                            val failureMsg = "Automatic token renewal failed - will retry"
-                            Log.e(TAG, failureMsg)
-                            _authenticationError.value = failureMsg
-                            // Keep retrying as long as we have credentials: the server may
-                            // still be coming up (auth endpoint and WebSocket together).
-                            if (authenticationService.hasStoredCredentials() &&
-                                transmitterScope?.isActive == true
-                            ) {
-                                Log.d(TAG, "Credentials exist — scheduling reconnect retry in 30 s")
-                                scheduleReconnection(30_000)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        val renewalError = "Error during token renewal: ${e.message}"
-                        Log.e(TAG, renewalError, e)
-                        _authenticationError.value = renewalError
-                    }
-                } ?: Log.w(TAG, "Cannot attempt token renewal - transmitter scope is null")
-            } else {
-                // Non-authentication HTTP error
-                _authenticationError.value = null
-                Log.w(TAG, "WebSocket failure (HTTP ${resp.code}), scheduling reconnection...")
-                scheduleReconnection(10000)
-            }
-        } ?: run {
-            // No response = network error (connection refused, timeout, etc.)
+            // Attempt automatic token renewal
+            transmitterScope?.launch { renewTokenAndReconnect() }
+                ?: Log.w(TAG, "Cannot attempt token renewal - transmitter scope is null")
+        } else {
             _authenticationError.value = null
-            Log.w(TAG, "Network-related WebSocket failure, scheduling reconnection...")
-            scheduleReconnection(10000)
+            if (code != null) {
+                // Non-authentication HTTP error
+                Log.w(TAG, "WebSocket failure (HTTP $code), scheduling reconnection...")
+            } else {
+                // No response = network error (connection refused, timeout, etc.)
+                Log.w(TAG, "Network-related WebSocket failure, scheduling reconnection...")
+            }
+            scheduleReconnection(FAILURE_RECONNECT_DELAY_MS)
+        }
+    }
+
+    private suspend fun renewTokenAndReconnect() {
+        Log.d(TAG, "Attempting automatic token renewal...")
+        // Use NonCancellable to ensure token renewal completes even if streaming stops
+        val result = withContext(NonCancellable) {
+            authenticationService.tryRefreshToken()
+        }
+        if (result.isSuccess && result.getOrNull() != null) {
+            Log.d(TAG, "Token renewed successfully")
+            _authenticationError.value = null
+            // Only schedule reconnection if scope is still active
+            if (transmitterScope?.isActive == true) {
+                Log.d(TAG, "Scheduling reconnection...")
+                scheduleReconnection(TOKEN_RENEWED_RECONNECT_DELAY_MS)
+            } else {
+                Log.d(TAG, "Streaming stopped - skipping reconnection after token renewal")
+            }
+        } else {
+            val failureMsg = "Automatic token renewal failed - will retry"
+            Log.e(TAG, failureMsg)
+            _authenticationError.value = failureMsg
+            // Keep retrying as long as we have credentials: the server may
+            // still be coming up (auth endpoint and WebSocket together).
+            if (authenticationService.hasStoredCredentials() &&
+                transmitterScope?.isActive == true
+            ) {
+                Log.d(TAG, "Credentials exist — scheduling reconnect retry in 30 s")
+                scheduleReconnection(TOKEN_RENEWAL_RETRY_DELAY_MS)
+            }
         }
     }
 }

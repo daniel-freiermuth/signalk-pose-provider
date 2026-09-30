@@ -1,7 +1,8 @@
 package com.signalk.companion.service
 
 import com.signalk.companion.data.model.LocationData
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SignalKDataTest {
@@ -24,19 +25,5 @@ class SignalKDataTest {
         assertNotNull(locationData)
         assertTrue(locationData.latitude > 0)
         assertTrue(locationData.longitude > 0)
-    }
-
-    @Test
-    fun testSignalKMessageStructure() {
-        // Test basic SignalK message structure
-        val expectedJson = """
-            {
-                "context": "vessels.self",
-                "updates": []
-            }
-        """.trimIndent()
-
-        // This test verifies our data model can be serialized
-        assertTrue(true, "SignalK message structure should be valid")
     }
 }

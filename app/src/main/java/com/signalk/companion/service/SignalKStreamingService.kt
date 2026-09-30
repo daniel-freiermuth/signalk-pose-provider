@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import com.signalk.companion.MainActivity
 import com.signalk.companion.R
 import com.signalk.companion.data.model.LocationData
+import com.signalk.companion.di.DefaultDispatcher
 import com.signalk.companion.replay.FixRecord
 import com.signalk.companion.replay.RecordingSession
 import com.signalk.companion.util.BatteryOptimizationHelper
@@ -24,9 +25,10 @@ import com.signalk.companion.util.StreamingSettings
 import com.signalk.companion.util.TransmissionSettings
 import com.signalk.companion.util.UrlParser
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -64,15 +66,21 @@ class SignalKStreamingService : Service() {
     @Inject
     lateinit var recordingSession: RecordingSession
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Inject
+    @DefaultDispatcher
+    lateinit var defaultDispatcher: CoroutineDispatcher
+
+    // Lazy because the dispatcher is field-injected: first touched in onCreate(), after
+    // super.onCreate() has run the injection.
+    private val serviceScope by lazy { CoroutineScope(SupervisorJob() + defaultDispatcher) }
     private val binder = LocalBinder()
 
     // Coroutine job for forwarding sensor/location data to the transmitter.
     // Null when not streaming so no data is forwarded and no CPU is burned.
-    private var transmissionJob: kotlinx.coroutines.Job? = null
+    private var transmissionJob: Job? = null
 
     // Forwards GNSS fixes into the recording. Null when not recording.
-    private var recordingJob: kotlinx.coroutines.Job? = null
+    private var recordingJob: Job? = null
 
     /**
      * The newest start command that asked for a teardown, shared by both stop paths.
@@ -99,14 +107,17 @@ class SignalKStreamingService : Service() {
     private val _streamingState = MutableStateFlow(StreamingState.IDLE)
     val streamingState: StateFlow<StreamingState> = _streamingState.asStateFlow()
 
-    // Derived property for consumers expecting Boolean - always consistent with streamingState
-    val isStreaming: StateFlow<Boolean> = _streamingState
-        .map { it == StreamingState.STREAMING }
-        .stateIn(
-            scope = serviceScope,
-            started = SharingStarted.Eagerly,
-            initialValue = false
-        )
+    // Derived property for consumers expecting Boolean - always consistent with streamingState.
+    // Lazy for the same reason as serviceScope; consumers only reach it through the binder.
+    val isStreaming: StateFlow<Boolean> by lazy {
+        _streamingState
+            .map { it == StreamingState.STREAMING }
+            .stateIn(
+                scope = serviceScope,
+                started = SharingStarted.Eagerly,
+                initialValue = false
+            )
+    }
 
     private val _messagesSent = MutableStateFlow(0)
     val messagesSent: StateFlow<Int> = _messagesSent.asStateFlow()
@@ -122,6 +133,13 @@ class SignalKStreamingService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "SIGNALK_STREAMING"
 
+        /** Used when a start/update intent carries no rate. */
+        private const val DEFAULT_LOCATION_INTERVAL_MS = 1000L
+        private const val DEFAULT_SENSOR_INTERVAL_MS = 1000
+
+        /** Grace period after starting the transmitter before data sources come up. */
+        private const val CONNECTION_SETTLE_DELAY_MS = 1000L
+
         const val ACTION_START_STREAMING = "START_STREAMING"
         const val ACTION_STOP_STREAMING = "STOP_STREAMING"
         const val ACTION_UPDATE_CONFIG = "UPDATE_CONFIG"
@@ -135,6 +153,15 @@ class SignalKStreamingService : Service() {
         const val EXTRA_SEND_HEADING = "SEND_HEADING"
         const val EXTRA_SEND_PRESSURE = "SEND_PRESSURE"
     }
+
+    /** What to stream and how often, as carried by start and update-config intents. */
+    private data class StreamingConfig(
+        val locationRateMs: Long,
+        val sensorRateMs: Int,
+        val sendLocation: Boolean,
+        val sendHeading: Boolean,
+        val sendPressure: Boolean
+    )
 
     inner class LocalBinder : Binder() {
         fun getService(): SignalKStreamingService = this@SignalKStreamingService
@@ -173,28 +200,22 @@ class SignalKStreamingService : Service() {
     private fun startTransmissionJob() {
         transmissionJob?.cancel()
         transmissionJob = serviceScope.launch {
+            // The transmitter handles its own send failures (it logs them and reports the
+            // connection as down), so nothing here needs to catch.
             launch {
                 locationService.locationUpdates.collect { locationData ->
                     locationData?.let {
-                        try {
-                            signalKTransmitter.sendLocationData(it, sendLocation)
-                            updateTransmissionStats()
-                            Log.d(TAG, "Sent location data: lat=${it.latitude}, lon=${it.longitude}")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to send location data", e)
-                        }
+                        signalKTransmitter.sendLocationData(it, sendLocation)
+                        updateTransmissionStats()
+                        Log.d(TAG, "Sent location data: lat=${it.latitude}, lon=${it.longitude}")
                     }
                 }
             }
             launch {
                 sensorService.sensorData.collect { sensorData ->
-                    try {
-                        signalKTransmitter.sendSensorData(sensorData, sendHeading, sendPressure)
-                        updateTransmissionStats()
-                        Log.d(TAG, "Sent sensor data: timestamp=${sensorData.timestamp}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to send sensor data", e)
-                    }
+                    signalKTransmitter.sendSensorData(sensorData, sendHeading, sendPressure)
+                    updateTransmissionStats()
+                    Log.d(TAG, "Sent sensor data: timestamp=${sensorData.timestamp}")
                 }
             }
         }
@@ -202,34 +223,42 @@ class SignalKStreamingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
-            // OS killed and restarted the service (START_STICKY). Resume streaming only if
-            // we were actively streaming when killed; otherwise just stop cleanly.
-            if (StreamingSettings.getWasStreaming(this)) {
-                Log.w(TAG, "Service restarted by OS after kill — resuming streaming from saved config")
-                val serverUrl = ConnectionSettings.getServerUrl(this)
-                val parsedUrl = UrlParser.parseUrl(serverUrl)
-                if (parsedUrl != null) {
-                    startStreaming(
-                        parsedUrl = parsedUrl,
-                        locationRate = StreamingSettings.getLocationIntervalMs(this),
-                        sensorRate = StreamingSettings.getSensorIntervalMs(this).toInt(),
-                        sendLocation = TransmissionSettings.getSendLocation(this),
-                        sendHeading = TransmissionSettings.getSendHeading(this),
-                        sendPressure = TransmissionSettings.getSendPressure(this),
-                        startId = startId
-                    )
-                } else {
-                    Log.e(TAG, "Cannot resume: saved server URL '$serverUrl' is invalid — stopping")
-                    StreamingSettings.setWasStreaming(this, false)
-                    stopSelf()
-                }
-            } else {
-                Log.d(TAG, "Service restarted by OS but was not streaming — stopping")
-                stopSelf()
-            }
-            return START_STICKY
+            resumeAfterOsRestart(startId)
+        } else {
+            handleAction(intent, startId)
         }
 
+        // START_STICKY: the OS will restart this service after an unexpected kill.
+        // If it was actively streaming (tracked via StreamingSettings.getWasStreaming), the
+        // null-intent branch above will resume it. If not streaming, it will call stopSelf()
+        // immediately.
+        return START_STICKY
+    }
+
+    /**
+     * OS killed and restarted the service (START_STICKY). Resume streaming only if we were
+     * actively streaming when killed; otherwise just stop cleanly.
+     */
+    private fun resumeAfterOsRestart(startId: Int) {
+        if (!StreamingSettings.getWasStreaming(this)) {
+            Log.d(TAG, "Service restarted by OS but was not streaming — stopping")
+            stopSelf()
+            return
+        }
+
+        Log.w(TAG, "Service restarted by OS after kill — resuming streaming from saved config")
+        val serverUrl = ConnectionSettings.getServerUrl(this)
+        val parsedUrl = UrlParser.parseUrl(serverUrl)
+        if (parsedUrl != null) {
+            startStreaming(parsedUrl, savedStreamingConfig(), startId)
+        } else {
+            Log.e(TAG, "Cannot resume: saved server URL '$serverUrl' is invalid — stopping")
+            StreamingSettings.setWasStreaming(this, false)
+            stopSelf()
+        }
+    }
+
+    private fun handleAction(intent: Intent, startId: Int) {
         when (intent.action) {
             ACTION_START_STREAMING -> {
                 @Suppress("DEPRECATION")
@@ -238,48 +267,29 @@ class SignalKStreamingService : Service() {
                 } else {
                     intent.getParcelableExtra(EXTRA_PARSED_URL)
                 }
-                val locationRate = intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L)
-                val sensorRate = intent.getIntExtra(EXTRA_SENSOR_RATE, 1000)
-                val sendLocation = intent.getBooleanExtra(EXTRA_SEND_LOCATION, true)
-                val sendHeading = intent.getBooleanExtra(EXTRA_SEND_HEADING, true)
-                val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
 
                 if (parsedUrl != null) {
-                    startStreaming(
-                        parsedUrl,
-                        locationRate,
-                        sensorRate,
-                        sendLocation,
-                        sendHeading,
-                        sendPressure,
-                        startId
-                    )
+                    startStreaming(parsedUrl, intent.toStreamingConfig(), startId)
                 } else {
-                    Log.w(TAG, "ACTION_START_STREAMING received but parsedUrl is null - ignoring request")
+                    Log.w(TAG, "ACTION_START_STREAMING received but parsedUrl is null - ignoring")
                 }
             }
-            ACTION_UPDATE_CONFIG -> {
-                val locationRate = intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L)
-                val sensorRate = intent.getIntExtra(EXTRA_SENSOR_RATE, 1000)
-                val sendLocation = intent.getBooleanExtra(EXTRA_SEND_LOCATION, true)
-                val sendHeading = intent.getBooleanExtra(EXTRA_SEND_HEADING, true)
-                val sendPressure = intent.getBooleanExtra(EXTRA_SEND_PRESSURE, true)
-
-                updateStreamingConfig(locationRate, sensorRate, sendLocation, sendHeading, sendPressure)
-            }
+            ACTION_UPDATE_CONFIG -> updateStreamingConfig(intent.toStreamingConfig())
             ACTION_STOP_STREAMING -> {
                 lastStopRequestId = startId
                 stopStreaming()
             }
             ACTION_START_RECORDING -> {
-                val started = startRecording(intent.getLongExtra(EXTRA_LOCATION_RATE, 1000L))
+                val started = startRecording(
+                    intent.getLongExtra(EXTRA_LOCATION_RATE, DEFAULT_LOCATION_INTERVAL_MS)
+                )
                 // toggleRecording() calls startForegroundService() for this action, which
                 // obligates a startForeground() call within seconds or the system kills the
                 // process for breaking that contract. A failed startRecording() never makes
                 // that call; streaming (if active) already has, so only a fully idle service
                 // needs to stop itself here to avoid being the one left holding the promise.
                 if (!started && _streamingState.value == StreamingState.IDLE) {
-                    Log.w(TAG, "Recording failed to start and nothing else needs the service - stopping")
+                    Log.w(TAG, "Recording failed to start and nothing else needs the service")
                     stopSelfResult(startId)
                 }
             }
@@ -288,24 +298,35 @@ class SignalKStreamingService : Service() {
                 stopRecording()
             }
         }
-
-        // START_STICKY: the OS will restart this service after an unexpected kill.
-        // If it was actively streaming (tracked via StreamingSettings.getWasStreaming), the null-intent
-        // branch above will resume it. If not streaming, it will call stopSelf() immediately.
-        return START_STICKY
     }
+
+    private fun Intent.toStreamingConfig() = StreamingConfig(
+        locationRateMs = getLongExtra(EXTRA_LOCATION_RATE, DEFAULT_LOCATION_INTERVAL_MS),
+        sensorRateMs = getIntExtra(EXTRA_SENSOR_RATE, DEFAULT_SENSOR_INTERVAL_MS),
+        sendLocation = getBooleanExtra(EXTRA_SEND_LOCATION, true),
+        sendHeading = getBooleanExtra(EXTRA_SEND_HEADING, true),
+        sendPressure = getBooleanExtra(EXTRA_SEND_PRESSURE, true)
+    )
+
+    private fun savedStreamingConfig() = StreamingConfig(
+        locationRateMs = StreamingSettings.getLocationIntervalMs(this),
+        sensorRateMs = StreamingSettings.getSensorIntervalMs(this).toInt(),
+        sendLocation = TransmissionSettings.getSendLocation(this),
+        sendHeading = TransmissionSettings.getSendHeading(this),
+        sendPressure = TransmissionSettings.getSendPressure(this)
+    )
 
     private fun startStreaming(
         parsedUrl: UrlParser.ParsedUrl,
-        locationRate: Long,
-        sensorRate: Int,
-        sendLocation: Boolean = true,
-        sendHeading: Boolean = true,
-        sendPressure: Boolean = true,
-        startId: Int = 0
+        config: StreamingConfig,
+        startId: Int
     ) {
         if (_streamingState.value != StreamingState.IDLE) {
-            Log.d(TAG, "Already streaming or starting (state=${_streamingState.value}), ignoring start request")
+            Log.d(
+                TAG,
+                "Already streaming or starting (state=${_streamingState.value}), " +
+                    "ignoring start request"
+            )
             return
         }
 
@@ -313,125 +334,137 @@ class SignalKStreamingService : Service() {
         _streamingState.value = StreamingState.STARTING
 
         // Store configuration
-        this.sendLocation = sendLocation
-        this.sendHeading = sendHeading
-        this.sendPressure = sendPressure
+        sendLocation = config.sendLocation
+        sendHeading = config.sendHeading
+        sendPressure = config.sendPressure
 
         Log.d(
             TAG,
             "Starting SignalK streaming to ${parsedUrl.toUrlString()} " +
                 "(location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)"
         )
+        logBatteryOptimizationStatus()
 
-        // Check battery optimization status
+        serviceScope.launch {
+            try {
+                bringUpStreaming(parsedUrl, config)
+            } catch (e: IllegalArgumentException) {
+                // Request.Builder rejects a malformed server URL
+                val detail = e.message?.substringAfter(":")?.trim() ?: "unknown error"
+                rollBackFailedStart("Invalid server URL: $detail", e, startId)
+            } catch (e: SecurityException) {
+                rollBackFailedStart("Permission denied: ${e.message}", e, startId)
+            } catch (e: IllegalStateException) {
+                // Includes ForegroundServiceStartNotAllowedException from startForeground()
+                rollBackFailedStart("Failed to start streaming: ${e.message}", e, startId)
+            }
+        }
+    }
+
+    private fun logBatteryOptimizationStatus() {
         val batteryOptimized = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)
         Log.d(TAG, "Battery optimization disabled: $batteryOptimized")
         if (!batteryOptimized) {
             Log.w(TAG, "WARNING: Battery optimization is enabled - app may stop in background!")
         }
+    }
 
-        serviceScope.launch {
+    /** Connects the transmitter, starts the data sources and promotes to the foreground. */
+    private suspend fun bringUpStreaming(parsedUrl: UrlParser.ParsedUrl, config: StreamingConfig) {
+        _error.value = null // Clear any previous errors
+        Log.d(TAG, "Configuring SignalK transmitter")
+
+        // Configure SignalK transmitter with parsed URL
+        signalKTransmitter.configure(parsedUrl)
+
+        // Start SignalK streaming (this is crucial!)
+        Log.d(TAG, "Starting SignalK transmitter...")
+        signalKTransmitter.startStreaming()
+
+        // Wait a moment for connection to establish
+        delay(CONNECTION_SETTLE_DELAY_MS)
+
+        startDataSources(config)
+
+        // Mark as successfully streaming
+        _streamingState.value = StreamingState.STREAMING
+
+        // Start forwarding data to the transmitter — only now that we are streaming
+        startTransmissionJob()
+
+        // Persist streaming state so the service can resume after an OS kill
+        StreamingSettings.setWasStreaming(this, true)
+
+        // Start foreground service with notification
+        val notification = createNotification("Streaming to SignalK server")
+        startForeground(NOTIFICATION_ID, notification)
+
+        Log.d(TAG, "SignalK streaming started successfully")
+    }
+
+    /** Starts GNSS and sensors, each only if some enabled transmission needs it. */
+    private fun startDataSources(config: StreamingConfig) {
+        if (config.sendLocation) {
+            Log.d(TAG, "Starting location updates with rate: ${config.locationRateMs}ms")
             try {
-                _error.value = null // Clear any previous errors
-                Log.d(TAG, "Configuring SignalK transmitter")
-
-                // Configure SignalK transmitter with parsed URL
-                signalKTransmitter.configure(parsedUrl)
-
-                // Start SignalK streaming (this is crucial!)
-                Log.d(TAG, "Starting SignalK transmitter...")
-                signalKTransmitter.startStreaming()
-
-                // Wait a moment for connection to establish
-                delay(1000)
-
-                // Conditionally start location updates only if location data is needed
-                if (sendLocation) {
-                    Log.d(TAG, "Starting location updates with rate: ${locationRate}ms")
-                    try {
-                        locationService.startLocationUpdates(this@SignalKStreamingService, locationRate)
-                    } catch (e: SecurityException) {
-                        Log.e(TAG, "Location permission not granted", e)
-                    }
-                } else {
-                    Log.d(TAG, "Location transmission disabled - skipping GPS activation")
-                }
-
-                // Conditionally start sensor updates only if heading or pressure data is needed
-                if (sendHeading || sendPressure) {
-                    Log.d(
-                        TAG,
-                        "Starting sensor updates with rate: ${sensorRate}ms (heading=$sendHeading, pressure=$sendPressure)"
-                    )
-                    sensorService.startSensorUpdates(
-                        sensorRate,
-                        needsHeading = sendHeading,
-                        needsPressure = sendPressure
-                    )
-                } else {
-                    Log.d(TAG, "All sensor transmission disabled - skipping sensor activation")
-                }
-
-                // Mark as successfully streaming
-                _streamingState.value = StreamingState.STREAMING
-
-                // Start forwarding data to the transmitter — only now that we are streaming
-                startTransmissionJob()
-
-                // Persist streaming state so the service can resume after an OS kill
-                StreamingSettings.setWasStreaming(this@SignalKStreamingService, true)
-
-                // Start foreground service with notification
-                val notification = createNotification("Streaming to SignalK server")
-                startForeground(NOTIFICATION_ID, notification)
-
-                Log.d(TAG, "SignalK streaming started successfully")
-            } catch (e: Exception) {
-                val errorMessage = when (e) {
-                    is IllegalArgumentException -> "Invalid server URL: ${e.message?.substringAfter(":")?.trim() ?: "unknown error"}"
-                    is java.net.UnknownHostException -> "Cannot resolve hostname: ${e.message}"
-                    is SecurityException -> "Permission denied: ${e.message}"
-                    else -> "Failed to start streaming: ${e.message}"
-                }
-                Log.e(TAG, errorMessage, e)
-                _error.value = errorMessage
-                _streamingState.value = StreamingState.IDLE
-
-                // The throw can land anywhere in the sequence above, including the very last
-                // line — startForeground() itself throws when the OS refuses the promotion.
-                // By then the transmitter, the sensors, the forwarding job and the resume
-                // flag are all live, so clearing the state enum alone would leave a service
-                // that reports IDLE still transmitting, and leave wasStreaming set for the
-                // next OS restart to resume a session that never actually started. Undo the
-                // whole partial start, not the flag that describes it.
-                StreamingSettings.setWasStreaming(this@SignalKStreamingService, false)
-                transmissionJob?.cancel()
-                transmissionJob = null
-                try {
-                    signalKTransmitter.stopStreaming()
-                } catch (stopError: Exception) {
-                    Log.w(TAG, "Transmitter refused to stop after a failed start", stopError)
-                }
-                sensorService.stopSensorUpdates()
-
-                // A recording is an independent reason for this service to exist, and it is
-                // the one artefact that cannot be re-taken. stopSelf() here would reach
-                // onDestroy(), which stops the attitude engine and closes the recording — so
-                // a mistyped hostname would end a sail already being recorded. GNSS is left
-                // alone on this path for the same reason: the recording still wants it, and
-                // on the other path onDestroy() stops it anyway.
-                if (recordingSession.isRecording) {
-                    updateNotification("Recording raw sensor data")
-                } else {
-                    // stopSelfResult, not stopSelf: this failure is handled on a background
-                    // dispatcher, so the read above can be stale by the time it is acted on.
-                    // A recording that started in that gap arrived as its own start command
-                    // and has bumped the id, which makes this call a no-op — otherwise a
-                    // failed connection attempt could destroy the service out from under a
-                    // sail that had just begun recording.
-                    stopSelfResult(startId)
-                }
+                locationService.startLocationUpdates(this, config.locationRateMs)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Location permission not granted", e)
             }
+        } else {
+            Log.d(TAG, "Location transmission disabled - skipping GPS activation")
+        }
+
+        if (config.sendHeading || config.sendPressure) {
+            Log.d(
+                TAG,
+                "Starting sensor updates with rate: ${config.sensorRateMs}ms " +
+                    "(heading=${config.sendHeading}, pressure=${config.sendPressure})"
+            )
+            sensorService.startSensorUpdates(
+                config.sensorRateMs,
+                needsHeading = config.sendHeading,
+                needsPressure = config.sendPressure
+            )
+        } else {
+            Log.d(TAG, "All sensor transmission disabled - skipping sensor activation")
+        }
+    }
+
+    private fun rollBackFailedStart(errorMessage: String, cause: Throwable, startId: Int) {
+        Log.e(TAG, errorMessage, cause)
+        _error.value = errorMessage
+        _streamingState.value = StreamingState.IDLE
+
+        // The throw can land anywhere in the start sequence, including the very last
+        // line — startForeground() itself throws when the OS refuses the promotion.
+        // By then the transmitter, the sensors, the forwarding job and the resume
+        // flag are all live, so clearing the state enum alone would leave a service
+        // that reports IDLE still transmitting, and leave wasStreaming set for the
+        // next OS restart to resume a session that never actually started. Undo the
+        // whole partial start, not the flag that describes it.
+        StreamingSettings.setWasStreaming(this, false)
+        transmissionJob?.cancel()
+        transmissionJob = null
+        signalKTransmitter.stopStreaming()
+        sensorService.stopSensorUpdates()
+
+        // A recording is an independent reason for this service to exist, and it is
+        // the one artefact that cannot be re-taken. stopSelf() here would reach
+        // onDestroy(), which stops the attitude engine and closes the recording — so
+        // a mistyped hostname would end a sail already being recorded. GNSS is left
+        // alone on this path for the same reason: the recording still wants it, and
+        // on the other path onDestroy() stops it anyway.
+        if (recordingSession.isRecording) {
+            updateNotification("Recording raw sensor data")
+        } else {
+            // stopSelfResult, not stopSelf: this failure is handled on a background
+            // dispatcher, so the read above can be stale by the time it is acted on.
+            // A recording that started in that gap arrived as its own start command
+            // and has bumped the id, which makes this call a no-op — otherwise a
+            // failed connection attempt could destroy the service out from under a
+            // sail that had just begun recording.
+            stopSelfResult(startId)
         }
     }
 
@@ -494,7 +527,7 @@ class SignalKStreamingService : Service() {
      * fix without that timestamp is dropped rather than stamped with an invented one: an
      * unplaceable fix is worse than a missing one for M4.
      */
-    fun startRecording(locationRate: Long = 1000L): Boolean {
+    fun startRecording(locationRate: Long = DEFAULT_LOCATION_INTERVAL_MS): Boolean {
         if (recordingSession.isRecording) {
             Log.d(TAG, "Recording already in progress, ignoring start request")
             return true
@@ -508,6 +541,15 @@ class SignalKStreamingService : Service() {
         recordingJob?.cancel()
         recordingJob = null
 
+        val engineStarted = openRecordingAndStartEngine()
+        if (engineStarted) startFixForwarding(locationRate)
+        val started = engineStarted && promoteRecordingToForeground()
+        if (started) Log.i(TAG, "Recording started")
+        return started
+    }
+
+    /** Opens the recording file and starts the attitude engine writing into it. */
+    private fun openRecordingAndStartEngine(): Boolean {
         if (recordingSession.start() == null) {
             Log.e(TAG, "Could not open a recording file - not starting the engine")
             return false
@@ -521,12 +563,16 @@ class SignalKStreamingService : Service() {
             CalibrationSettings.getCalibrationBetaDeg(this),
             CalibrationSettings.getCalibrationGammaDeg(this)
         )
-        if (!attitudeEngine.start(record = true)) {
+        val engineStarted = attitudeEngine.start(record = true)
+        if (!engineStarted) {
             Log.e(TAG, "Attitude engine refused to start - closing the empty recording")
             recordingSession.stop()
-            return false
         }
+        return engineStarted
+    }
 
+    /** Ensures GNSS is running and forwards every new fix into the recording. */
+    private fun startFixForwarding(locationRate: Long) {
         // Whatever fix is current *now* predates the recording by definition. locationUpdates
         // is a StateFlow and replays its last value to the collector below, so a baseline of
         // zero would let that stale fix — possibly minutes old, from a previous sail — be
@@ -536,12 +582,12 @@ class SignalKStreamingService : Service() {
         val baselineFixNs = locationService.locationUpdates.value?.toFixRecord()?.timestampNs ?: 0L
 
         // UNDISPATCHED: the body runs on this thread, to completion, before startRecording()
-        // returns. startLocationUpdates() is a suspend function that never actually suspends,
-        // so a normally-dispatched child could still be queued when stopRecording() cancels
-        // it — and cancellation cannot interrupt a body that has no suspension point to
-        // observe it at. It would then re-register GNSS *after* stopRecording() had already
-        // stopped it, leaving the receiver running with nobody left to own it. Taking
-        // ownership here orders the start strictly before any stop that follows.
+        // returns. startLocationUpdates() never suspends, so a normally-dispatched child could
+        // still be queued when stopRecording() cancels it — and cancellation cannot interrupt
+        // a body that has no suspension point to observe it at. It would then re-register
+        // GNSS *after* stopRecording() had already stopped it, leaving the receiver running
+        // with nobody left to own it. Taking ownership here orders the start strictly before
+        // any stop that follows.
         serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
             // The service may already have GNSS running for streaming; starting it twice
             // would double-register. LocationService re-registers cleanly, but there is
@@ -565,26 +611,37 @@ class SignalKStreamingService : Service() {
                 attitudeEngine.onFix(fix)
             }
         }
+    }
 
-        try {
-            startForeground(NOTIFICATION_ID, createNotification("Recording raw sensor data"))
-        } catch (e: Exception) {
-            // The system can refuse the promotion outright — ForegroundServiceStartNotAllowed
-            // when the start did not come from a context that earns it, a SecurityException
-            // when the declared service type is not permitted. Uncaught, that propagates out
-            // of onStartCommand() and takes the process with it, so the `return false` path
-            // the caller already handles would never run and the buffered tail of the
-            // recording would die in the crash instead of reaching disk. Roll back by hand.
-            Log.e(TAG, "Foreground promotion refused - rolling the recording back", e)
-            recordingJob?.cancel()
-            recordingJob = null
-            attitudeEngine.stop()
-            recordingSession.stop()
-            releaseGnssUnlessStreamingWantsIt()
-            return false
-        }
-        Log.i(TAG, "Recording started")
-        return true
+    /**
+     * Promotes the service to the foreground for the recording, rolling the recording back
+     * when the system refuses.
+     *
+     * The system can refuse the promotion outright — ForegroundServiceStartNotAllowedException
+     * (an IllegalStateException) when the start did not come from a context that earns it, a
+     * SecurityException when the declared service type is not permitted. Uncaught, that
+     * propagates out of onStartCommand() and takes the process with it, so the `return false`
+     * path the caller already handles would never run and the buffered tail of the recording
+     * would die in the crash instead of reaching disk. Roll back by hand.
+     */
+    private fun promoteRecordingToForeground(): Boolean = try {
+        startForeground(NOTIFICATION_ID, createNotification("Recording raw sensor data"))
+        true
+    } catch (e: IllegalStateException) {
+        rollBackRecording(e)
+        false
+    } catch (e: SecurityException) {
+        rollBackRecording(e)
+        false
+    }
+
+    private fun rollBackRecording(cause: RuntimeException) {
+        Log.e(TAG, "Foreground promotion refused - rolling the recording back", cause)
+        recordingJob?.cancel()
+        recordingJob = null
+        attitudeEngine.stop()
+        recordingSession.stop()
+        releaseGnssUnlessStreamingWantsIt()
     }
 
     /**
@@ -638,64 +695,86 @@ class SignalKStreamingService : Service() {
         return file
     }
 
-    private fun updateStreamingConfig(locationRate: Long, sensorRate: Int, sendLocation: Boolean, sendHeading: Boolean, sendPressure: Boolean) {
+    private fun updateStreamingConfig(config: StreamingConfig) {
         if (_streamingState.value != StreamingState.STREAMING) {
-            Log.d(TAG, "Not currently streaming (state=${_streamingState.value}), ignoring config update")
+            Log.d(
+                TAG,
+                "Not currently streaming (state=${_streamingState.value}), ignoring config update"
+            )
             return
         }
 
         Log.d(
             TAG,
-            "Updating streaming configuration (location=$sendLocation, heading=$sendHeading, pressure=$sendPressure)"
+            "Updating streaming configuration (location=${config.sendLocation}, " +
+                "heading=${config.sendHeading}, pressure=${config.sendPressure})"
         )
 
         serviceScope.launch {
             // Update stored configuration
-            this@SignalKStreamingService.sendLocation = sendLocation
-            this@SignalKStreamingService.sendHeading = sendHeading
-            this@SignalKStreamingService.sendPressure = sendPressure
+            sendLocation = config.sendLocation
+            sendHeading = config.sendHeading
+            sendPressure = config.sendPressure
 
-            // Handle location service changes
-            val wasLocationActive = locationService.isLocationUpdatesActive()
-            // An active recording needs GNSS as much as sendLocation does - a config update
-            // that turns sendLocation off must not stop fixes out from under a recording that
-            // is still running, the same ownership rule stopRecording() applies on its side.
-            val shouldLocationBeActive = sendLocation || recordingSession.isRecording
-
-            if (wasLocationActive && !shouldLocationBeActive) {
-                Log.d(TAG, "Stopping location updates (disabled in config)")
-                locationService.stopLocationUpdates()
-            } else if (!wasLocationActive && shouldLocationBeActive) {
-                Log.d(TAG, "Starting location updates (enabled in config)")
-                try {
-                    locationService.startLocationUpdates(this@SignalKStreamingService, locationRate)
-                } catch (e: SecurityException) {
-                    Log.e(TAG, "Location permission not granted", e)
-                }
-            } else if (wasLocationActive && shouldLocationBeActive) {
-                Log.d(TAG, "Updating location rate to ${locationRate}ms")
-                locationService.updateLocationRate(locationRate)
-            }
-
-            // Handle sensor service changes
-            val wasSensorActive = sensorService.isSensorUpdatesActive()
-            val shouldSensorBeActive = sendHeading || sendPressure
-
-            if (wasSensorActive && !shouldSensorBeActive) {
-                Log.d(TAG, "Stopping sensor updates (all sensors disabled in config)")
-                sensorService.stopSensorUpdates()
-            } else if (!wasSensorActive && shouldSensorBeActive) {
-                Log.d(TAG, "Starting sensor updates (sensors enabled in config)")
-                sensorService.startSensorUpdates(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)
-            } else if (wasSensorActive && shouldSensorBeActive) {
-                Log.d(TAG, "Updating sensor configuration (heading=$sendHeading, pressure=$sendPressure)")
-                // Restart sensors with new configuration
-                sensorService.stopSensorUpdates()
-                sensorService.startSensorUpdates(sensorRate, needsHeading = sendHeading, needsPressure = sendPressure)
-            }
+            reconcileLocationUpdates(config)
+            reconcileSensorUpdates(config)
 
             Log.d(TAG, "Streaming configuration updated successfully")
         }
+    }
+
+    /** Starts, stops or re-rates GNSS to match [config]. */
+    private fun reconcileLocationUpdates(config: StreamingConfig) {
+        val wasLocationActive = locationService.isLocationUpdatesActive()
+        // An active recording needs GNSS as much as sendLocation does - a config update
+        // that turns sendLocation off must not stop fixes out from under a recording that
+        // is still running, the same ownership rule stopRecording() applies on its side.
+        val shouldLocationBeActive = config.sendLocation || recordingSession.isRecording
+
+        if (wasLocationActive && !shouldLocationBeActive) {
+            Log.d(TAG, "Stopping location updates (disabled in config)")
+            locationService.stopLocationUpdates()
+        } else if (!wasLocationActive && shouldLocationBeActive) {
+            Log.d(TAG, "Starting location updates (enabled in config)")
+            try {
+                locationService.startLocationUpdates(this, config.locationRateMs)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Location permission not granted", e)
+            }
+        } else if (wasLocationActive && shouldLocationBeActive) {
+            Log.d(TAG, "Updating location rate to ${config.locationRateMs}ms")
+            locationService.updateLocationRate(config.locationRateMs)
+        }
+    }
+
+    /** Starts, stops or restarts the sensors to match [config]. */
+    private fun reconcileSensorUpdates(config: StreamingConfig) {
+        val wasSensorActive = sensorService.isSensorUpdatesActive()
+        val shouldSensorBeActive = config.sendHeading || config.sendPressure
+
+        if (wasSensorActive && !shouldSensorBeActive) {
+            Log.d(TAG, "Stopping sensor updates (all sensors disabled in config)")
+            sensorService.stopSensorUpdates()
+            return
+        }
+        if (!shouldSensorBeActive) return
+
+        if (wasSensorActive) {
+            Log.d(
+                TAG,
+                "Updating sensor configuration " +
+                    "(heading=${config.sendHeading}, pressure=${config.sendPressure})"
+            )
+            // Restart sensors with new configuration
+            sensorService.stopSensorUpdates()
+        } else {
+            Log.d(TAG, "Starting sensor updates (sensors enabled in config)")
+        }
+        sensorService.startSensorUpdates(
+            config.sensorRateMs,
+            needsHeading = config.sendHeading,
+            needsPressure = config.sendPressure
+        )
     }
 
     fun updateCalibrationAngles(alphaDeg: Float, betaDeg: Float, gammaDeg: Float) {
