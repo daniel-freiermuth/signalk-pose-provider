@@ -19,6 +19,7 @@ import com.signalk.companion.service.LocationService
 import com.signalk.companion.service.SensorService
 import com.signalk.companion.service.SignalKStreamingService
 import com.signalk.companion.service.SignalKTransmitter
+import com.signalk.companion.util.verifyCalled
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -168,17 +169,15 @@ class MainViewModelTest {
     /** The connection the view model passed to bindService, as the framework would see it. */
     private fun capturedConnection(): ServiceConnection {
         val captor = ArgumentCaptor.forClass(ServiceConnection::class.java)
-        verify(context).bindService(any(Intent::class.java), captor.capture(), anyInt())
+        verifyCalled(context) { bindService(any(Intent::class.java), captor.capture(), anyInt()) }
         return captor.value
     }
 
     /** Start streaming and complete the bind with [bound], as the framework does. */
-    private fun startStreamingAndBind(bound: FakeBoundService): ServiceConnection {
+    private fun startStreamingAndBind(bound: FakeBoundService) {
         viewModel.initializeSettings()
         viewModel.startStreaming()
-        val connection = capturedConnection()
-        connection.onServiceConnected(component, bound.binder)
-        return connection
+        capturedConnection().onServiceConnected(component, bound.binder)
     }
 
     // --- startStreaming ---
@@ -195,9 +194,10 @@ class MainViewModelTest {
                 viewModel.uiState.value.error.orEmpty().startsWith("Invalid server URL"),
                 "Unexpected error: ${viewModel.uiState.value.error}"
             )
-            verify(context, never())
-                .bindService(any(Intent::class.java), any(ServiceConnection::class.java), anyInt())
-            verify(context, never()).startForegroundService(any(Intent::class.java))
+            verifyCalled(context, never()) {
+                bindService(any(Intent::class.java), any(ServiceConnection::class.java), anyInt())
+            }
+            verifyCalled(context, never()) { startForegroundService(any(Intent::class.java)) }
         }
 
     @Test
@@ -212,7 +212,7 @@ class MainViewModelTest {
             viewModel.startStreaming()
 
             assertNull(viewModel.uiState.value.error)
-            verify(context).startForegroundService(any(Intent::class.java))
+            verifyCalled(context) { startForegroundService(any(Intent::class.java)) }
         }
 
     @Test
@@ -221,9 +221,10 @@ class MainViewModelTest {
 
         viewModel.startStreaming()
 
-        verify(context, times(1))
-            .bindService(any(Intent::class.java), any(ServiceConnection::class.java), anyInt())
-        verify(context, times(2)).startForegroundService(any(Intent::class.java))
+        verifyCalled(context, times(1)) {
+            bindService(any(Intent::class.java), any(ServiceConnection::class.java), anyInt())
+        }
+        verifyCalled(context, times(2)) { startForegroundService(any(Intent::class.java)) }
     }
 
     // --- Service binding lifecycle ---
@@ -253,7 +254,8 @@ class MainViewModelTest {
     fun `reconnecting to a new service instance stops listening to the old one`() = runTest {
         val first = FakeBoundService()
         val second = FakeBoundService()
-        val connection = startStreamingAndBind(first)
+        startStreamingAndBind(first)
+        val connection = capturedConnection()
 
         connection.onServiceConnected(component, second.binder)
         second.messagesSent.value = 3
@@ -271,7 +273,8 @@ class MainViewModelTest {
     @Test
     fun `an unexpected service disconnect drops the service without unbinding`() = runTest {
         val bound = FakeBoundService()
-        val connection = startStreamingAndBind(bound)
+        startStreamingAndBind(bound)
+        val connection = capturedConnection()
 
         connection.onServiceDisconnected(component)
         bound.messagesSent.value = 42
@@ -289,7 +292,8 @@ class MainViewModelTest {
     @Test
     fun `stopStreaming shows the stream as stopped before the service reports it`() = runTest {
         val bound = FakeBoundService()
-        val connection = startStreamingAndBind(bound)
+        startStreamingAndBind(bound)
+        val connection = capturedConnection()
         bound.isStreaming.value = true
         assertTrue(viewModel.uiState.value.isStreaming)
 
@@ -300,7 +304,7 @@ class MainViewModelTest {
         bound.isStreaming.value = false
         bound.isStreaming.value = true
         assertFalse(viewModel.uiState.value.isStreaming)
-        verify(context).startService(any(Intent::class.java))
+        verifyCalled(context) { startService(any(Intent::class.java)) }
         verify(context).unbindService(connection)
     }
 
@@ -437,7 +441,8 @@ class MainViewModelTest {
     @Test
     fun `clearing the view model unbinds the service and stops the foreground sensors`() =
         runTest {
-            val connection = startStreamingAndBind(FakeBoundService())
+            startStreamingAndBind(FakeBoundService())
+            val connection = capturedConnection()
             viewModel.onAppForeground()
 
             viewModelStore.clear()

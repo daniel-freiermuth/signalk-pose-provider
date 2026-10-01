@@ -8,6 +8,7 @@ import com.signalk.companion.service.SensorService
 import com.signalk.companion.util.DeviceCalibration
 import com.signalk.companion.util.Matrix3
 import com.signalk.companion.util.assertAngleEquals
+import com.signalk.companion.util.verifyCalled
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
@@ -241,7 +242,7 @@ class CalibrationControllerTest {
             controller().calibrateTilt()
             advanceTimeBy(SENSOR_DATA_TIMEOUT_MS / 2)
             runCurrent()
-            verify(sensorService, never()).getCurrentRotationMatrix()
+            verifyCalled(sensorService, never()) { getCurrentRotationMatrix() }
 
             sensorsReady = true
             advanceUntilIdle()
