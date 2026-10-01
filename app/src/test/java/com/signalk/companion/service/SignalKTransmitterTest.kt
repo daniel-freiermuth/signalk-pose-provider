@@ -330,6 +330,25 @@ class SignalKTransmitterTest {
         assertEquals(setOf("environment.outside.pressure"), values.keys)
     }
 
+    @Test
+    fun `non-finite environment readings are dropped rather than breaking the message`() {
+        startStreaming()
+
+        transmitter.sendSensor(
+            SensorData(
+                compassHeading = 1.57f,
+                pressure = Float.NaN,
+                temperature = Float.POSITIVE_INFINITY,
+                relativeHumidity = Float.NEGATIVE_INFINITY
+            )
+        )
+
+        val values = valuesOf(requireNotNull(server.awaitMessage()))
+        assertEquals(setOf("navigation.headingCompass"), values.keys)
+        assertEquals(1, transmitter.messagesSent.value)
+        assertTrue(transmitter.connectionStatus.value, "a bad reading must not report the link as down")
+    }
+
     // ── Authentication-failure recovery ───────────────────────────────────────
 
     @Test
