@@ -135,6 +135,8 @@ class SensorServiceTest {
     @Test
     fun `an interval of 100 ms samples at game rate`() {
         service.startSensorUpdates(100)
+        // The Boolean is Mockito's placeholder for a recorded verification, not a registration result.
+        @Suppress("IgnoredReturnValue")
         verify(sensorManager).registerListener(
             eq(service),
             eq(sensors.getValue(Sensor.TYPE_PRESSURE)),
@@ -145,6 +147,8 @@ class SensorServiceTest {
     @Test
     fun `an interval of 101 ms samples at normal rate`() {
         service.startSensorUpdates(101)
+        // The Boolean is Mockito's placeholder for a recorded verification, not a registration result.
+        @Suppress("IgnoredReturnValue")
         verify(sensorManager).registerListener(
             eq(service),
             eq(sensors.getValue(Sensor.TYPE_PRESSURE)),
@@ -211,6 +215,8 @@ class SensorServiceTest {
     private fun withDeviceAttitude(rotationW_D: FloatArray, block: () -> Unit) {
         mockStatic(SensorManager::class.java).use { mocked ->
             mocked.`when`<Boolean> {
+                // Recorded by mockStatic as the call to stub; there is no real result to check.
+                @Suppress("IgnoredReturnValue")
                 SensorManager.getRotationMatrix(any(), isNull(), any(), any())
             }.thenAnswer { invocation ->
                 rotationW_D.copyInto(invocation.getArgument<FloatArray>(0))
