@@ -116,6 +116,8 @@ class SensorService @Inject constructor(
         currentSensorDelay = getSensorDelayFromInterval(updateIntervalMs)
         lastUpdateTime = 0L // Reset to force immediate first update
         hasRotationMatrix = false // Force waiting for fresh sensor data
+        pendingData = SensorData(magnetometerAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE)
+        pendingSensorUpdate = false
         Log.d(
             TAG,
             "Starting sensor updates with interval ${updateIntervalMs}ms " +
