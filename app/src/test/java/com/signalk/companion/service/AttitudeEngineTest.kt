@@ -11,12 +11,10 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentCaptor
+import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.atLeastOnce
 import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
+import org.mockito.Mockito.mockingDetails
 import org.mockito.Mockito.`when`
 
 /**
@@ -42,11 +40,11 @@ class AttitudeEngineTest {
             .thenReturn(magnetometer)
         `when`(
             sensorManager.registerListener(
-                org.mockito.ArgumentMatchers.any(SensorEventListener::class.java),
-                org.mockito.ArgumentMatchers.any(Sensor::class.java),
+                any(SensorEventListener::class.java),
+                any(Sensor::class.java),
                 anyInt(),
                 anyInt(),
-                org.mockito.ArgumentMatchers.any()
+                any()
             )
         ).thenReturn(true)
 
@@ -56,7 +54,7 @@ class AttitudeEngineTest {
     @Test
     fun `stop clears the published pose so the UI does not show a frozen estimate`() {
         assertTrue(engine.start())
-        feedUntilEmitted(captureListener())
+        feedUntilEmitted(registeredListener())
         assertNotNull(engine.state.value, "precondition: the engine emitted a pose while running")
 
         engine.stop()
@@ -67,7 +65,7 @@ class AttitudeEngineTest {
     @Test
     fun `restart does not show the previous session's pose before the first new estimate`() {
         assertTrue(engine.start())
-        feedUntilEmitted(captureListener())
+        feedUntilEmitted(registeredListener())
         assertNotNull(engine.state.value, "precondition: the engine emitted a pose while running")
 
         assertTrue(engine.start())
@@ -75,17 +73,11 @@ class AttitudeEngineTest {
         assertNull(engine.state.value, "a fresh session starts with no pose until it emits one")
     }
 
-    private fun captureListener(): SensorEventListener {
-        val captor = ArgumentCaptor.forClass(SensorEventListener::class.java)
-        verify(sensorManager, atLeastOnce()).registerListener(
-            captor.capture(),
-            eq(gyroscope),
-            anyInt(),
-            anyInt(),
-            org.mockito.ArgumentMatchers.any()
-        )
-        return captor.value
-    }
+    /** The listener the engine's sensor source registered most recently. */
+    private fun registeredListener(): SensorEventListener =
+        mockingDetails(sensorManager).invocations
+            .last { it.method.name == "registerListener" }
+            .getArgument(0)
 
     /** Level, stationary device: gravity up, field north and down, no rotation. */
     private fun feedUntilEmitted(listener: SensorEventListener) {
