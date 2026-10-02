@@ -210,7 +210,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     
     // WebSocket
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
     
     // Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.37.0")
