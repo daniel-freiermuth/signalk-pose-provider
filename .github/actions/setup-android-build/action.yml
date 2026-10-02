@@ -12,10 +12,11 @@ runs:
         distribution: temurin
         # The JDK that runs Gradle (and with it kotlinc, javac, detekt, lint and the unit
         # tests). Pinned rather than tracking the runner default, so a runner image upgrade
-        # cannot silently change it. It must be an LTS release that the wrapper's Gradle
-        # can run on: Gradle 8.13 runs on Java 17–23 only (Gradle's compatibility matrix;
-        # JDK 25 needs Gradle 9.1, JDK 27 needs 9.8). The bytecode the app ships is set
-        # separately (sourceCompatibility 17, jvmTarget 17 in app/build.gradle.kts).
+        # cannot silently change it. It must be an LTS release every tool in the build can
+        # run on: Gradle 9.8 runs on Java 17–27, but detekt 1.23.8 fails to start on
+        # Java 25 and 27, so 21 is the newest that works until detekt moves to 2.x. The
+        # bytecode the app ships is set separately (sourceCompatibility 17, jvmTarget 17
+        # in app/build.gradle.kts).
         java-version: '21'
 
     - name: Set up Gradle

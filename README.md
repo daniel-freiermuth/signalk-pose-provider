@@ -51,7 +51,7 @@ Design documents:
 - **Networking**: UDP sockets for SignalK communication
 - **Serialization**: Kotlinx Serialization
 - **Background Processing**: Android Foreground Services
-- **Build System**: Gradle 8.4 with KSP (Kotlin Symbol Processing)
+- **Build System**: Gradle 9.8 with KSP (Kotlin Symbol Processing)
 
 ## SignalK Data Paths
 
@@ -142,7 +142,8 @@ Sign conventions are verified verbatim against the SignalK specification schemas
 
 ### Prerequisites
 
-- **Java 17 or higher** (OpenJDK recommended)
+- **Java 21** (OpenJDK recommended; what CI uses). Java 17+ builds the app, but detekt
+  1.23 — part of the checks below — fails to start on Java 25 and later
 - **Android SDK** — via Android Studio or `cmdline-tools`, with `ANDROID_HOME` set or
   `sdk.dir` in `local.properties`
 - **No Gradle installation needed** — `gradle-wrapper.jar` is committed, so `./gradlew`
@@ -275,7 +276,7 @@ this README describes only what the app does today.
 
 ### Build Issues
 
-**Java Version**: Ensure you have Java 17+
+**Java Version**: Use Java 21 (17+ builds the app; detekt fails to start on 25+)
 ```bash
 java -version
 ```
