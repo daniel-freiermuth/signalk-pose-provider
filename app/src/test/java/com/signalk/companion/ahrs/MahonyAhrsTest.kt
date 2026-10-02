@@ -429,7 +429,7 @@ class MahonyAhrsTest {
         f.onGyroscope(t + 5_000_000L, 0f, 0f, rateRadS) // rejected: out of order
         f.onGyroscope(t + 20_000_000L, 0f, 0f, rateRadS) // must see dt = 10 ms, not 15 ms
         // Two accepted 10 ms ticks at 10 rad/s = 20 ms total integrated, to port.
-        val expectedDeg = 360f - Math.toDegrees((rateRadS * 0.020).toDouble()).toFloat()
+        val expectedDeg = 360f - Math.toDegrees(rateRadS * 0.020).toFloat()
         assertDegreesNear(
             expectedDeg,
             angles(f).headingRad,
