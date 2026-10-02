@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
+import java.io.Writer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -32,8 +33,21 @@ import java.util.Locale
  * one `Writer` interleave half-lines and race the byte counter, and a corrupt recording is
  * discovered long after the sail that produced it. The lock is uncontended almost always and
  * guards a buffered append, so the cost does not show at these rates.
+ *
+ * [openSink] and [maxBytes] exist so the failure and budget paths can be exercised on the
+ * JVM; production always uses the public constructor.
  */
-class RecordingSession(private val context: Context) {
+class RecordingSession internal constructor(
+    private val context: Context,
+    private val openSink: (File) -> Writer,
+    private val maxBytes: Long
+) {
+
+    constructor(context: Context) : this(
+        context,
+        openSink = { target -> BufferedWriter(FileWriter(target), BUFFER_BYTES) },
+        maxBytes = RecordingWriter.DEFAULT_MAX_BYTES
+    )
 
     /** What the UI needs to show, and what a bug report needs to quote. */
     data class Status(
@@ -94,9 +108,7 @@ class RecordingSession(private val context: Context) {
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
             val target = File.createTempFile("$stamp-", FILE_EXTENSION, directory)
 
-            val recordingWriter = RecordingWriter(
-                BufferedWriter(FileWriter(target), BUFFER_BYTES)
-            )
+            val recordingWriter = RecordingWriter(openSink(target), maxBytes)
             recordingWriter.writeHeader(
                 deviceDescription = deviceDescription,
                 wallClockMs = System.currentTimeMillis(),
