@@ -303,9 +303,14 @@ class MainViewModel @Inject constructor(
             needsHeading = true,
             needsPressure = true
         )
+        startForegroundLocation()
+    }
+
+    private fun startForegroundLocation() {
+        val intervalMs = _uiState.value.locationIntervalMs
         viewModelScope.launch {
             try {
-                locationService.startLocationUpdates(applicationContext, state.locationIntervalMs)
+                locationService.startLocationUpdates(applicationContext, intervalMs)
             } catch (e: SecurityException) {
                 Log.e(TAG, "Location permission not granted for foreground display", e)
             }
@@ -478,6 +483,17 @@ class MainViewModel @Inject constructor(
             applicationContext.sendToStreamingService(serviceIntent, foreground = true)
         } else {
             applicationContext.sendToStreamingService(serviceIntent)
+            // The service's stopRecording() releases GNSS whenever streaming is not using it,
+            // and LocationService is shared: that includes the registration this screen made
+            // for its own display. Claim it back, as stopStreaming() does, once the service
+            // has processed the stop - otherwise the location card stays frozen until the
+            // next ON_RESUME. Sensors need no restart: the recording never touches them.
+            if (isAppInForeground) {
+                viewModelScope.launch {
+                    delay(SENSOR_RESTART_DELAY_MS)
+                    startForegroundLocation()
+                }
+            }
         }
     }
 
