@@ -230,6 +230,17 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
+    constraints {
+        // The instrumented-test libraries (espresso-core 3.6.1, androidx.test:core 1.6.1)
+        // need concurrent-futures 1.1.0, while the app on its own resolves 1.0.0 through
+        // androidx.core. The test APK runs against the app's classpath, so AGP pins the test
+        // classpaths to the app's version. Gradle 8 silently downgraded the test libraries to
+        // 1.0.0; Gradle 9 rejects the conflict, which broke `lintDebug`. Lift the app instead.
+        implementation("androidx.concurrent:concurrent-futures:1.1.0") {
+            because("androidTest libraries require it and must share the app's version")
+        }
+    }
+
     // Static analysis: ktlint's formatting rules, run through detekt.
     detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.8")
 }
