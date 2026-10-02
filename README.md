@@ -51,7 +51,7 @@ Design documents:
 - **Networking**: UDP sockets for SignalK communication
 - **Serialization**: Kotlinx Serialization
 - **Background Processing**: Android Foreground Services
-- **Build System**: Gradle 8.4 with KSP (Kotlin Symbol Processing)
+- **Build System**: Gradle 9.8 with KSP (Kotlin Symbol Processing)
 
 ## SignalK Data Paths
 
