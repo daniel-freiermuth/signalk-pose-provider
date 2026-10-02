@@ -19,11 +19,20 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
 
+/**
+ * @param clock wall-clock milliseconds; drives emission rate limiting, emission timestamps,
+ *   and the magnetic-variation cache. Injectable so tests can step time deterministically.
+ */
 @Singleton
-class SensorService @Inject constructor(
+class SensorService internal constructor(
     private val context: Context,
-    private val locationService: LocationService
+    private val locationService: LocationService,
+    private val clock: () -> Long
 ) : SensorEventListener {
+
+    @Inject
+    constructor(context: Context, locationService: LocationService) :
+        this(context, locationService, System::currentTimeMillis)
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
@@ -302,7 +311,7 @@ class SensorService @Inject constructor(
         }
         loggedMissingFix = false
 
-        val now = System.currentTimeMillis()
+        val now = clock()
         val cached = cachedVariationRad
         return if (cached != null && isVariationCacheValid(locationData, now)) {
             cached
@@ -374,7 +383,7 @@ class SensorService @Inject constructor(
     }
 
     private fun updateSensorData(update: SensorData.() -> SensorData) {
-        val currentTime = System.currentTimeMillis()
+        val currentTime = clock()
 
         // Always cache the latest sensor values to prevent data loss
         pendingData = pendingData.update()
