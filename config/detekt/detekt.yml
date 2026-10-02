@@ -82,6 +82,7 @@ potential-bugs:
       - 'android.app.AlertDialog.Builder.show'
       - 'org.mockito.stubbing.OngoingStubbing.thenReturn'
       - 'org.mockito.stubbing.OngoingStubbing.thenThrow'
+      - 'org.mockito.stubbing.OngoingStubbing.thenAnswer'
       - 'org.junit.jupiter.api.assertThrows'
 
 naming:
