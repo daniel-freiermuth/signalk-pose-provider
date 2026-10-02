@@ -28,7 +28,7 @@ import javax.inject.Singleton
 
 @Singleton
 class AuthenticationService @Inject constructor(
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
+    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
 
     companion object {

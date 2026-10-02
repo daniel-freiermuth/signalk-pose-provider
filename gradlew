@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 
 ##############################################################################
 #
@@ -22,12 +24,10 @@
 #
 #   Important for running:
 #
-#   (1) You will need a POSIX-compliant shell to run this script. If your /bin/sh is
-#       nbash, cygwin, msys, or busybox (which are all POSIX compliant) this script
-#       should work fine.
-#       If your /bin/sh is not POSIX compliant but you have some other shell such as
-#       ksh, bash, or zsh, then to run this script, type that shell name before
-#       the whole command line, like:
+#   (1) You need a POSIX-compliant shell to run this script. If your /bin/sh is
+#       noncompliant, but you have some other compliant shell such as ksh or
+#       bash, then to run this script, type that shell name before the whole
+#       command line, like:
 #
 #           ksh Gradle
 #
@@ -56,7 +56,9 @@
 #       There are tweaks for specific operating systems such as AIX, CygWin,
 #       Darwin, MinGW, and NonStop.
 #
-#   (3) This script is generated from the Gradle template within the Gradle project.
+#   (3) This script is generated from the Groovy template
+#       https://github.com/gradle/gradle/blob/HEAD/platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/unixStartScript.txt
+#       within the Gradle project.
 #
 #       You can find Gradle at https://github.com/gradle/gradle/.
 #
@@ -84,7 +86,7 @@ done
 # shellcheck disable=SC2034
 APP_BASE_NAME=${0##*/}
 # Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
-APP_HOME=$( cd "${APP_HOME:-./}" > /dev/null && pwd -P ) || exit
+APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
 
 # Use the maximum available, or set MAX_FD != -1 to use that value.
 MAX_FD=maximum
@@ -203,7 +205,7 @@ fi
 DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
 
 # Collect all arguments for the java command:
-#   * DEFAULT_JVM_OPTS, JAVA_OPTS, JAVA_OPTS, and optsEnvironmentVar are not allowed to contain shell fragments,
+#   * DEFAULT_JVM_OPTS, JAVA_OPTS, and optsEnvironmentVar are not allowed to contain shell fragments,
 #     and any embedded shellness will be escaped.
 #   * For example: A user cannot expect ${Hostname} to be expanded, as it is an environment variable and will be
 #     treated as '${Hostname}' itself on the command line.
@@ -232,17 +234,18 @@ fi
 # but POSIX shell has neither arrays nor command substitution, so instead we
 # post-process each arg (as a line of input to sed) to backslash-escape any
 # character that might be a shell metacharacter, then use eval to reverse
-# that process (while maintaining the separation between arguments).
+# that process (while maintaining the separation between arguments), and wrap
+# the whole thing up as a single "set" statement.
 #
 # This will of course break if any of these variables contains a newline or
 # an unmatched quote.
 #
 
 eval "set -- $(
-        printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" \
-        | xargs -n1 \
-        | sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' \
-        | tr '\n' ' '
+        printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" |
+        xargs -n1 |
+        sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' |
+        tr '\n' ' '
     )" '"$@"'
 
 exec "$JAVACMD" "$@"

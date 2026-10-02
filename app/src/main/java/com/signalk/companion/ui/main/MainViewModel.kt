@@ -77,7 +77,7 @@ data class MainUiState(
 @Suppress("LongParameterList")
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    @ApplicationContext private val applicationContext: Context,
+    @param:ApplicationContext private val applicationContext: Context,
     private val locationService: LocationService,
     private val sensorService: SensorService,
     private val signalKTransmitter: SignalKTransmitter,
