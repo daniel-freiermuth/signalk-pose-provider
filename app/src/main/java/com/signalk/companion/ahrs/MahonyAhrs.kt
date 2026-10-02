@@ -139,6 +139,9 @@ class MahonyAhrs(
     var maxGyroForAccel: Float = DEFAULT_MAX_GYRO_FOR_ACCEL
 
     private var lastGyroNs: Long = 0L
+
+    /** Whether a TRIAD seed has been applied since construction or the last [reset]. */
+    private var seeded = false
     private var haveAccel = false
     private var haveMag = false
     private val accel = floatArrayOf(0f, 0f, 0f)
@@ -180,6 +183,7 @@ class MahonyAhrs(
     fun onGyroscope(timestampNs: Long, wx: Float, wy: Float, wz: Float) {
         if (!wx.isFinite() || !wy.isFinite() || !wz.isFinite()) return
         if (isInitialised) {
+            seedIfPending(wx, wy, wz)
             propagate(timestampNs, wx, wy, wz)
         } else {
             initialise(timestampNs, wx, wy, wz)
@@ -190,6 +194,18 @@ class MahonyAhrs(
     private fun initialise(timestampNs: Long, wx: Float, wy: Float, wz: Float) {
         lastGyroNs = timestampNs
         isInitialised = true
+        seedIfPending(wx, wy, wz)
+    }
+
+    /**
+     * Seed from the latest measurement pair, unless that has already happened.
+     *
+     * Retried on every gyro sample until it succeeds, not just the first: live, the gyro is
+     * the fastest stream and routinely delivers before the first magnetometer sample, and
+     * the first sample can equally land mid-tack. Either way only the seed is deferred.
+     */
+    private fun seedIfPending(wx: Float, wy: Float, wz: Float) {
+        if (seeded) return
         // Seed algebraically rather than starting at identity and letting the loop walk
         // there. Starting at identity means the estimate must cross the whole error, and
         // near a 180° initial error the correction term — a cross product of two nearly
@@ -202,8 +218,8 @@ class MahonyAhrs(
         // a distrusted measurement in through the back door, and would do it at full
         // weight rather than through a gain.
         //
-        // The rate gate matters as much as the gain here: the first gyro sample can land
-        // mid-tack, where lever-arm acceleration at the phone reads a perfectly plausible
+        // The rate gate matters as much as the gain here: a sample can land mid-tack,
+        // where lever-arm acceleration at the phone reads a perfectly plausible
         // |a| ≈ g while pointing nowhere near down (P7). seedFromMeasurements() checks
         // only the magnitude, so without this the correction path would reject exactly
         // the sample the seed accepted.
@@ -217,8 +233,11 @@ class MahonyAhrs(
         } else {
             null
         }
-        // No usable pair yet: start from the current attitude and let the loop converge.
-        if (seed != null) attitude = seed.alignedWith(attitude)
+        // No usable pair yet: keep the current attitude and try again on the next sample.
+        if (seed != null) {
+            attitude = seed.alignedWith(attitude)
+            seeded = true
+        }
     }
 
     private fun propagate(timestampNs: Long, wx: Float, wy: Float, wz: Float) {
@@ -270,7 +289,8 @@ class MahonyAhrs(
      *
      * Two non-parallel reference directions fully determine an orientation, so no iteration
      * is needed: gravity fixes roll and pitch, and the field's horizontal component fixes
-     * heading. Called automatically on the first gyro sample; also useful after a long gap.
+     * heading. Called automatically on gyro samples until it first succeeds; also useful
+     * after a long gap.
      *
      * Note it needs no knowledge of the local dip angle. The second basis vector is
      * `up × field`, which points **West** whatever the inclination, so the construction is
@@ -284,6 +304,7 @@ class MahonyAhrs(
     fun seedFromMeasurements(): Boolean {
         val seed = triadAttitude() ?: return false
         attitude = seed.alignedWith(attitude)
+        seeded = true
         return true
     }
 
@@ -324,6 +345,7 @@ class MahonyAhrs(
         attitude = to.normalized()
         lastGyroNs = 0L
         isInitialised = false
+        seeded = false
         haveAccel = false
         haveMag = false
         accelerometerAccepted = false
