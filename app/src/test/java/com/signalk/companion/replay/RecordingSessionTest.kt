@@ -31,8 +31,7 @@ class RecordingSessionTest {
 
     /** A sink that can be told to fail, standing in for a full disk or a dropped USB-MTP session. */
     private class FlakySink : Writer() {
-        val content = StringBuilder()
-        @Volatile var failWrites = false
+        var failWrites = false
         var failClose = false
         var closed = false
         var failedWriteAttempts = 0
@@ -42,7 +41,7 @@ class RecordingSessionTest {
                 failedWriteAttempts++
                 throw IOException("No space left on device")
             }
-            content.append(cbuf, off, len)
+            // Successful writes are discarded; these tests assert on status, not content.
         }
 
         override fun flush() = Unit
