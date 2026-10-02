@@ -90,6 +90,7 @@ class MainViewModelTest {
     private lateinit var sensorService: SensorService
     private lateinit var authenticationService: AuthenticationService
     private lateinit var recordingSession: RecordingSession
+    private val recordingStatus = MutableStateFlow(RecordingSession.Status())
     private lateinit var viewModelStore: ViewModelStore
     private lateinit var viewModel: MainViewModel
     private val component = ComponentName("com.signalk.companion", "SignalKStreamingService")
@@ -125,7 +126,7 @@ class MainViewModelTest {
         `when`(authenticationService.authState).thenReturn(MutableStateFlow(AuthState()))
 
         recordingSession = mock(RecordingSession::class.java)
-        `when`(recordingSession.status).thenReturn(MutableStateFlow(RecordingSession.Status()))
+        `when`(recordingSession.status).thenReturn(recordingStatus)
 
         val attitudeEngine = mock(AttitudeEngine::class.java)
         `when`(attitudeEngine.state).thenReturn(MutableStateFlow<AttitudeEngine.State?>(null))
@@ -393,6 +394,44 @@ class MainViewModelTest {
             verify(sensorService, never()).stopSensorUpdates()
             verify(locationService, never()).stopLocationUpdates()
         }
+
+    // --- toggleRecording ---
+
+    // The service's stopRecording() releases the shared LocationService whenever streaming is
+    // not using it - including the registration this screen made for its own display. The
+    // screen must claim GNSS back, or the location card freezes until the next ON_RESUME.
+    @Test
+    fun `stopping a recording in the foreground restarts GNSS after the grace delay`() =
+        runTest {
+            viewModel.initializeSettings()
+            viewModel.onAppForeground()
+            recordingStatus.value = RecordingSession.Status(isRecording = true)
+            clearInvocations(locationService)
+
+            viewModel.toggleRecording()
+            advanceTimeBy(SENSOR_RESTART_DELAY_MS - 1)
+            runCurrent()
+            verify(locationService, never()).startLocationUpdates(context, 1000L)
+
+            advanceTimeBy(1)
+            runCurrent()
+
+            verify(locationService).startLocationUpdates(context, 1000L)
+        }
+
+    @Test
+    fun `stopping a recording in the background leaves GNSS off`() = runTest {
+        viewModel.initializeSettings()
+        viewModel.onAppForeground()
+        viewModel.onAppBackground()
+        recordingStatus.value = RecordingSession.Status(isRecording = true)
+        clearInvocations(locationService)
+
+        viewModel.toggleRecording()
+        advanceUntilIdle()
+
+        verify(locationService, never()).startLocationUpdates(context, 1000L)
+    }
 
     // --- initializeSettings auto-login ---
 
