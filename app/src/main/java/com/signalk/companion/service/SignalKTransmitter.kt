@@ -516,15 +516,15 @@ class SignalKTransmitter internal constructor(
     ): List<SignalKValue> = buildList {
         if (sendPressure) {
             sensorData.pressure?.let { pressure ->
-                add(numberValue("environment.outside.pressure", pressure.toDouble())) // Pa
-            }
+                finiteNumberValue("environment.outside.pressure", pressure.toDouble()) // Pa
+            }?.let { add(it) }
         }
         sensorData.temperature?.let { temperature ->
-            add(numberValue("environment.outside.temperature", temperature.toDouble())) // K
-        }
+            finiteNumberValue("environment.outside.temperature", temperature.toDouble()) // K
+        }?.let { add(it) }
         sensorData.relativeHumidity?.let { humidity ->
-            add(numberValue("environment.outside.relativeHumidity", humidity.toDouble())) // ratio
-        }
+            finiteNumberValue("environment.outside.relativeHumidity", humidity.toDouble()) // ratio
+        }?.let { add(it) }
     }
 
     private fun numberValue(path: String, value: Double): SignalKValue =
