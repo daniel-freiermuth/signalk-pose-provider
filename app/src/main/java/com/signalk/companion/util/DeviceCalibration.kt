@@ -349,11 +349,14 @@ object DeviceCalibration {
         return Pair(newGamma, composeZXZ(existingAlphaDeg, existingBetaDeg, newGamma))
     }
 
-    /** Normalize an angle in degrees to [-180, 180]. */
+    /**
+     * Normalize an angle in degrees to [-180, 180]. In-range values are returned unchanged.
+     *
+     * Floor-based like [wrapTo2Pi], not a `while` loop: ∞ − 360 = ∞, so the loop form never
+     * terminated on a non-finite input. NaN/±∞ now yield NaN.
+     */
     private fun wrapToHalfTurn(angleDeg: Float): Float {
-        var wrapped = angleDeg
-        while (wrapped > HALF_TURN_DEG) wrapped -= FULL_TURN_DEG
-        while (wrapped < -HALF_TURN_DEG) wrapped += FULL_TURN_DEG
-        return wrapped
+        if (abs(angleDeg) <= HALF_TURN_DEG) return angleDeg
+        return angleDeg - FULL_TURN_DEG * floor((angleDeg + HALF_TURN_DEG) / FULL_TURN_DEG)
     }
 }

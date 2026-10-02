@@ -1,8 +1,11 @@
 package com.signalk.companion.util
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.ThrowingSupplier
+import java.time.Duration
 import kotlin.math.abs
 import kotlin.math.acos
 import kotlin.math.asin
@@ -547,6 +550,66 @@ class DeviceCalibrationTest {
         assertAngleEquals(0f, newGamma, tolerance = 0.5f) // correction brings heading to 30°
 
         // Resulting calibration must produce correct heading
+        val R_W_V_after = Matrix3.multiply(R_W_D, updated)
+        val heading = Math.toDegrees(
+            atan2(R_W_V_after[1].toDouble(), R_W_V_after[4].toDouble())
+        ).toFloat()
+        assertHeadingEquals(30f, heading)
+    }
+
+    @Test
+    fun `calibrateAzimuth terminates and propagates NaN on NaN GPS heading`() {
+        val R_W_D = DeviceCalibration.buildFlatHeadingMatrix(30f)
+
+        val (newGamma, _) = assertTimeoutPreemptively(
+            Duration.ofSeconds(5),
+            ThrowingSupplier {
+                DeviceCalibration.calibrateAzimuth(R_W_D, 0f, 0f, 0f, Float.NaN)
+            },
+        )
+
+        assertTrue(newGamma.isNaN(), "expected NaN gamma, got $newGamma")
+    }
+
+    @Test
+    fun `calibrateAzimuth terminates on infinite GPS heading`() {
+        // The degree-domain while-loop normalization never terminated here: ∞ − 360 = ∞.
+        val R_W_D = DeviceCalibration.buildFlatHeadingMatrix(30f)
+
+        for (gps in listOf(Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            val (newGamma, _) = assertTimeoutPreemptively(
+                Duration.ofSeconds(5),
+                ThrowingSupplier {
+                    DeviceCalibration.calibrateAzimuth(R_W_D, 0f, 0f, 0f, gps)
+                },
+            )
+            assertTrue(newGamma.isNaN(), "gps=$gps: expected NaN gamma, got $newGamma")
+        }
+    }
+
+    @Test
+    fun `calibrateAzimuth normalizes deltas spanning multiple turns`() {
+        // Vehicle heading 30°; GPS heading 30° + 2 full turns → raw δ = −720°, wraps to 0°.
+        val R_W_D = DeviceCalibration.buildFlatHeadingMatrix(30f)
+
+        val (newGamma, updated) = DeviceCalibration.calibrateAzimuth(R_W_D, 0f, 0f, 0f, 750f)
+
+        assertAngleEquals(0f, newGamma, tolerance = 0.5f)
+        val R_W_V_after = Matrix3.multiply(R_W_D, updated)
+        val heading = Math.toDegrees(
+            atan2(R_W_V_after[1].toDouble(), R_W_V_after[4].toDouble())
+        ).toFloat()
+        assertHeadingEquals(30f, heading)
+    }
+
+    @Test
+    fun `calibrateAzimuth keeps gamma within half turn for multi-turn existing gamma`() {
+        val R_W_D = DeviceCalibration.buildFlatHeadingMatrix(30f)
+
+        // γ = 1000° ≡ −80°; any correction must come back in [−180°, 180°].
+        val (newGamma, updated) = DeviceCalibration.calibrateAzimuth(R_W_D, 0f, 0f, 1000f, 30f)
+
+        assertTrue(newGamma in -180f..180f, "gamma $newGamma outside [-180, 180]")
         val R_W_V_after = Matrix3.multiply(R_W_D, updated)
         val heading = Math.toDegrees(
             atan2(R_W_V_after[1].toDouble(), R_W_V_after[4].toDouble())
