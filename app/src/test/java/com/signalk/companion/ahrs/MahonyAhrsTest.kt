@@ -137,6 +137,40 @@ class MahonyAhrsTest {
     }
 
     @Test
+    fun `seeds when the reference sensors arrive after the first gyro sample`() {
+        // The live ordering: RawSensorSource registers the 200 Hz gyro before the slower
+        // magnetometer, so the first gyro sample routinely lands before any reference pair
+        // exists. Seeding must still happen as soon as the pair arrives — otherwise the
+        // filter starts at identity and, at 180°, sits on the antipodal point above.
+        val f = MahonyAhrs(kp = 2f, ki = 0f)
+        val (accel, mag) = sensorsAtRest(levelAtHeading(180f))
+        var t = 1_000_000_000L
+        f.onGyroscope(t, 0f, 0f, 0f) // time base only: nothing to seed from yet
+        f.onAccelerometer(accel[0], accel[1], accel[2])
+        f.onMagnetometer(mag[0], mag[1], mag[2])
+        repeat(5) {
+            t += 5_000_000L
+            f.onGyroscope(t, 0f, 0f, 0f)
+        }
+        assertDegreesNear(180f, angles(f).headingRad, 0.5f, "heading once the pair arrives")
+    }
+
+    @Test
+    fun `seeds on the first calm sample after a hard swing`() {
+        // A first sample mid-tack must not seed (see below), but that must defer the seed,
+        // not cancel it.
+        val f = MahonyAhrs(kp = 2f, ki = 0f)
+        val (accel, mag) = sensorsAtRest(levelAtHeading(180f))
+        f.onAccelerometer(accel[0], accel[1], accel[2])
+        f.onMagnetometer(mag[0], mag[1], mag[2])
+        var t = 1_000_000_000L
+        f.onGyroscope(t, 0f, 0f, f.maxGyroForAccel * 3f)
+        t += 5_000_000L
+        f.onGyroscope(t, 0f, 0f, 0f)
+        assertDegreesNear(180f, angles(f).headingRad, 0.5f, "heading once the swing stops")
+    }
+
+    @Test
     fun `seeding is skipped when the field is parallel to gravity`() {
         // Degenerate: heading is genuinely undetermined, so seeding must decline rather than
         // emit a NaN attitude.
