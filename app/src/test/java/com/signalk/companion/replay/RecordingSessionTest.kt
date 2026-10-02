@@ -70,7 +70,7 @@ class RecordingSessionTest {
         assertTrue(file.name.endsWith(RecordingSession.FILE_EXTENSION))
         assertTrue(session.isRecording)
         assertEquals(RecordingSession.Status(isRecording = true, fileName = file.name), session.status.value)
-        session.stop()
+        assertEquals(file, session.stop())
     }
 
     @Test
@@ -82,7 +82,7 @@ class RecordingSessionTest {
 
         assertEquals(first, second)
         assertEquals(listOf(first), recordingFiles())
-        session.stop()
+        assertEquals(first, session.stop())
     }
 
     @Test
@@ -131,7 +131,7 @@ class RecordingSessionTest {
     fun `a write failure stops the recording, closes the writer and reports the error without throwing`() {
         val sink = FlakySink()
         val session = sessionWith(sink)
-        session.start("test-device")
+        assertNotNull(session.start("test-device"))
         session.write(sample(1L))
 
         sink.failWrites = true
@@ -155,7 +155,7 @@ class RecordingSessionTest {
     fun `a close failure during write-failure cleanup is swallowed and the write error is still reported`() {
         val sink = FlakySink()
         val session = sessionWith(sink)
-        session.start("test-device")
+        assertNotNull(session.start("test-device"))
 
         sink.failWrites = true
         sink.failClose = true
@@ -168,7 +168,7 @@ class RecordingSessionTest {
     @Test
     fun `status is published on every 256th record and not in between`() {
         val session = sessionWith(FlakySink())
-        session.start("test-device")
+        assertNotNull(session.start("test-device"))
 
         (1L..255L).forEach { session.write(sample(it)) }
         assertEquals(0L, session.status.value.recordCount)
@@ -191,7 +191,7 @@ class RecordingSessionTest {
         val header = RecordingFormat.header("test-device", System.currentTimeMillis(), 0L)
         // Room for the header and a handful of records - far fewer than the 256-record cadence.
         val session = sessionWith(FlakySink(), maxBytes = header.length + 400L)
-        session.start("test-device")
+        assertNotNull(session.start("test-device"))
 
         var writes = 0
         while (!session.status.value.isTruncated && writes < 255) {
@@ -221,7 +221,7 @@ class RecordingSessionTest {
         }
         go.countDown()
         producers.forEach { it.join() }
-        session.stop()
+        assertEquals(file, session.stop())
 
         val recordLines = file.readLines().filter { it.isNotBlank() && !it.startsWith("#") }
         assertEquals(2 * perThread, recordLines.size.toLong())
