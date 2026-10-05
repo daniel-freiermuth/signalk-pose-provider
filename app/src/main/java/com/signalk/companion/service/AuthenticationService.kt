@@ -18,11 +18,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
 import java.io.OutputStreamWriter
-import java.net.ConnectException
 import java.net.HttpURLConnection
-import java.net.SocketTimeoutException
 import java.net.URL
-import java.net.UnknownHostException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -56,30 +53,28 @@ class AuthenticationService @Inject constructor(
         }
     }
 
-    /** Records [errorMessage] in the auth state and returns [cause] as the failed result. */
-    private fun <T> failLogin(errorMessage: String, cause: Throwable): Result<T> {
-        setAuthError(errorMessage)
-        return Result.failure(cause)
+    /** Records [error] in the auth state and returns it as the failed outcome. */
+    private fun failLogin(error: LoginError): LoginOutcome {
+        setAuthError(error.userMessage)
+        return LoginOutcome.Failure(error)
     }
 
     /**
      * Logs in and stores the credentials for [tryRefreshToken]. The outcome, including the
      * user-facing error, is also published in [authState]; callers that only drive the UI
-     * may therefore ignore the returned [Result].
+     * may therefore ignore the returned [LoginOutcome]. Cancellation is rethrown, never
+     * reported as a failed login.
      */
     @CanIgnoreReturnValue
     suspend fun login(
         serverUrl: String,
         username: String,
         password: String
-    ): Result<LoginResponse> {
+    ): LoginOutcome {
         _authState.update { it.copy(isLoading = true, error = null) }
 
         val baseUrl = UrlParser.parseUrl(serverUrl)?.toUrlString()
-        if (baseUrl == null) {
-            val error = "Invalid server URL: $serverUrl"
-            return failLogin(error, IllegalArgumentException(error))
-        }
+            ?: return failLogin(LoginError.InvalidServerUrl(serverUrl))
 
         // Store credentials immediately so tryRefreshToken() can retry
         // even if the network call below fails (e.g. server down at startup).
@@ -93,15 +88,11 @@ class AuthenticationService @Inject constructor(
             }
             handleLoginResponse(response, baseUrl, username, password)
         } catch (e: IOException) {
-            val error = networkErrorMessage(e)
-            failLogin(error, IOException(error, e))
+            failLogin(LoginError.Network(e))
         } catch (e: IllegalArgumentException) {
             // kotlinx SerializationException is an IllegalArgumentException: the server
             // answered 200 with a body that is not a LoginResponse.
-            failLogin(
-                "Login failed: ${e.javaClass.simpleName} - ${e.message ?: "Unknown error"}",
-                e
-            )
+            failLogin(LoginError.MalformedResponse(e))
         } catch (e: CancellationException) {
             // The caller went away mid-request. Not a login failure, but the shared state
             // must not stay "loading", or every later Settings screen shows a login in flight.
@@ -144,7 +135,7 @@ class AuthenticationService @Inject constructor(
         baseUrl: String,
         username: String,
         password: String
-    ): Result<LoginResponse> = when (response.code) {
+    ): LoginOutcome = when (response.code) {
         HttpURLConnection.HTTP_OK -> {
             val loginResponse = json.decodeFromString<LoginResponse>(response.body)
             _authState.update {
@@ -158,27 +149,11 @@ class AuthenticationService @Inject constructor(
                     error = null
                 )
             }
-            Result.success(loginResponse)
+            LoginOutcome.Success(loginResponse)
         }
-        HttpURLConnection.HTTP_UNAUTHORIZED ->
-            failLogin("Invalid username or password", IOException("Invalid credentials"))
-        HttpURLConnection.HTTP_NOT_IMPLEMENTED ->
-            failLogin(
-                "Server does not support authentication",
-                IOException("Authentication not supported")
-            )
-        else ->
-            failLogin(
-                "Login failed: ${response.code}",
-                IOException("HTTP ${response.code}: ${response.body}")
-            )
-    }
-
-    private fun networkErrorMessage(e: IOException): String = when (e) {
-        is UnknownHostException -> "Cannot resolve hostname: ${e.message ?: "Unknown host"}"
-        is ConnectException -> "Cannot connect to server: ${e.message ?: "Connection refused"}"
-        is SocketTimeoutException -> "Connection timeout: Server not responding"
-        else -> "Network error: ${e.message ?: "I/O error"}"
+        HttpURLConnection.HTTP_UNAUTHORIZED -> failLogin(LoginError.InvalidCredentials)
+        HttpURLConnection.HTTP_NOT_IMPLEMENTED -> failLogin(LoginError.AuthNotSupported)
+        else -> failLogin(LoginError.HttpError(response.code))
     }
 
     suspend fun logout() {
@@ -230,22 +205,26 @@ class AuthenticationService @Inject constructor(
     /**
      * Re-authenticate with stored credentials to get a fresh token.
      *
-     * Returns the new token, or null when re-authentication failed or no credentials are
-     * stored, meaning a manual login is required. We do NOT require isAuthenticated —
-     * credentials may exist from a prior login attempt that failed due to the server being
-     * temporarily unreachable.
+     * We do NOT require isAuthenticated — credentials may exist from a prior login attempt
+     * that failed due to the server being temporarily unreachable. Callers retry only an
+     * [RefreshOutcome.Unreachable] outcome; the others need the user to act.
      */
-    suspend fun tryRefreshToken(): Result<String?> {
+    suspend fun tryRefreshToken(): RefreshOutcome {
         val currentState = _authState.value
         val serverUrl = currentState.serverUrl
         val username = currentState.username
         val password = currentState.password
         if (serverUrl == null || username == null || password == null) {
-            return Result.success(null)
+            return RefreshOutcome.NoCredentials
         }
 
-        val loginResult = login(serverUrl, username, password)
-        return Result.success(if (loginResult.isSuccess) _authState.value.token else null)
+        return when (val outcome = login(serverUrl, username, password)) {
+            is LoginOutcome.Success -> RefreshOutcome.Refreshed(outcome.response.token)
+            is LoginOutcome.Failure -> when (val error = outcome.error) {
+                is LoginError.Refusal -> RefreshOutcome.Refused(error)
+                is LoginError.Infrastructure -> RefreshOutcome.Unreachable(error)
+            }
+        }
     }
 
     fun clearError() {
