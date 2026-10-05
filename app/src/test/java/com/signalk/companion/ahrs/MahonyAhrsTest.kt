@@ -472,6 +472,135 @@ class MahonyAhrsTest {
         )
     }
 
+    // ------------------------------------------------------------------ non-finite input
+
+    /**
+     * HALs emit NaN/Inf on glitches, and replayed recordings parse "NaN" tokens straight back
+     * into floats, so every input path must drop a non-finite sample rather than let it into
+     * the state. Each case puts one bad value on one axis, the others zero.
+     */
+    private val nonFiniteCases: List<Pair<Int, Float>> =
+        (0..2).flatMap { axis ->
+            listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY).map { axis to it }
+        }
+
+    private fun onAxis(axis: Int, value: Float): FloatArray = FloatArray(3).also { it[axis] = value }
+
+    /** Feeds `ticks` at-rest samples at 100 Hz from `startNs`; returns the next free timestamp. */
+    private fun feedAtRest(f: MahonyAhrs, qTrue: Quaternion, ticks: Int, startNs: Long, gyro: FloatArray): Long {
+        val (accel, mag) = sensorsAtRest(qTrue)
+        var t = startNs
+        repeat(ticks) {
+            f.onAccelerometer(accel[0], accel[1], accel[2])
+            f.onMagnetometer(mag[0], mag[1], mag[2])
+            f.onGyroscope(t, gyro[0], gyro[1], gyro[2])
+            t += 10_000_000L
+        }
+        return t
+    }
+
+    @Test
+    fun `a non-finite gyro sample leaves attitude and bias untouched`() {
+        // Without the guard a NaN rate reaches the integrated quaternion, whose NaN norm makes
+        // normalized() fall back to IDENTITY — a silent snap to heading 0° and level.
+        for ((axis, bad) in nonFiniteCases) {
+            val label = "gyro axis $axis = $bad"
+            val f = MahonyAhrs(kp = 2f, ki = 0.5f)
+            val bias = floatArrayOf(0.02f, -0.015f, 0.01f)
+            val t = feedAtRest(f, levelAtHeading(45f), ticks = 500, startNs = 1_000_000_000L, gyro = bias)
+            val attitudeBefore = f.attitude
+            val biasBefore = f.gyroBias.copyOf()
+
+            val w = onAxis(axis, bad)
+            f.onGyroscope(t, w[0], w[1], w[2])
+
+            assertEquals(attitudeBefore, f.attitude, "$label: attitude must not change")
+            assertTrue(biasBefore.contentEquals(f.gyroBias), "$label: bias must not change, got ${f.gyroBias.toList()}")
+        }
+    }
+
+    @Test
+    fun `a non-finite gyro sample does not advance the time base`() {
+        // Same contract as a rejected out-of-order sample: the next accepted tick integrates
+        // against the last *accepted* timestamp, not the rejected one.
+        for ((axis, bad) in nonFiniteCases) {
+            val f = MahonyAhrs(kp = 0f, ki = 0f)
+            val rateRadS = 10f
+            val t = 1_000_000_000L
+            f.onGyroscope(t, 0f, 0f, 0f) // establish time base
+            f.onGyroscope(t + 10_000_000L, 0f, 0f, rateRadS) // accepted: dt = 10 ms
+            val w = onAxis(axis, bad)
+            f.onGyroscope(t + 15_000_000L, w[0], w[1], w[2]) // rejected: non-finite
+            f.onGyroscope(t + 20_000_000L, 0f, 0f, rateRadS) // must see dt = 10 ms, not 5 ms
+            // Two accepted 10 ms ticks at 10 rad/s = 20 ms total integrated, to port.
+            val expectedDeg = 360f - Math.toDegrees(rateRadS * 0.020).toFloat()
+            assertDegreesNear(
+                expectedDeg,
+                angles(f).headingRad,
+                0.2f,
+                "gyro axis $axis = $bad: a rejected sample must not move the time base"
+            )
+        }
+    }
+
+    @Test
+    fun `a non-finite first gyro sample neither initialises nor seeds`() {
+        for ((axis, bad) in nonFiniteCases) {
+            val label = "gyro axis $axis = $bad"
+            val f = MahonyAhrs(kp = 2f, ki = 0f)
+            val (accel, mag) = sensorsAtRest(levelAtHeading(90f))
+            f.onAccelerometer(accel[0], accel[1], accel[2])
+            f.onMagnetometer(mag[0], mag[1], mag[2])
+
+            val w = onAxis(axis, bad)
+            f.onGyroscope(1_000_000_000L, w[0], w[1], w[2])
+            assertFalse(f.isInitialised, "$label: must not establish a time base")
+            assertEquals(Quaternion.IDENTITY, f.attitude, "$label: must not seed")
+
+            // The first *finite* sample is then the one that initialises and seeds.
+            f.onGyroscope(1_010_000_000L, 0f, 0f, 0f)
+            assertTrue(f.isInitialised, "$label: next finite sample must initialise")
+            assertDegreesNear(90f, angles(f).headingRad, 0.5f, "$label: next finite sample must seed")
+        }
+    }
+
+    @Test
+    fun `a non-finite accelerometer sample keeps the last good one`() {
+        // Without the guard the NaN overwrites the stored vector: the gate's |a| ≈ g check
+        // compares NaN and silently fails, and seeding cannot normalise it.
+        for ((axis, bad) in nonFiniteCases) {
+            val label = "accel axis $axis = $bad"
+            val f = MahonyAhrs(kp = 2f, ki = 0f)
+            val t = feedAtRest(f, levelAtHeading(30f), ticks = 100, startNs = 1_000_000_000L, gyro = FloatArray(3))
+
+            val a = onAxis(axis, bad)
+            f.onAccelerometer(a[0], a[1], a[2])
+            f.onGyroscope(t, 0f, 0f, 0f)
+
+            assertTrue(f.accelerometerAccepted, "$label: correction must still use the last good sample")
+            assertTrue(f.seedFromMeasurements(), "$label: seeding must still use the last good sample")
+            assertDegreesNear(30f, angles(f).headingRad, 0.5f, "$label: heading")
+            assertDegreesNear(0f, angles(f).rollRad, 0.5f, "$label: roll")
+        }
+    }
+
+    @Test
+    fun `a non-finite magnetometer sample keeps the last good one`() {
+        for ((axis, bad) in nonFiniteCases) {
+            val label = "mag axis $axis = $bad"
+            val f = MahonyAhrs(kp = 2f, ki = 0f)
+            val t = feedAtRest(f, levelAtHeading(30f), ticks = 100, startNs = 1_000_000_000L, gyro = FloatArray(3))
+
+            val m = onAxis(axis, bad)
+            f.onMagnetometer(m[0], m[1], m[2])
+            f.onGyroscope(t, 0f, 0f, 0f)
+
+            assertTrue(f.magnetometerAccepted, "$label: correction must still use the last good sample")
+            assertTrue(f.seedFromMeasurements(), "$label: seeding must still use the last good sample")
+            assertDegreesNear(30f, angles(f).headingRad, 0.5f, "$label: heading")
+        }
+    }
+
     // ------------------------------------------------------------------ numerics
 
     @Test
