@@ -361,9 +361,26 @@ class SignalKTransmitterTest {
     }
 
     @Test
-    fun `403 upgrade failure with a failing renewal reports it and retries after 30 seconds`() {
+    fun `403 upgrade failure with a refused renewal reports the refusal and stops retrying`() {
         login()
-        server.loginStatus = 401 // every renewal from here on fails
+        server.loginStatus = 401 // the stored credentials are no longer accepted
+        server.scriptStreamStatuses(403)
+
+        startStreaming()
+
+        transmitter.authenticationError.awaitValue {
+            it?.contains("Invalid username or password") == true
+        }
+        // Known-bad credentials are not posted again: no reconnect, no further login.
+        reconnectDelay.assertNoRequest(QUIET_PERIOD_MS)
+        assertEquals(2, server.loginRequests.size, "the initial login plus exactly one renewal")
+        assertEquals(1, server.streamRequests.size)
+    }
+
+    @Test
+    fun `403 upgrade failure with an unreachable renewal reports it and retries after 30 seconds`() {
+        login()
+        server.loginStatus = 503 // the server's auth endpoint is not answering properly yet
         server.scriptStreamStatuses(403)
 
         startStreaming()
@@ -650,15 +667,15 @@ class SignalKTransmitterTest {
     private fun startStreaming() = runBlocking { transmitter.startStreaming() }
 
     private fun login() = runBlocking {
-        val result = authenticationService.login(server.url, "user", "password")
-        assertTrue(result.isSuccess, "fake server login should succeed: $result")
+        val outcome = authenticationService.login(server.url, "user", "password")
+        assertTrue(outcome is LoginOutcome.Success, "fake server login should succeed: $outcome")
         assertEquals("token-1", authenticationService.getAuthToken())
     }
 
     /** Stores credentials the server rejects, leaving the transmitter to log in on connect. */
     private fun storeCredentialsWithoutToken() = runBlocking {
         server.loginStatus = 401
-        assertTrue(authenticationService.login(server.url, "user", "password").isFailure)
+        assertTrue(authenticationService.login(server.url, "user", "password") is LoginOutcome.Failure)
         assertNull(authenticationService.getAuthToken())
         assertTrue(authenticationService.hasStoredCredentials())
         server.loginStatus = 200
