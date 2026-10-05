@@ -601,9 +601,17 @@ class SignalKTransmitter internal constructor(
             authenticationService.hasStoredCredentials()
         ) {
             Log.d(TAG, "No token available — attempting login before WebSocket connection")
-            val token = authenticationService.tryRefreshToken().getOrNull()
-            if (token == null) {
-                Log.w(TAG, "Login before WebSocket connection failed; connecting without a token")
+            when (val outcome = authenticationService.tryRefreshToken()) {
+                is RefreshOutcome.Refreshed -> Unit
+                is RefreshOutcome.Refused -> Log.w(
+                    TAG,
+                    "Login before WebSocket connection refused (${outcome.error.userMessage}); " +
+                        "connecting without a token"
+                )
+                is RefreshOutcome.Unreachable, RefreshOutcome.NoCredentials -> Log.w(
+                    TAG,
+                    "Login before WebSocket connection failed; connecting without a token"
+                )
             }
         }
 
@@ -788,29 +796,45 @@ class SignalKTransmitter internal constructor(
     private suspend fun renewTokenAndReconnect(generation: Long) {
         Log.d(TAG, "Attempting automatic token renewal...")
         // Use NonCancellable to ensure token renewal completes even if streaming stops
-        val result = withContext(NonCancellable) {
+        val outcome = withContext(NonCancellable) {
             authenticationService.tryRefreshToken()
         }
-        if (result.isSuccess && result.getOrNull() != null) {
-            Log.d(TAG, "Token renewed successfully")
-            _authenticationError.value = null
-            // Reconnect only if this failure still belongs to the running session:
-            // streaming may have stopped, or stopped and restarted, meanwhile.
-            ifCurrentConnection(generation, "token renewal") {
-                Log.d(TAG, "Scheduling reconnection...")
-                scheduleReconnection(TOKEN_RENEWED_RECONNECT_DELAY_MS)
-            }
-        } else {
-            val failureMsg = "Automatic token renewal failed - will retry"
-            Log.e(TAG, failureMsg)
-            _authenticationError.value = failureMsg
-            // Keep retrying as long as we have credentials: the server may
-            // still be coming up (auth endpoint and WebSocket together).
-            if (authenticationService.hasStoredCredentials()) {
-                ifCurrentConnection(generation, "failed token renewal") {
-                    Log.d(TAG, "Credentials exist — scheduling reconnect retry in 30 s")
-                    scheduleReconnection(TOKEN_RENEWAL_RETRY_DELAY_MS)
+        when (outcome) {
+            is RefreshOutcome.Refreshed -> {
+                Log.d(TAG, "Token renewed successfully")
+                _authenticationError.value = null
+                // Reconnect only if this failure still belongs to the running session:
+                // streaming may have stopped, or stopped and restarted, meanwhile.
+                ifCurrentConnection(generation, "token renewal") {
+                    Log.d(TAG, "Scheduling reconnection...")
+                    scheduleReconnection(TOKEN_RENEWED_RECONNECT_DELAY_MS)
                 }
+            }
+            is RefreshOutcome.Unreachable -> {
+                val failureMsg = "Automatic token renewal failed - will retry"
+                Log.e(TAG, "$failureMsg: ${outcome.error.userMessage}")
+                _authenticationError.value = failureMsg
+                // Keep retrying as long as we have credentials: the server may
+                // still be coming up (auth endpoint and WebSocket together).
+                if (authenticationService.hasStoredCredentials()) {
+                    ifCurrentConnection(generation, "failed token renewal") {
+                        Log.d(TAG, "Credentials exist — scheduling reconnect retry in 30 s")
+                        scheduleReconnection(TOKEN_RENEWAL_RETRY_DELAY_MS)
+                    }
+                }
+            }
+            // Retrying cannot succeed without the user changing the settings: stop, so
+            // known-bad credentials are not posted to the server over and over.
+            is RefreshOutcome.Refused -> {
+                val failureMsg = "Automatic token renewal refused: " +
+                    "${outcome.error.userMessage} - update the login in Settings"
+                Log.e(TAG, failureMsg)
+                _authenticationError.value = failureMsg
+            }
+            RefreshOutcome.NoCredentials -> {
+                val failureMsg = "Authentication required - log in from Settings"
+                Log.e(TAG, failureMsg)
+                _authenticationError.value = failureMsg
             }
         }
     }
