@@ -11,6 +11,8 @@ import com.signalk.companion.replay.RotationVectorRecord
 import com.signalk.companion.replay.SensorRecord
 import com.signalk.companion.util.DeviceCalibration
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -23,6 +25,8 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -35,24 +39,31 @@ class AttitudeEngineTest {
 
     private val g = MahonyAhrs.GRAVITY
 
-    /** A fake device: every sensor present, records delivered by [deliver] on this thread. */
+    /**
+     * A fake device: every sensor present unless [availability] says otherwise, records
+     * delivered by [deliver] on the calling thread.
+     */
     private class Harness {
         val recordingSession: RecordingSession = mock(RecordingSession::class.java)
         val engine = AttitudeEngine(recordingSession) { newSource() }
-        private var onRecord: ((SensorRecord) -> Unit)? = null
+
+        /** What the next source built by [AttitudeEngine.start] reports. */
+        var availability = RawSensorSource.Availability(
+            hasAccelerometer = true,
+            hasGyroscope = true,
+            hasMagnetometer = true,
+            gyroscopeUncalibrated = true,
+            magnetometerUncalibrated = true,
+            hasRotationVector = true
+        )
+
+        /** The callback the newest started source was handed: the current session's input. */
+        var onRecord: ((SensorRecord) -> Unit)? = null
+            private set
 
         private fun newSource(): RawSensorSource {
             val source = mock(RawSensorSource::class.java)
-            `when`(source.availability).thenReturn(
-                RawSensorSource.Availability(
-                    hasAccelerometer = true,
-                    hasGyroscope = true,
-                    hasMagnetometer = true,
-                    gyroscopeUncalibrated = true,
-                    magnetometerUncalibrated = true,
-                    hasRotationVector = true
-                )
-            )
+            `when`(source.availability).thenReturn(availability)
             doAnswer { invocation ->
                 onRecord = invocation.getArgument(2)
                 true
@@ -400,6 +411,78 @@ class AttitudeEngineTest {
         assertEquals(secondStart, afterRestart.first().timestampNs, "first tick must emit at once")
         assertEquals(fresh, afterRestart, "a restarted engine must match a fresh one")
         assertTrue(afterRestart.all { it.referenceHeadingRad == null })
+    }
+
+    @Test
+    fun `stop clears the published state`() {
+        val harness = Harness()
+        harness.start()
+        harness.deliver(GyroRecord(1_000_000_000L, 0f, 0f, 0f))
+        assertNotNull(harness.engine.state.value, "precondition: the running session published a pose")
+
+        harness.engine.stop()
+
+        assertNull(harness.engine.state.value, "a stopped engine must not keep showing a pose as live")
+    }
+
+    @Test
+    fun `start on a device without the required sensors leaves no previous pose published`() {
+        val harness = Harness()
+        harness.start()
+        harness.deliver(GyroRecord(1_000_000_000L, 0f, 0f, 0f))
+        assertNotNull(harness.engine.state.value, "precondition: the running session published a pose")
+
+        harness.availability = harness.availability.copy(hasMagnetometer = false)
+
+        assertFalse(harness.engine.start(), "a device without a magnetometer must not start")
+        assertNull(harness.engine.state.value, "a start that could not run must not show the old pose")
+    }
+
+    @Test
+    fun `restart hides the previous session until the new session emits`() {
+        val harness = Harness()
+        harness.start()
+        val previousSession = checkNotNull(harness.onRecord)
+        previousSession(GyroRecord(1_000_000_000L, 0f, 0f, 0f))
+        assertNotNull(harness.engine.state.value, "precondition: the first session published a pose")
+
+        harness.start()
+
+        assertNull(harness.engine.state.value, "nothing from the old session before the new one emits")
+
+        // A late callback from the previous session's source is not the new session's data.
+        previousSession(GyroRecord(2_000_000_000L, 0f, 0f, 0f))
+        assertNull(harness.engine.state.value, "the old session must not publish into the new one")
+
+        harness.deliver(GyroRecord(3_000_000_000L, 0f, 0f, 0f))
+        assertEquals(3_000_000_000L, harness.engine.state.value?.timestampNs)
+    }
+
+    @Test
+    fun `an emit already in flight when stop runs does not republish afterwards`() {
+        val harness = Harness()
+        harness.start(record = true)
+
+        // A recording session writes each record before the filter sees it, so blocking the
+        // write parks a sensor-thread callback mid-flight while stop() runs on this thread.
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        doAnswer {
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS)) { "test never released the callback" }
+            null
+        }.`when`(harness.recordingSession).write(anyNonNull())
+
+        val sensorThread = Thread { harness.deliver(GyroRecord(1_000_000_000L, 0f, 0f, 0f)) }
+        sensorThread.start()
+        assertTrue(entered.await(5, TimeUnit.SECONDS), "callback never started")
+
+        harness.engine.stop()
+        release.countDown()
+        sensorThread.join(TimeUnit.SECONDS.toMillis(5))
+        assertFalse(sensorThread.isAlive, "callback never finished")
+
+        assertNull(harness.engine.state.value, "an emit racing stop() must not repopulate state")
     }
 
     @Test
