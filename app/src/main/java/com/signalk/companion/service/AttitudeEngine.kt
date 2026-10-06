@@ -42,10 +42,17 @@ import javax.inject.Singleton
  * exists to avoid.
  */
 @Singleton
-class AttitudeEngine @Inject constructor(
-    private val context: Context,
-    private val recordingSession: RecordingSession
+class AttitudeEngine internal constructor(
+    private val recordingSession: RecordingSession,
+    /**
+     * Builds the sensor source on each [start]. The seam that lets the JVM tests drive the
+     * real pipeline with synthetic records; production always gets a [RawSensorSource].
+     */
+    private val newSource: () -> RawSensorSource
 ) {
+
+    @Inject constructor(context: Context, recordingSession: RecordingSession) :
+        this(recordingSession, { RawSensorSource(context) })
 
     /**
      * One pose estimate, in the vehicle frame, plus enough state to explain it.
@@ -135,7 +142,7 @@ class AttitudeEngine @Inject constructor(
     ): Boolean {
         stop()
 
-        val raw = RawSensorSource(context)
+        val raw = newSource()
         availability = raw.availability
         val started = if (raw.availability.isUsable) {
             startSource(raw, samplingPeriodUs, record)
