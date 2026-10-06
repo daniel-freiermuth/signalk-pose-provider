@@ -107,7 +107,24 @@ class AttitudeEngine @Inject constructor(
     @Volatile var hardIron: HardIronStrategy = HardIronStrategy.HalEstimate
 
     private val _state = MutableStateFlow<State?>(null)
+
+    /**
+     * The latest estimate of the running session, or null while stopped and before a new
+     * session's first emit. The UI treats non-null as live, so a stopped engine must never
+     * leave its last pose behind.
+     */
     val state: StateFlow<State?> = _state.asStateFlow()
+
+    /**
+     * The session currently allowed to publish [state], or null while stopped. Guarded by
+     * [stateLock], which also covers every write to [_state], so clearing and a sensor-thread
+     * publish can never interleave: an emit computed for a session that has since stopped is
+     * dropped rather than republished. [RawSensorSource.stop] joining its thread already
+     * gives this on a device; the engine keeps the guarantee itself instead of depending on
+     * how the source tears down.
+     */
+    private val stateLock = Any()
+    private var publishingSession: Any? = null
 
     /** What the device offers, or null before the first [start]. */
     var availability: RawSensorSource.Availability? = null
@@ -158,19 +175,34 @@ class AttitudeEngine @Inject constructor(
         referenceAttitude = null
         clockNoted = false
 
-        return raw.start(samplingPeriodUs) { sensorRecord ->
+        // Allowed to publish before raw.start returns: the first records can arrive as soon
+        // as the sensors are registered.
+        val session = Any()
+        synchronized(stateLock) { publishingSession = session }
+
+        val started = raw.start(samplingPeriodUs) { sensorRecord ->
             if (!clockNoted) {
                 raw.noteClockBase(sensorRecord.timestampNs)
                 clockNoted = true
             }
             if (record) recordingSession.write(sensorRecord)
-            consume(sensorRecord)
+            consume(sensorRecord, session)
         }
+        if (!started) clearState()
+        return started
     }
 
     fun stop() {
         source?.stop()
         source = null
+        clearState()
+    }
+
+    private fun clearState() {
+        synchronized(stateLock) {
+            publishingSession = null
+            _state.value = null
+        }
     }
 
     /**
@@ -191,7 +223,7 @@ class AttitudeEngine @Inject constructor(
 
     // ------------------------------------------------------------------ sensor thread
 
-    private fun consume(record: SensorRecord) {
+    private fun consume(record: SensorRecord, session: Any) {
         when (record) {
             is AccelRecord -> filter.onAccelerometer(record.x, record.y, record.z)
 
@@ -209,12 +241,12 @@ class AttitudeEngine @Inject constructor(
             is GyroRecord -> {
                 lastGyro = floatArrayOf(record.x, record.y, record.z)
                 filter.onGyroscope(record.timestampNs, record.x, record.y, record.z)
-                maybeEmit(record.timestampNs)
+                maybeEmit(record.timestampNs, session)
             }
         }
     }
 
-    private fun maybeEmit(timestampNs: Long) {
+    private fun maybeEmit(timestampNs: Long, session: Any) {
         if (!filter.isInitialised) return
         // Guard on the absolute difference, not `timestampNs - lastEmitNs >= interval`: a
         // clock that jumps backwards (§7) would otherwise stop emission until it caught up.
@@ -240,7 +272,7 @@ class AttitudeEngine @Inject constructor(
             ).headingRad
         }
 
-        _state.value = State(
+        val next = State(
             timestampNs = timestampNs,
             headingRad = angles.headingRad,
             pitchRad = angles.pitchRad,
@@ -254,5 +286,8 @@ class AttitudeEngine @Inject constructor(
             ),
             referenceHeadingRad = reference
         )
+        synchronized(stateLock) {
+            if (publishingSession === session) _state.value = next
+        }
     }
 }
