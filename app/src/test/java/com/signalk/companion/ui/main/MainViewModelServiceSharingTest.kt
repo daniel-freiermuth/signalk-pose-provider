@@ -79,6 +79,13 @@ class MainViewModelServiceSharingTest {
                 it.onServiceConnected(name, binder)
             }
         }
+
+        /** The service destroyed (stopped from its notification, say); clients are told. */
+        fun destroy() {
+            running = false
+            connected.forEach { it.onServiceDisconnected(name) }
+            connected.clear()
+        }
     }
 
     private val testDispatcher = UnconfinedTestDispatcher()
@@ -202,6 +209,21 @@ class MainViewModelServiceSharingTest {
         host.dispatchConnections()
 
         assertEquals(true, viewModel.uiState.value.isStreaming)
+    }
+
+    @Test
+    fun `a reopened screen sees the service stop even before its last state arrives`() {
+        serviceAlreadyStreaming()
+        val viewModel = newViewModel()
+        host.dispatchConnections()
+        viewModel.onAppForeground()
+
+        // The service is gone; whether its IDLE reached the collector first is a race.
+        host.destroy()
+        viewModel.onAppBackground()
+
+        assertFalse(viewModel.uiState.value.isStreaming)
+        verify(sensorService).stopSensorUpdates()
     }
 
     @Test
