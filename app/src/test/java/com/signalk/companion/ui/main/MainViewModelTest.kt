@@ -44,6 +44,7 @@ import org.mockito.Mockito.anyFloat
 import org.mockito.Mockito.anyInt
 import org.mockito.Mockito.anyLong
 import org.mockito.Mockito.anyString
+import org.mockito.Mockito.atLeastOnce
 import org.mockito.Mockito.clearInvocations
 import org.mockito.Mockito.eq
 import org.mockito.Mockito.mock
@@ -166,10 +167,16 @@ class MainViewModelTest {
         `when`(preferences.getFloat(anyString(), anyFloat())).thenReturn(0f)
     }
 
-    /** The connection the view model passed to bindService, as the framework would see it. */
+    /**
+     * The connection the view model passed to bindService, as the framework would see it.
+     * Every bind uses the same connection: the passive one made at construction, and the
+     * auto-creating one added when streaming starts.
+     */
     private fun capturedConnection(): ServiceConnection {
         val captor = ArgumentCaptor.forClass(ServiceConnection::class.java)
-        verifyCalled(context) { bindService(any(Intent::class.java), captor.capture(), anyInt()) }
+        verifyCalled(context, atLeastOnce()) {
+            bindService(any(Intent::class.java), captor.capture(), anyInt())
+        }
         return captor.value
     }
 
@@ -183,7 +190,7 @@ class MainViewModelTest {
     // --- startStreaming ---
 
     @Test
-    fun `startStreaming with an unsupported URL reports it and never contacts the service`() =
+    fun `startStreaming with an unsupported URL reports it and never starts the service`() =
         runTest {
             stubStoredSettings(serverUrl = "ftp://invalid.server", username = "", password = "")
             viewModel.initializeSettings()
@@ -195,7 +202,11 @@ class MainViewModelTest {
                 "Unexpected error: ${viewModel.uiState.value.error}"
             )
             verifyCalled(context, never()) {
-                bindService(any(Intent::class.java), any(ServiceConnection::class.java), anyInt())
+                bindService(
+                    any(Intent::class.java),
+                    any(ServiceConnection::class.java),
+                    eq(Context.BIND_AUTO_CREATE)
+                )
             }
             verifyCalled(context, never()) { startForegroundService(any(Intent::class.java)) }
         }
@@ -222,7 +233,11 @@ class MainViewModelTest {
         viewModel.startStreaming()
 
         verifyCalled(context, times(1)) {
-            bindService(any(Intent::class.java), any(ServiceConnection::class.java), anyInt())
+            bindService(
+                any(Intent::class.java),
+                any(ServiceConnection::class.java),
+                eq(Context.BIND_AUTO_CREATE)
+            )
         }
         verifyCalled(context, times(2)) { startForegroundService(any(Intent::class.java)) }
     }
@@ -271,7 +286,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `an unexpected service disconnect drops the service without unbinding`() = runTest {
+    fun `an unexpected service disconnect drops the service but not the binding`() = runTest {
         val bound = FakeBoundService()
         startStreamingAndBind(bound)
         val connection = capturedConnection()
@@ -282,9 +297,10 @@ class MainViewModelTest {
 
         assertEquals(0, viewModel.uiState.value.messagesSent)
         verify(bound.service, never()).updateCalibrationAngles(anyFloat(), anyFloat(), anyFloat())
-        // The system already dropped the binding; unbinding again would throw.
+        // The binding outlives the disconnect (the framework reconnects it if the service comes
+        // back); only unbindService releases the connection, so clearing must still call it.
         viewModelStore.clear()
-        verify(context, never()).unbindService(any(ServiceConnection::class.java))
+        verify(context).unbindService(connection)
     }
 
     // --- stopStreaming ---
@@ -453,10 +469,14 @@ class MainViewModelTest {
         }
 
     @Test
-    fun `clearing an unbound view model does not unbind`() = runTest {
+    fun `clearing after stopStreaming released the binding does not unbind again`() = runTest {
+        startStreamingAndBind(FakeBoundService())
+        viewModel.stopStreaming()
+
         viewModelStore.clear()
 
-        verify(context, never()).unbindService(any(ServiceConnection::class.java))
+        // A second unbindService for a released connection throws "Service not registered".
+        verify(context, times(1)).unbindService(any(ServiceConnection::class.java))
         verify(sensorService).stopSensorUpdates()
     }
 }
