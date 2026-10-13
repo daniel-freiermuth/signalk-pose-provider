@@ -92,6 +92,11 @@ class MainViewModel @Inject constructor(
     @SuppressLint("StaticFieldLeak")
     private var streamingService: SignalKStreamingService? = null
     private var bound = false
+
+    // Whether a bindService() call is registered and not yet unbound. Separate from [bound]
+    // (connected): the binding made in init may never connect, because it does not create
+    // the service, yet it still holds [serviceConnection] until unbindService releases it.
+    private var bindRequested = false
     private var serviceCollectorJob: Job? = null
     private var isAppInForeground = false
 
@@ -117,6 +122,10 @@ class MainViewModel @Inject constructor(
 
         override fun onServiceDisconnected(arg0: ComponentName) {
             cleanupServiceBinding(unbind = false)
+            // The init binding does not keep the service alive, so it can be destroyed while
+            // still bound. The collector cancelled above may not have seen its last IDLE yet,
+            // and a service that is gone is not streaming.
+            _uiState.update { it.copy(isStreaming = false) }
         }
     }
 
@@ -166,8 +175,9 @@ class MainViewModel @Inject constructor(
         serviceCollectorJob?.cancel()
         serviceCollectorJob = null
 
-        if (unbind && bound) {
+        if (unbind && bindRequested) {
             applicationContext.unbindService(serviceConnection)
+            bindRequested = false
         }
         bound = false
         streamingService = null
@@ -193,6 +203,13 @@ class MainViewModel @Inject constructor(
     init {
         // Configure sensor service with default (identity) calibration
         sensorService.setCalibrationAngles(0f, 0f, 0f)
+
+        // Rejoin a streaming service that outlived the screen which started it (the task was
+        // swiped away, or Back finished the activity, while the foreground service kept the
+        // process alive). Without this the new ViewModel believes nothing is streaming and
+        // onAppBackground stops the sensors and GNSS the service is still streaming from.
+        // No BIND_AUTO_CREATE: opening the screen must not create the service, only find one.
+        bindStreamingService(flags = 0)
 
         // Still observe location and sensor data for UI display (but not for transmission)
         viewModelScope.launch {
@@ -481,9 +498,11 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    private fun bindStreamingService() {
+    private fun bindStreamingService(flags: Int = Context.BIND_AUTO_CREATE) {
         val intent = Intent(applicationContext, SignalKStreamingService::class.java)
-        if (!applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)) {
+        // Even a failed bindService() must be unbound to release the connection.
+        bindRequested = true
+        if (!applicationContext.bindService(intent, serviceConnection, flags)) {
             // The service still runs from the start command; only its live state is missing.
             Log.e(TAG, "Could not bind to SignalKStreamingService; live status will not update")
         }
@@ -500,6 +519,11 @@ class MainViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         cleanupServiceBinding(unbind = true)
-        stopForegroundSensors()
+        // The activity finishing (swiped from Recents, Back) does not stop a streaming
+        // session: the foreground service keeps running and still needs these shared sources.
+        // It stops them itself when streaming ends.
+        if (!_uiState.value.isStreaming) {
+            stopForegroundSensors()
+        }
     }
 }
