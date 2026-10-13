@@ -345,6 +345,13 @@ class SignalKStreamingService : Service() {
         )
         logBatteryOptimizationStatus()
 
+        // startStreaming() answers a startForegroundService() call, which gives the service a
+        // few seconds (10 s before Android 14, 30 s since) to call startForeground() or be
+        // ANR'd/killed. Everything in bringUpStreaming() waits on the network — DNS, a pre-
+        // connect login with 10 s connect and read timeouts, the settle delay — so promote
+        // here, before any of it, and never let a slow server decide whether we make it.
+        if (!promoteStreamingToForeground(startId)) return
+
         serviceScope.launch {
             try {
                 bringUpStreaming(parsedUrl, config)
@@ -355,10 +362,25 @@ class SignalKStreamingService : Service() {
             } catch (e: SecurityException) {
                 rollBackFailedStart("Permission denied: ${e.message}", e, startId)
             } catch (e: IllegalStateException) {
-                // Includes ForegroundServiceStartNotAllowedException from startForeground()
                 rollBackFailedStart("Failed to start streaming: ${e.message}", e, startId)
             }
         }
+    }
+
+    /**
+     * Promotes the service to the foreground for streaming, rolling the start back when the
+     * system refuses — ForegroundServiceStartNotAllowedException (an IllegalStateException)
+     * or a SecurityException for the declared service type.
+     */
+    private fun promoteStreamingToForeground(startId: Int): Boolean = try {
+        startForeground(NOTIFICATION_ID, createNotification("Connecting to SignalK..."))
+        true
+    } catch (e: IllegalStateException) {
+        rollBackFailedStart("Failed to start streaming: ${e.message}", e, startId)
+        false
+    } catch (e: SecurityException) {
+        rollBackFailedStart("Permission denied: ${e.message}", e, startId)
+        false
     }
 
     private fun logBatteryOptimizationStatus() {
@@ -369,7 +391,7 @@ class SignalKStreamingService : Service() {
         }
     }
 
-    /** Connects the transmitter, starts the data sources and promotes to the foreground. */
+    /** Connects the transmitter and starts the data sources. The caller has already promoted. */
     private suspend fun bringUpStreaming(parsedUrl: UrlParser.ParsedUrl, config: StreamingConfig) {
         _error.value = null // Clear any previous errors
         Log.d(TAG, "Configuring SignalK transmitter")
@@ -394,10 +416,6 @@ class SignalKStreamingService : Service() {
 
         // Persist streaming state so the service can resume after an OS kill
         StreamingSettings.setWasStreaming(this, true)
-
-        // Start foreground service with notification
-        val notification = createNotification("Streaming to SignalK server")
-        startForeground(NOTIFICATION_ID, notification)
 
         Log.d(TAG, "SignalK streaming started successfully")
     }
@@ -436,13 +454,11 @@ class SignalKStreamingService : Service() {
         _error.value = errorMessage
         _streamingState.value = StreamingState.IDLE
 
-        // The throw can land anywhere in the start sequence, including the very last
-        // line — startForeground() itself throws when the OS refuses the promotion.
-        // By then the transmitter, the sensors, the forwarding job and the resume
-        // flag are all live, so clearing the state enum alone would leave a service
-        // that reports IDLE still transmitting, and leave wasStreaming set for the
-        // next OS restart to resume a session that never actually started. Undo the
-        // whole partial start, not the flag that describes it.
+        // The throw can land anywhere in the start sequence, after the transmitter, the
+        // sensors or the forwarding job are already live, so clearing the state enum alone
+        // would leave a service that reports IDLE still transmitting. Undo the whole
+        // partial start, not the flag that describes it — including wasStreaming, so the
+        // next OS restart cannot resume a session that never actually started.
         StreamingSettings.setWasStreaming(this, false)
         transmissionJob?.cancel()
         transmissionJob = null
