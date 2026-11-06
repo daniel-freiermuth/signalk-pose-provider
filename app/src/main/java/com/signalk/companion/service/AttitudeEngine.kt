@@ -171,6 +171,10 @@ class AttitudeEngine @Inject constructor(
     fun stop() {
         source?.stop()
         source = null
+        // After the source has stopped: its stop() joins the sensor thread, so no in-flight
+        // emit can republish a pose behind this. A stopped engine has no current estimate,
+        // and keeping the last one would show a frozen number as if it were live.
+        _state.value = null
     }
 
     /**
