@@ -1,6 +1,7 @@
 package com.signalk.companion.service
 
 import com.signalk.companion.data.model.AuthState
+import com.signalk.companion.data.model.LoginResponse
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
@@ -21,6 +22,7 @@ import java.net.ServerSocket
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 class AuthenticationServiceTest {
@@ -78,22 +80,70 @@ class AuthenticationServiceTest {
     @Test
     fun `login with unparseable scheme does not store credentials`() = runTest {
         // "ftp://" is rejected by UrlParser so parsedUrl == null → return early, no storage
-        service.login("ftp://server:3000", "bob", "pass")
+        val outcome = service.login("ftp://server:3000", "bob", "pass")
 
+        assertEquals(LoginOutcome.Failure(LoginError.InvalidServerUrl("ftp://server:3000")), outcome)
         val state = service.authState.value
         assertFalse(state.isAuthenticated)
         // URL failed to parse: credentials must NOT be stored
         assertNull(state.username)
     }
 
+    // ── login() outcome classification ────────────────────────────────────────
+
+    @Test
+    fun `login accepted returns the token`() = runTest {
+        val outcome = loginAgainst(HTTP_OK to """{"token":"t-1"}""")
+
+        assertEquals(LoginOutcome.Success(LoginResponse("t-1")), outcome)
+        assertEquals("t-1", service.getAuthToken())
+    }
+
+    @Test
+    fun `login rejected with 401 is an invalid-credentials refusal`() = runTest {
+        val outcome = loginAgainst(HTTP_UNAUTHORIZED to "")
+
+        assertEquals(LoginOutcome.Failure(LoginError.InvalidCredentials), outcome)
+        assertEquals("Invalid username or password", service.authState.value.error)
+    }
+
+    @Test
+    fun `login answered 501 is an auth-not-supported refusal`() = runTest {
+        val outcome = loginAgainst(HTTP_NOT_IMPLEMENTED to "")
+
+        assertEquals(LoginOutcome.Failure(LoginError.AuthNotSupported), outcome)
+    }
+
+    @Test
+    fun `login answered with a server error is an infrastructure failure carrying the code`() = runTest {
+        val outcome = loginAgainst(HTTP_UNAVAILABLE to "")
+
+        assertEquals(LoginOutcome.Failure(LoginError.HttpError(503)), outcome)
+    }
+
+    @Test
+    fun `login answered 200 with a body that is not a login response is malformed`() = runTest {
+        val outcome = loginAgainst(HTTP_OK to """{"unexpected":true}""")
+
+        val error = (outcome as LoginOutcome.Failure).error
+        assertTrue(error is LoginError.MalformedResponse, "got $error")
+        assertFalse(service.authState.value.isAuthenticated)
+    }
+
+    @Test
+    fun `login to an unreachable server is a network failure`() = runTest {
+        val outcome = service.login("http://127.0.0.1:1", "bob", "pass123")
+
+        val error = (outcome as LoginOutcome.Failure).error
+        assertTrue(error is LoginError.Network, "got $error")
+    }
+
     // ── tryRefreshToken() works without prior successful login ────────────────
 
     @Test
-    fun `tryRefreshToken returns null when no credentials are stored`() = runTest {
+    fun `tryRefreshToken reports missing credentials without contacting a server`() = runTest {
         // Fresh service, no prior login
-        val result = service.tryRefreshToken()
-        assertTrue(result.isSuccess, "Should succeed (no exception)")
-        assertNull(result.getOrNull(), "Should return null when no credentials stored")
+        assertEquals(RefreshOutcome.NoCredentials, service.tryRefreshToken())
     }
 
     @Test
@@ -104,15 +154,41 @@ class AuthenticationServiceTest {
         assertFalse(stateAfterFailedLogin.isAuthenticated)
         assertNotNull(stateAfterFailedLogin.username, "Credentials should be stored even after failure")
 
-        // tryRefreshToken should attempt re-login (it will fail again, but that's OK —
-        // we verify it *tries* by checking it returns Result.success(null) rather than
-        // skipping with null due to the old isAuthenticated guard)
-        val result = service.tryRefreshToken()
-        assertTrue(result.isSuccess, "tryRefreshToken should not throw")
-        // Result is null because re-login to 127.0.0.1:1 also fails, but it *tried*
-        assertNull(result.getOrNull())
+        // The re-login is attempted (not skipped for lack of isAuthenticated) and fails
+        // again against the closed port: the server is unreachable, not refusing.
+        val outcome = service.tryRefreshToken()
+        assertTrue(outcome is RefreshOutcome.Unreachable, "got $outcome")
+        assertTrue((outcome as RefreshOutcome.Unreachable).error is LoginError.Network)
         // authState should still have credentials for the next attempt
         assertEquals("alice", service.authState.value.username)
+    }
+
+    @Test
+    fun `tryRefreshToken returns the renewed token`() = runTest {
+        val outcome = refreshAgainst(HTTP_OK to """{"token":"t-1"}""", HTTP_OK to """{"token":"t-2"}""")
+
+        assertEquals(RefreshOutcome.Refreshed("t-2"), outcome)
+    }
+
+    @Test
+    fun `tryRefreshToken with rejected credentials is refused, not unreachable`() = runTest {
+        val outcome = refreshAgainst(HTTP_OK to """{"token":"t-1"}""", HTTP_UNAUTHORIZED to "")
+
+        assertEquals(RefreshOutcome.Refused(LoginError.InvalidCredentials), outcome)
+    }
+
+    @Test
+    fun `tryRefreshToken against a server without auth support is refused`() = runTest {
+        val outcome = refreshAgainst(HTTP_UNAUTHORIZED to "", HTTP_NOT_IMPLEMENTED to "")
+
+        assertEquals(RefreshOutcome.Refused(LoginError.AuthNotSupported), outcome)
+    }
+
+    @Test
+    fun `tryRefreshToken against a server error is unreachable`() = runTest {
+        val outcome = refreshAgainst(HTTP_UNAUTHORIZED to "", HTTP_UNAVAILABLE to "")
+
+        assertEquals(RefreshOutcome.Unreachable(LoginError.HttpError(503)), outcome)
     }
 
     // ── hasStoredCredentials helper ───────────────────────────────────────────
@@ -138,17 +214,23 @@ class AuthenticationServiceTest {
     // ── cancellation mid-request ──────────────────────────────────────────────
 
     @Test
-    fun `login cancelled mid-request does not leave the shared state loading`() = runBlocking {
+    fun `login cancelled mid-request propagates cancellation without an auth error`() = runBlocking {
         val ioService = AuthenticationService(threads)
+        val returned = AtomicBoolean(false)
         ScriptedHttpServer(listOf(HTTP_UNAUTHORIZED to "")).use { server ->
-            val call = launch(threads) { ioService.login(server.url, "user", "pw") }
+            val call = launch(threads) {
+                ioService.login(server.url, "user", "pw")
+                returned.set(true)
+            }
             server.awaitRequest()
             call.cancel()
             server.respond()
             call.join()
         }
 
+        assertFalse(returned.get(), "login must rethrow the cancellation, not return an outcome")
         assertFalse(ioService.authState.value.isLoading, "A cancelled login must not stay loading")
+        assertNull(ioService.authState.value.error, "Cancellation is not a login failure")
     }
 
     @Test
@@ -171,9 +253,29 @@ class AuthenticationServiceTest {
         assertNull(ioService.authState.value.token)
     }
 
+    /** Logs [service] in against a server answering [response]. */
+    private suspend fun loginAgainst(response: Pair<String, String>): LoginOutcome =
+        ScriptedHttpServer(listOf(response)).use { server ->
+            server.respond()
+            service.login(server.url, "user", "pw")
+        }
+
+    /** Logs in against a server answering [login], then refreshes against [refresh]. */
+    private suspend fun refreshAgainst(
+        login: Pair<String, String>,
+        refresh: Pair<String, String>
+    ): RefreshOutcome = ScriptedHttpServer(listOf(login, refresh)).use { server ->
+        server.respond()
+        server.respond()
+        service.login(server.url, "user", "pw")
+        service.tryRefreshToken()
+    }
+
     private companion object {
         const val HTTP_OK = "HTTP/1.1 200 OK"
         const val HTTP_UNAUTHORIZED = "HTTP/1.1 401 Unauthorized"
+        const val HTTP_NOT_IMPLEMENTED = "HTTP/1.1 501 Not Implemented"
+        const val HTTP_UNAVAILABLE = "HTTP/1.1 503 Service Unavailable"
     }
 }
 
