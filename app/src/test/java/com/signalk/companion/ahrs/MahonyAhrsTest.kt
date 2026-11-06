@@ -137,6 +137,40 @@ class MahonyAhrsTest {
     }
 
     @Test
+    fun `seeds when the reference sensors arrive after the first gyro sample`() {
+        // The live ordering: RawSensorSource registers the 200 Hz gyro before the slower
+        // magnetometer, so the first gyro sample routinely lands before any reference pair
+        // exists. Seeding must still happen as soon as the pair arrives — otherwise the
+        // filter starts at identity and, at 180°, sits on the antipodal point above.
+        val f = MahonyAhrs(kp = 2f, ki = 0f)
+        val (accel, mag) = sensorsAtRest(levelAtHeading(180f))
+        var t = 1_000_000_000L
+        f.onGyroscope(t, 0f, 0f, 0f) // time base only: nothing to seed from yet
+        f.onAccelerometer(accel[0], accel[1], accel[2])
+        f.onMagnetometer(mag[0], mag[1], mag[2])
+        repeat(5) {
+            t += 5_000_000L
+            f.onGyroscope(t, 0f, 0f, 0f)
+        }
+        assertDegreesNear(180f, angles(f).headingRad, 0.5f, "heading once the pair arrives")
+    }
+
+    @Test
+    fun `seeds on the first calm sample after a hard swing`() {
+        // A first sample mid-tack must not seed (see below), but that must defer the seed,
+        // not cancel it.
+        val f = MahonyAhrs(kp = 2f, ki = 0f)
+        val (accel, mag) = sensorsAtRest(levelAtHeading(180f))
+        f.onAccelerometer(accel[0], accel[1], accel[2])
+        f.onMagnetometer(mag[0], mag[1], mag[2])
+        var t = 1_000_000_000L
+        f.onGyroscope(t, 0f, 0f, f.maxGyroForAccel * 3f)
+        t += 5_000_000L
+        f.onGyroscope(t, 0f, 0f, 0f)
+        assertDegreesNear(180f, angles(f).headingRad, 0.5f, "heading once the swing stops")
+    }
+
+    @Test
     fun `seeding is skipped when the field is parallel to gravity`() {
         // Degenerate: heading is genuinely undetermined, so seeding must decline rather than
         // emit a NaN attitude.
@@ -226,25 +260,22 @@ class MahonyAhrsTest {
 
     @Test
     fun `recovers from a large error without seeding, given time`() {
-        // The unseeded path still has to work: seeding needs both sensors, and either can be
-        // missing at startup. Forced here by resetting to a deliberately wrong attitude after
-        // initialisation. With the integral term active the system is second-order and
+        // The unseeded path still has to work: seeding needs both sensors trusted, and the
+        // seed only removes the startup error — a later disturbance has to be walked off by
+        // the loop. Forced here by seeding at North and then presenting a field 90° away.
+        // With the integral term active the system is second-order and
         // settles in minutes — measured from 90° out at kp=2, ki=0.1:
         //   30 s → 5.6° out    60 s → 0.8° out    120 s → 0.02° out
         // Pinned so the documented figure and the code cannot drift apart, and so a future
         // gain change has to confront the cost.
         val f = MahonyAhrs(kp = 2f, ki = 0.1f)
+        val (northAccel, northMag) = sensorsAtRest(levelAtHeading(0f))
         val (accel, mag) = sensorsAtRest(levelAtHeading(90f))
         var t = 1_000_000_000L
-        // Gyro arrives first, before either reference sensor — a real startup ordering, and
-        // the one case where seeding cannot apply. The filter starts at identity, 90° out.
+        f.onAccelerometer(northAccel[0], northAccel[1], northAccel[2])
+        f.onMagnetometer(northMag[0], northMag[1], northMag[2])
         f.onGyroscope(t, 0f, 0f, 0f)
-        assertEquals(
-            1f,
-            Quaternion.IDENTITY.cosAngleTo(f.attitude),
-            1e-6f,
-            "with no reference sensors yet, the filter must start at identity"
-        )
+        assertDegreesNear(0f, angles(f).headingRad, 0.5f, "seeded at North, 90° out")
 
         repeat(15000) {
             t += 10_000_000L
@@ -263,10 +294,13 @@ class MahonyAhrsTest {
 
     @Test
     fun `bias estimator is frozen while the error is large`() {
-        // Gyro first, so seeding cannot apply and the filter really does start 180° out.
+        // Seeded at North, then a field 180° away: the filter really is 180° out.
         val f = MahonyAhrs(kp = 2f, ki = 0.5f)
+        val (northAccel, northMag) = sensorsAtRest(levelAtHeading(0f))
         val (accel, mag) = sensorsAtRest(levelAtHeading(180f))
         var t = 1_000_000_000L
+        f.onAccelerometer(northAccel[0], northAccel[1], northAccel[2])
+        f.onMagnetometer(northMag[0], northMag[1], northMag[2])
         f.onGyroscope(t, 0f, 0f, 0f)
         f.onAccelerometer(accel[0], accel[1], accel[2])
         f.onMagnetometer(mag[0], mag[1], mag[2])
