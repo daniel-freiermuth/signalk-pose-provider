@@ -376,6 +376,30 @@ class AttitudeEngineTest {
     // ------------------------------------------------------------------ sessions
 
     @Test
+    fun `stop clears the published pose so the UI does not show a frozen estimate`() {
+        val harness = Harness()
+        harness.start()
+        val emitted = harness.feed(syntheticRecording(90f, 0.5))
+        assertTrue(emitted.isNotEmpty(), "precondition: the engine emitted while running")
+
+        harness.engine.stop()
+
+        assertNull(harness.engine.state.value, "a stopped engine must not keep publishing its last pose")
+    }
+
+    @Test
+    fun `a restart shows no pose until the new session emits`() {
+        val harness = Harness()
+        harness.start()
+        val emitted = harness.feed(syntheticRecording(90f, 0.5))
+        assertTrue(emitted.isNotEmpty(), "precondition: the engine emitted while running")
+
+        harness.start()
+
+        assertNull(harness.engine.state.value, "a fresh session starts with no pose until it emits one")
+    }
+
+    @Test
     fun `a restart does not inherit the previous session`() {
         // The monotonic clock carries on across a restart, so the second session begins
         // 50 ms after the first one's last emission. Carrying over the emit time would
