@@ -11,6 +11,7 @@ import com.signalk.companion.data.model.LocationData
 import com.signalk.companion.data.model.SensorData
 import com.signalk.companion.util.DeviceCalibration
 import com.signalk.companion.util.Matrix3
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,7 +32,7 @@ class SensorService internal constructor(
 ) : SensorEventListener {
 
     @Inject
-    constructor(context: Context, locationService: LocationService) :
+    constructor(@ApplicationContext context: Context, locationService: LocationService) :
         this(context, locationService, System::currentTimeMillis)
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager

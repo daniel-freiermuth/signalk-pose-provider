@@ -249,7 +249,7 @@ If you prefer using Android Studio:
 ├── data/
 │   └── model/         # Data classes and SignalK models
 └── di/
-    └── AppModule.kt   # Hilt dependency injection
+    └── DispatchersModule.kt   # Hilt bindings for coroutine dispatchers
 ```
 
 Frame, sign and unit conventions for everything under `service/` and `util/` are normative

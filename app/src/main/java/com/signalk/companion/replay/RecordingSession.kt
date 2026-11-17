@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,6 +15,8 @@ import java.io.Writer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * A file-backed recording: where it lands, what it is called, and its live status.
@@ -37,13 +40,15 @@ import java.util.Locale
  * [openSink] and [maxBytes] exist so the failure and budget paths can be exercised on the
  * JVM; production always uses the public constructor.
  */
+@Singleton
 class RecordingSession internal constructor(
     private val context: Context,
     private val openSink: (File) -> Writer,
     private val maxBytes: Long
 ) {
 
-    constructor(context: Context) : this(
+    @Inject
+    constructor(@ApplicationContext context: Context) : this(
         context,
         openSink = { target -> BufferedWriter(FileWriter(target), BUFFER_BYTES) },
         maxBytes = RecordingWriter.DEFAULT_MAX_BYTES
