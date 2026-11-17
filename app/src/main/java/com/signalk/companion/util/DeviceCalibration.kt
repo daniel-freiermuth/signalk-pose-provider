@@ -26,8 +26,6 @@ import kotlin.math.sin
  * - β: X rotation [0°,180°] — tilt from horizontal (0°=flat, 90°=vertical)
  * - γ: second Z rotation — heading offset (only thing azimuth calibration touches)
  * Gimbal lock at β=0° (flat mounting, uncommon for marine use).
- *
- * ZYX Tait-Bryan angles (legacy) live in [TaitBryanZyx]; not used for UI/persistence.
  */
 object DeviceCalibration {
 
