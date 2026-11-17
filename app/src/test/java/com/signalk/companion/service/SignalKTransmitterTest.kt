@@ -62,7 +62,7 @@ class SignalKTransmitterTest {
     }
 
     private fun newTransmitter() =
-        SignalKTransmitter(authenticationService, io, reconnectDelay::await).apply {
+        SignalKTransmitter(authenticationService, io, { "vessels.self" }, reconnectDelay::await).apply {
             configure(requireNotNull(UrlParser.parseUrl(server.url)))
         }
 
@@ -595,6 +595,7 @@ class SignalKTransmitterTest {
         transmitter = SignalKTransmitter(
             authenticationService,
             io,
+            { "vessels.self" },
             reconnectDelay::await
         ) { client, request, listener ->
             client.newWebSocket(request, listener).also {
@@ -624,6 +625,7 @@ class SignalKTransmitterTest {
         transmitter = SignalKTransmitter(
             authenticationService,
             io,
+            { "vessels.self" },
             reconnectDelay::await
         ) { client, request, listener ->
             clients += client

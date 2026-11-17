@@ -12,6 +12,7 @@ import com.signalk.companion.data.model.SignalKValues
 import com.signalk.companion.di.IoDispatcher
 import com.signalk.companion.util.UrlParser
 import com.signalk.companion.util.VesselSettings
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -52,6 +53,12 @@ class SignalKTransmitter internal constructor(
     private val authenticationService: AuthenticationService,
     private val ioDispatcher: CoroutineDispatcher,
     /**
+     * The SignalK context each message is addressed to, read per message so a vessel-id
+     * change in settings applies without reconnecting. Injectable so tests need no Android
+     * preferences.
+     */
+    private val vesselContext: () -> String,
+    /**
      * Waits out a scheduled reconnection's delay, in milliseconds. Injectable so tests can
      * observe which delay each failure path requests and control when it elapses.
      */
@@ -66,9 +73,15 @@ class SignalKTransmitter internal constructor(
 
     @Inject
     constructor(
+        @ApplicationContext context: Context,
         authenticationService: AuthenticationService,
         @IoDispatcher ioDispatcher: CoroutineDispatcher
-    ) : this(authenticationService, ioDispatcher, { delayMs -> delay(delayMs) })
+    ) : this(
+        authenticationService,
+        ioDispatcher,
+        { VesselSettings.getSignalKContext(context) },
+        { delayMs -> delay(delayMs) }
+    )
 
     companion object {
         private const val TAG = "SignalKTransmitter"
@@ -87,8 +100,6 @@ class SignalKTransmitter internal constructor(
         private const val FAILURE_RECONNECT_DELAY_MS = 10_000L
         private const val TOKEN_RENEWED_RECONNECT_DELAY_MS = 1_000L
         private const val TOKEN_RENEWAL_RETRY_DELAY_MS = 30_000L
-
-        private const val DEFAULT_VESSEL_CONTEXT = "vessels.self"
 
         private val LOCATION_SOURCE = SignalKSource(
             label = "SignalK Pose Provider",
@@ -110,7 +121,6 @@ class SignalKTransmitter internal constructor(
         CONNECTED // WebSocket is open and functional
     }
 
-    private var context: Context? = null
     private var serverAddress: String = ""
     private var serverPort: Int = 3000
     private var baseUrl: String = "" // Store the full base URL for HTTP(S) streaming
@@ -171,10 +181,6 @@ class SignalKTransmitter internal constructor(
         baseUrl = "$wsProtocol://${parsedUrl.hostname}:${parsedUrl.port}"
 
         _connectionStatus.value = false
-    }
-
-    fun setContext(context: Context) {
-        this.context = context
     }
 
     suspend fun startStreaming() {
@@ -539,15 +545,13 @@ class SignalKTransmitter internal constructor(
         timestampMs: Long,
         values: List<SignalKValue>
     ): SignalKMessage {
-        val vesselContext =
-            context?.let { VesselSettings.getSignalKContext(it) } ?: DEFAULT_VESSEL_CONTEXT
         val updates = if (values.isEmpty()) {
             emptyList()
         } else {
             val timestamp = dateFormat.format(java.time.Instant.ofEpochMilli(timestampMs))
             listOf(SignalKUpdate(source = source, timestamp = timestamp, values = values))
         }
-        return SignalKMessage(context = vesselContext, updates = updates)
+        return SignalKMessage(context = vesselContext(), updates = updates)
     }
 
     private fun sendMessage(message: SignalKMessage) {

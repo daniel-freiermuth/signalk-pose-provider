@@ -14,6 +14,7 @@ import com.signalk.companion.replay.RotationVectorRecord
 import com.signalk.companion.replay.SensorRecord
 import com.signalk.companion.util.DeviceCalibration
 import com.signalk.companion.util.Matrix3
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,7 +52,7 @@ class AttitudeEngine internal constructor(
     private val newSource: () -> RawSensorSource
 ) {
 
-    @Inject constructor(context: Context, recordingSession: RecordingSession) :
+    @Inject constructor(@ApplicationContext context: Context, recordingSession: RecordingSession) :
         this(recordingSession, { RawSensorSource(context) })
 
     /**
