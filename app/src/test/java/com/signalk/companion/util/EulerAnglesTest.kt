@@ -2,19 +2,10 @@ package com.signalk.companion.util
 
 import org.junit.jupiter.api.Test
 
-/** ZYX ([TaitBryanZyx]) and ZXZ ([DeviceCalibration]) compose/decompose round trips. */
+/** ZXZ ([DeviceCalibration]) compose/decompose round trips and [TaitBryanZyx] fixture checks. */
 class EulerAnglesTest {
 
     // --- Identity / zero-angle tests ---
-
-    @Test
-    fun `identity matrix decomposes to zero angles`() {
-        val identity = DeviceCalibration.IDENTITY_3X3.copyOf()
-        val (rz, ry, rx) = TaitBryanZyx.decompose(identity)
-        assertAngleEquals(0f, rz)
-        assertAngleEquals(0f, ry)
-        assertAngleEquals(0f, rx)
-    }
 
     @Test
     fun `zero angles compose to identity matrix`() {
@@ -37,95 +28,6 @@ class EulerAnglesTest {
     fun `ZXZ zero angles compose to identity matrix`() {
         val result = DeviceCalibration.composeZXZ(0f, 0f, 0f)
         assertMatrixEquals(DeviceCalibration.IDENTITY_3X3, result)
-    }
-
-    // --- Single-axis rotation tests ---
-
-    @Test
-    fun `90 degrees around Z axis`() {
-        val matrix = TaitBryanZyx.compose(rzDeg = 90f, ryDeg = 0f, rxDeg = 0f)
-        val (rz, ry, rx) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(90f, rz)
-        assertAngleEquals(0f, ry)
-        assertAngleEquals(0f, rx)
-    }
-
-    @Test
-    fun `minus 90 degrees around Z axis`() {
-        val matrix = TaitBryanZyx.compose(rzDeg = -90f, ryDeg = 0f, rxDeg = 0f)
-        val (rz, ry, rx) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(-90f, rz)
-        assertAngleEquals(0f, ry)
-        assertAngleEquals(0f, rx)
-    }
-
-    @Test
-    fun `45 degrees around Y axis`() {
-        val matrix = TaitBryanZyx.compose(rzDeg = 0f, ryDeg = 45f, rxDeg = 0f)
-        val (rz, ry, rx) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(0f, rz)
-        assertAngleEquals(45f, ry)
-        assertAngleEquals(0f, rx)
-    }
-
-    @Test
-    fun `30 degrees around X axis`() {
-        val matrix = TaitBryanZyx.compose(rzDeg = 0f, ryDeg = 0f, rxDeg = 30f)
-        val (rz, ry, rx) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(0f, rz)
-        assertAngleEquals(0f, ry)
-        assertAngleEquals(30f, rx)
-    }
-
-    // --- Roundtrip: compose then decompose ---
-
-    @Test
-    fun `roundtrip with typical mounting angles`() {
-        // Phone in landscape tilted back 35 degrees
-        val rzIn = 90f
-        val ryIn = 0f
-        val rxIn = 35f
-        val matrix = TaitBryanZyx.compose(rzIn, ryIn, rxIn)
-        val (rzOut, ryOut, rxOut) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(rzIn, rzOut)
-        assertAngleEquals(ryIn, ryOut)
-        assertAngleEquals(rxIn, rxOut)
-    }
-
-    @Test
-    fun `roundtrip with all three angles nonzero`() {
-        val rzIn = 45f
-        val ryIn = -20f
-        val rxIn = 10f
-        val matrix = TaitBryanZyx.compose(rzIn, ryIn, rxIn)
-        val (rzOut, ryOut, rxOut) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(rzIn, rzOut)
-        assertAngleEquals(ryIn, ryOut)
-        assertAngleEquals(rxIn, rxOut)
-    }
-
-    @Test
-    fun `roundtrip with 180 degrees Z`() {
-        val rzIn = 180f
-        val ryIn = 0f
-        val rxIn = 0f
-        val matrix = TaitBryanZyx.compose(rzIn, ryIn, rxIn)
-        val (rzOut, ryOut, rxOut) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(rzIn, rzOut)
-        assertAngleEquals(ryIn, ryOut)
-        assertAngleEquals(rxIn, rxOut)
-    }
-
-    @Test
-    fun `roundtrip with negative angles`() {
-        val rzIn = -45f
-        val ryIn = -30f
-        val rxIn = -15f
-        val matrix = TaitBryanZyx.compose(rzIn, ryIn, rxIn)
-        val (rzOut, ryOut, rxOut) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(rzIn, rzOut)
-        assertAngleEquals(ryIn, ryOut)
-        assertAngleEquals(rxIn, rxOut)
     }
 
     // --- ZXZ roundtrip tests ---
@@ -193,28 +95,5 @@ class EulerAnglesTest {
         val zxz = DeviceCalibration.composeZXZ(90f, 0f, 0f)
         // Both should be Rz(90) since middle/last angles are 0
         assertMatrixEquals(zyx, zxz, tolerance = 1e-5f)
-    }
-
-    // --- Gimbal lock (pitch = ±90°) ---
-
-    @Test
-    fun `decompose at positive gimbal lock returns valid angles`() {
-        // RY = +90° is gimbal lock. The matrix loses one DOF.
-        val matrix = TaitBryanZyx.compose(rzDeg = 45f, ryDeg = 90f, rxDeg = 20f)
-        val (rz, ry, rx) = TaitBryanZyx.decompose(matrix)
-        // At gimbal lock, ry should be 90, and rz+rx combined effect should match
-        assertAngleEquals(90f, ry)
-        // Recompose and check the matrix matches
-        val recomposed = TaitBryanZyx.compose(rz, ry, rx)
-        assertMatrixEquals(matrix, recomposed, tolerance = 1e-3f)
-    }
-
-    @Test
-    fun `decompose at negative gimbal lock returns valid angles`() {
-        val matrix = TaitBryanZyx.compose(rzDeg = 30f, ryDeg = -90f, rxDeg = 10f)
-        val (rz, ry, rx) = TaitBryanZyx.decompose(matrix)
-        assertAngleEquals(-90f, ry)
-        val recomposed = TaitBryanZyx.compose(rz, ry, rx)
-        assertMatrixEquals(matrix, recomposed, tolerance = 1e-3f)
     }
 }

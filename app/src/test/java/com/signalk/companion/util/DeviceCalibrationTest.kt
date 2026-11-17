@@ -36,10 +36,7 @@ class DeviceCalibrationTest {
         val R_W_D = Matrix3.multiply(R_W_V, R_V_D)
 
         val calibrated = DeviceCalibration.computeCalibration(R_W_D, R_W_V)
-        val (rz, ry, rx) = TaitBryanZyx.decompose(calibrated)
-        assertAngleEquals(90f, rz)
-        assertAngleEquals(0f, ry)
-        assertAngleEquals(0f, rx)
+        assertMatrixEquals(knownMounting, calibrated, tolerance = 1e-4f)
     }
 
     @Test
@@ -164,11 +161,8 @@ class DeviceCalibrationTest {
         // Calibrate
         val calibrated = DeviceCalibration.computeCalibration(R_W_D, R_W_V_desired)
 
-        // Should recover the real mounting angles
-        val (rz, ry, rx) = TaitBryanZyx.decompose(calibrated)
-        assertAngleEquals(90f, rz)
-        assertAngleEquals(0f, ry)
-        assertAngleEquals(30f, rx)
+        // Should recover the real mounting
+        assertMatrixEquals(realMounting, calibrated, tolerance = 1e-4f)
 
         // Verify: applying calibration to sensor reading gives correct vehicle attitude
         val recovered = Matrix3.multiply(R_W_D, calibrated)
@@ -650,60 +644,6 @@ class DeviceCalibrationTest {
         assertAngleWrappedEquals(newGamma, gamma2, tolerance = 0.1f)
 
         // Vehicle attitude is correct
-        val R_W_V = Matrix3.multiply(R_W_D_distorted, afterAzimuth)
-        val heading = Math.toDegrees(
-            atan2(R_W_V[1].toDouble(), R_W_V[4].toDouble())
-        ).toFloat()
-        assertHeadingEquals(0f, heading)
-        assertEquals(0f, R_W_V[6], 1e-3f)
-        assertEquals(0f, R_W_V[7], 1e-3f)
-    }
-
-    @Test
-    fun `ZYX azimuth correction can change non-RZ Euler angles for tilted mounting`() {
-        // Demonstrates ZYX limitation: for tilted mountings, heading correction
-        // affects non-heading Euler angles. This motivates the switch to ZXZ.
-        val mounting = TaitBryanZyx.compose(0f, 0f, -90f)
-
-        // At dock: vehicle heading north, flat
-        val R_W_D_true = Matrix3.transpose(mounting)
-
-        // Magnetometer adds 30° error
-        val magError = DeviceCalibration.buildFlatHeadingMatrix(30f)
-        val R_W_D_distorted = Matrix3.multiply(magError, R_W_D_true)
-
-        // Tilt calibration at dock
-        val (alpha1, beta1, afterTilt) = DeviceCalibration.calibrateTilt(R_W_D_distorted, 0f)
-        val gamma1 = 0f // γ passed to calibrateTilt
-        val (rz1, ry1, rx1) = TaitBryanZyx.decompose(afterTilt)
-
-        // GPS says heading = 0° (north)
-        val (_, afterAzimuth) = DeviceCalibration.calibrateAzimuth(
-            R_W_D_distorted,
-            alpha1,
-            beta1,
-            gamma1,
-            0f
-        )
-        val (rz2, ry2, rx2) = TaitBryanZyx.decompose(afterAzimuth)
-
-        // KEY INSIGHT: In ZYX decomposition, heading correction does NOT stay
-        // in a single angle. At least one of (rz, ry, rx) besides rz changes.
-        // This is because for this vertical mounting, heading rotation maps to
-        // a combination of ZYX Euler angles — there's no clean separation.
-        val ryChanged = abs(ry2 - ry1) > 1f
-        val rxChanged = abs(abs(rx2) - abs(rx1)) > 1f
-        assertTrue(
-            ryChanged || rxChanged,
-            "ZYX heading correction should leak into non-RZ angles"
-        )
-
-        // In contrast, ZXZ decomposition keeps α, β unchanged
-        val (alphaA, betaA, _) = DeviceCalibration.decomposeZXZ(afterAzimuth)
-        assertAngleWrappedEquals(alpha1, alphaA, tolerance = 0.5f)
-        assertAngleEquals(beta1, betaA, tolerance = 0.5f)
-
-        // Vehicle attitude is correct regardless
         val R_W_V = Matrix3.multiply(R_W_D_distorted, afterAzimuth)
         val heading = Math.toDegrees(
             atan2(R_W_V[1].toDouble(), R_W_V[4].toDouble())
