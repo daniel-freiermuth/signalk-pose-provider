@@ -22,6 +22,13 @@ configurations.configureEach {
     exclude(group = "androidx.profileinstaller", module = "profileinstaller")
 }
 
+// Mockito's inline mock maker is a Java agent. Since JDK 21 (JEP 451) a library attaching an
+// agent to its own JVM triggers a warning, and a future JDK will refuse it outright. Loading
+// mockito-core as an explicit -javaagent (Mockito's documented Gradle setup) avoids both.
+val mockitoAgent: Configuration = configurations.create("mockitoAgent") {
+    isTransitive = false
+}
+
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 if (keystorePropertiesFile.exists()) {
@@ -155,6 +162,7 @@ android {
         unitTests.isReturnDefaultValues = true
         unitTests.all {
             it.useJUnitPlatform()
+            it.jvmArgs("-javaagent:${mockitoAgent.asPath}")
         }
     }
 }
@@ -219,7 +227,10 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testImplementation("org.junit.jupiter:junit-jupiter-engine:6.1.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.1.3")
-    testImplementation("org.mockito:mockito-core:5.8.0")
+    // Same artifact twice: once on the classpath, once as the agent; keep the versions equal.
+    val mockitoCore = "org.mockito:mockito-core:5.24.0"
+    testImplementation(mockitoCore)
+    mockitoAgent(mockitoCore)
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
